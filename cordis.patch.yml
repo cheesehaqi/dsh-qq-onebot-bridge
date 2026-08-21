@@ -1,0 +1,4 @@
+# Mount the QQ OneBot bridge in any DSH profile that installs this package.
+- insert:
+    - id: dsh-qq-onebot-bridge
+      name: dsh-qq-onebot-bridge

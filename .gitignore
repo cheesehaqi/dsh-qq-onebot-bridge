@@ -1,0 +1,6 @@
+node_modules/
+qq-faces/
+qq-images/
+qq-replies/
+qq-bridge-debug.log
+*.zip
