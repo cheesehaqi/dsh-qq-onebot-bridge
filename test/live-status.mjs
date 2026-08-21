@@ -1,6 +1,5 @@
-﻿/** End-to-end smoke: connect to the live bridge on 6700 and send /status. */
-import wsPackage from 'ws'
-const { WebSocket } = wsPackage
+/** End-to-end smoke: connect to the live bridge on 6700 and send /status. */
+import { WebSocket } from 'ws'
 
 const ws = new WebSocket('ws://127.0.0.1:6700/')
 let done = false

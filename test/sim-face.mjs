@@ -1,6 +1,5 @@
-﻿/** Verify [face:xxx] markers in agent replies become CQ face segments. */
-import wsPackage from 'ws'
-const { WebSocket } = wsPackage
+/** Verify [face:xxx] markers in agent replies become CQ face segments. */
+import { WebSocket } from 'ws'
 
 const ws = new WebSocket('ws://127.0.0.1:6700/')
 let replies = []
@@ -13,7 +12,7 @@ ws.on('open', () => {
   console.log('connected')
   ws.send(JSON.stringify({
     post_type: 'message', message_type: 'group', group_id: 888001, user_id: 777001,
-    message: '[CQ:at,qq=10001] 璇峰洖澶嶏細鏀跺埌[face:榧撴帉]锛屽彟澶朳face:寰瑧]',
+    message: '[CQ:at,qq=10001] 请回复：收到[face:鼓掌]，另外[face:微笑]',
     message_id: 301,
   }))
 })
@@ -27,7 +26,7 @@ ws.on('message', (data) => {
     const faceIds = (frame.params.message || []).filter((s) => s.type === 'face').map((s) => s.data?.id)
     console.log('face ids found:', faceIds.join(','))
     if (faceIds.includes('42') && faceIds.includes('14')) {
-      console.log('PASS: 琛ㄦ儏娈靛凡鏇挎崲锛堥紦鎺?2銆佸井绗?4锛?)
+      console.log('PASS: 表情段已替换（鼓掌42、微笑14）')
       clearTimeout(timer)
       process.exit(0)
     }
