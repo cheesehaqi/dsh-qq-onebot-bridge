@@ -1,0 +1,29 @@
+# 完整示例：web profile 的 cordis.patch.yml 中挂载并配置 dsh-qq-onebot-bridge。
+# 把下面这段按需修改后放进 <profile>/cordis.patch.yml（key 记得换成自己的）。
+#
+# ⚠️ 使用第三方 QQ 协议存在账号风控/封号风险：请用机器人小号、配置 allowUsers/allowGroups
+# 白名单、控制回复频率。完整风险与合规说明见 README.md「风险与合规说明」章节。
+
+- id: dsh-qq-onebot-bridge
+  name: dsh-qq-onebot-bridge
+  config:
+    host: 127.0.0.1
+    port: 6700
+    accessToken: ''              # 需要时与 OneBot 端一致
+    allowUsers: []               # 留空 = 允许所有私聊用户（注意安全）
+    allowGroups: []              # 留空 = 允许所有群
+    botQq: 0                     # 改成机器人 QQ 号，用于群内 @ 检测
+    replyOnlyWhenMentioned: true # 群聊仅 @机器人 回复
+    acceptPrivate: true          # 私聊文本/语音回复
+    autoCollectStickers: false
+    faceEnabled: false           # true=启用 [face:] 标记与 qq_face_* 工具
+    sessionMode: chat            # chat=每群一会话；user=每群每人一会话
+    cwd: ''                      # 会话工作目录（决定 qq-faces/qq-replies/调试日志位置）
+    provider: ''                 # 留空=agent 默认模型
+    model: ''
+    maxMessageLength: 1700
+    # ---- 语音转文字（STT）----
+    sttEnabled: true
+    sttBaseUrl: https://open.bigmodel.cn/api/paas/v4
+    sttModel: glm-asr-2512      # 或 SiliconFlow: FunAudioLLM/SenseVoiceSmall（baseUrl 换成 https://api.siliconflow.cn/v1）
+    sttApiKey: '<你的智谱APIKey>'  # 可复用 DeepEye 的智谱 key
