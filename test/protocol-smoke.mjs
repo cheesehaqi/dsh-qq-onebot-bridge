@@ -1,6 +1,5 @@
-﻿/** Protocol smoke test: fake OneBot client connects and exchanges frames. */
-import wsPackage from 'ws'
-const { WebSocket } = wsPackage
+/** Protocol smoke test: fake OneBot client connects and exchanges frames. */
+import { WebSocket } from 'ws'
 import { OneBotServer } from '../lib/onebot.js'
 
 const logger = { info: (m) => console.log('[server]', m), warn: console.warn, error: console.error }
@@ -15,8 +14,8 @@ function check(name, ok, extra = '') {
 
 server.on('message', async (message) => {
   check('message event parsed', message.userId === 123456 && message.messageType === 'private', JSON.stringify(message.userId))
-  check('CQ code stripped / text extracted', message.text === '浣犲ソ @灏忔槑 涓栫晫', JSON.stringify(message.text))
-  await server.sendText(message.bot, 'private', message.userId, '鍥炲鏂囨湰')
+  check('CQ code stripped / text extracted', message.text === '你好 世界', JSON.stringify(message.text))
+  await server.sendText(message.bot, 'private', message.userId, '回复文本')
 })
 
 server.on('bot-connect', (socket) => {
@@ -31,7 +30,7 @@ ws.on('message', (data) => {
   const frame = JSON.parse(String(data))
   if (frame.action) {
     received++
-    check('send_private_msg action', frame.action === 'send_private_msg' && frame.params.user_id === 123456 && frame.params.message === '鍥炲鏂囨湰')
+    check('send_private_msg action', frame.action === 'send_private_msg' && frame.params.user_id === 123456 && Array.isArray(frame.params.message) && frame.params.message[0]?.data?.text === '回复文本')
     ws.send(JSON.stringify({ status: 'ok', retcode: 0, data: { message_id: 1 }, echo: frame.echo }))
   }
 })
@@ -41,7 +40,7 @@ ws.send(JSON.stringify({
   post_type: 'message',
   message_type: 'private',
   user_id: 123456,
-  message: '浣犲ソ [CQ:at,qq=789,name=灏忔槑] 涓栫晫 [CQ:image,file=xx.png]',
+  message: '你好 [CQ:at,qq=789,name=小明] 世界 [CQ:image,file=xx.png]',
   message_id: 999,
 }))
 

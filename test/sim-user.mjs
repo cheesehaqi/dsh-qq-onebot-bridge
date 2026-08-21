@@ -1,6 +1,5 @@
-﻿/** Simulate a QQ user sending a message and collect the agent reply. */
-import wsPackage from 'ws'
-const { WebSocket } = wsPackage
+/** Simulate a QQ user sending a message and collect the agent reply. */
+import { WebSocket } from 'ws'
 
 const ws = new WebSocket('ws://127.0.0.1:6700/')
 const replies = []
@@ -16,7 +15,7 @@ ws.on('open', () => {
     post_type: 'message',
     message_type: 'private',
     user_id: 999888,
-    message: '璇峰洖澶嶏細妗ユ祴璇曟垚鍔燂紝骞惰涓変釜瀛楃殑鍚嶅瓧',
+    message: '请回复：桥测试成功，并说三个字的名字',
     message_id: 42,
   }))
 })
