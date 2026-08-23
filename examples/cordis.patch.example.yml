@@ -10,8 +10,8 @@
     host: 127.0.0.1
     port: 6700
     accessToken: ''              # 需要时与 OneBot 端一致
-    allowUsers: []               # 留空 = 允许所有私聊用户（注意安全）
-    allowGroups: []              # 留空 = 允许所有群
+    allowUsers: []               # ⚠️ 空=拒绝所有私聊！务必填入你自己的 QQ 号，如 [123456789]
+    allowGroups: []              # ⚠️ 空=拒绝所有群消息！填入机器人服务的群号，如 [888001]
     botQq: 0                     # 改成机器人 QQ 号，用于群内 @ 检测
     replyOnlyWhenMentioned: true # 群聊仅 @机器人 回复
     acceptPrivate: true          # 私聊文本/语音回复
