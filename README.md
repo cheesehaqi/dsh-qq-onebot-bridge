@@ -47,11 +47,11 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `host` | `127.0.0.1` | 反向 WS 监听地址 |
 | `port` | `6700` | 反向 WS 监听端口 |
 | `accessToken` | `''` | OneBot 端须携带的 Bearer token（空=不校验） |
-| `allowUsers` | `[]` | 用户白名单（空=所有人） |
-| `allowGroups` | `[]` | 群白名单（空=所有群） |
+| `allowUsers` | `[]` | 私聊用户白名单（**空=拒绝所有私聊**，务必填入自己的 QQ 号） |
+| `allowGroups` | `[]` | 群白名单（**空=拒绝所有群消息**，列出机器人服务的群号） |
 | `botQq` | `0` | 机器人 QQ 号（用于群内 @ 检测；0=任何群消息视为@） |
 | `replyOnlyWhenMentioned` | `true` | 群聊仅 @机器人 才回复 |
-| `acceptPrivate` | `true` | 是否回复私聊 |
+| `acceptPrivate` | `true` | 是否回复私聊（私聊仍需 allowUsers 放行） |
 | `autoCollectStickers` | `false` | 自动收藏消息里的图片表情到本地图库 |
 | `faceEnabled` | `true` | 表情功能总开关（[face:] 标记 + qq_face_* 工具） |
 | `sessionMode` | `chat` | 群会话分组：`chat`=每群一会话；`user`=每群每人一会话 |
@@ -141,7 +141,7 @@ ws://127.0.0.1:6700/
 - 建议在人设/系统提示中约束输出合规内容；违规内容既触发账号处罚，也可能带来法律责任
 
 ### 安全风险
-- `allowUsers` / `allowGroups` 留空时，任何能给机器人发消息的人都能间接驱动你的 agent（含执行命令能力）——**务必配置白名单**或 `accessToken`
+- `allowUsers` / `allowGroups` 未配置（为空）时，插件**默认拒绝所有私聊与群消息**——请显式填入自己的 QQ 号与群号后再使用；配置白名单后，白名单外的任何人都无法驱动你的 agent
 - 插件只监听 `127.0.0.1`，不要改成 `0.0.0.0` 暴露公网
 - 语音与图片会上传到第三方云服务（STT API）处理，**敏感语音请勿发送**
 
@@ -155,6 +155,6 @@ ws://127.0.0.1:6700/
 
 ## 安全注意
 
-- `allowUsers` 留空时任何人都能通过你的 agent 执行命令——公网/群场景务必配置白名单
+- `allowUsers` / `allowGroups` 为空时默认拒绝一切消息——使用前务必填入自己的 QQ 号与群号
 - 端口仅监听 127.0.0.1；不要对外暴露
 - OneBot 实现本身有 QQ 封号风险，使用第三方机器人协议需自行评估

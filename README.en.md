@@ -47,11 +47,11 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `host` | `127.0.0.1` | Reverse-WS listen host |
 | `port` | `6700` | Reverse-WS listen port |
 | `accessToken` | `''` | Bearer token the OneBot client must present (empty = no check) |
-| `allowUsers` | `[]` | User allowlist (empty = everyone) |
-| `allowGroups` | `[]` | Group allowlist (empty = all groups) |
+| `allowUsers` | `[]` | Private-chat user allowlist (**empty = deny all private chats**; list your own QQ id) |
+| `allowGroups` | `[]` | Group allowlist (**empty = deny all group messages**; list the groups the bot serves) |
 | `botQq` | `0` | Bot QQ id used for @-mention detection in groups (0 = treat every group message as mentioned) |
 | `replyOnlyWhenMentioned` | `true` | In groups, only respond when the bot is @-mentioned |
-| `acceptPrivate` | `true` | Whether to respond to private chats |
+| `acceptPrivate` | `true` | Whether to respond to private chats (private chats still require allowUsers allowlisting) |
 | `autoCollectStickers` | `false` | Auto-save image stickers from messages into the local library |
 | `faceEnabled` | `true` | Master switch for emoji features ([face:] markers and qq_face_* tools) |
 | `sessionMode` | `chat` | Group session mapping: `chat` = one session per group, `user` = one per sender |
@@ -141,7 +141,7 @@ This plugin ships **no persona, preferences, or group rules**. The whale-girl pe
 - Constrain outputs in the persona/system prompt; violating content triggers account penalties and possibly legal liability
 
 ### Security
-- With `allowUsers` / `allowGroups` empty, anyone who can message the bot can indirectly drive your agent (including command execution) — **configure allowlists** or `accessToken`
+- With `allowUsers` / `allowGroups` unset (empty), the plugin **denies all private and group messages by default** — explicitly list your own QQ id and the groups to serve before use; once configured, nobody outside the allowlists can drive your agent
 - The plugin listens on `127.0.0.1` only; do not change it to `0.0.0.0`
 - Voice and images are uploaded to third-party cloud services (STT API) — **do not send sensitive audio**
 
@@ -155,6 +155,6 @@ This plugin is provided for technical learning and personal research. Users must
 
 ## Security notes
 
-- With `allowUsers` empty, anyone can execute commands through your agent — configure allowlists in public/group scenarios
+- With `allowUsers` / `allowGroups` empty, all messages are denied by default — list your own QQ id and groups before use
 - The port listens on 127.0.0.1 only; do not expose it
 - OneBot implementations themselves carry QQ ban risk; assess third-party bot protocols yourself
