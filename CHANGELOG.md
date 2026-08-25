@@ -1,7 +1,5 @@
 # 更新日志 / Changelog
 
-> 此文件仅展示最近的五个版本；更早版本请查阅 git 提交历史（v0.2.2 私聊识图、v0.2.1 稳定性修复、v0.2.0 插件化整合、v0.1.1 首个可用版本）。
-
 ## v0.2.7（2026-08-26）
 
 **维护性优化**
@@ -42,3 +40,35 @@
 - 白名单语义改为「空 = 拒绝」：`allowUsers` 为空拒绝所有私聊，`allowGroups` 为空拒绝所有群消息
 - 部署者必须显式填入自己的 QQ 号与群号后才能使用
 - 配置描述、README（中英）、示例配置同步更新
+
+## v0.2.2（2026-08-21）
+
+**私聊识图**
+- 私聊中用户发送的图片/动画表情（image/mface 段）自动下载到 `cwd/qq-images/` 并注入会话，agent 用 `describe_image` 查看后回应
+- 下载按 Content-Type 推断扩展名（GIF 动画表情不再误存为 .png）
+- 新增配置：`privateImageView`（默认 `true`）
+
+## v0.2.1（2026-08-20）
+
+**稳定性修复**
+- 修复未处理的 Promise rejection（新增 `#safeReply` + 消息处理整体 try/catch）
+- 修复 @+引用无内容时向 agent 发送空消息的问题
+- 修复非语音引用误用"引用了一条语音"指令
+- WS 连接 id 加计数器防碰撞
+- 依赖 junction 全部指向共享树（修复 `web\node_modules\ws` 被清理导致的启动崩溃）
+
+## v0.2.0（2026-08-20）
+
+**插件化整合**
+- 全部 QQ AI 功能整合为独立插件：双向消息桥、每群/每私聊会话分组、语音转文字、引用解析、表情系统、白名单、`/new` `/status`
+- 语音转文字最终触发策略：群聊 @机器人并引用语音 → 转写回复；私聊语音直接转写（智谱 GLM-ASR-2512，可换任意 OpenAI 兼容端点）
+- 私聊开启（`acceptPrivate: true`），agent 注入 chatScope 会话归属
+- 完整 README（中英）、LICENSE、示例配置、风险与合规说明、测试脚本
+
+## v0.1.1（2026-08-16）
+
+**首个可用版本**
+- OneBot v11 反向 WebSocket 双向桥
+- 每群/每私聊用户独立会话（sessionMode）
+- 黄脸表情表、`[face:名字]` 标记、图片表情收藏、`qq_face_list`/`qq_face_send` 工具
+- `allowUsers`/`allowGroups` 白名单、`accessToken`、仅@回复

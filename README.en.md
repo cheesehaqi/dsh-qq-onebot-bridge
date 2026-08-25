@@ -169,12 +169,4 @@ This plugin is provided for technical learning and personal research. Users must
 
 ## Changelog
 
-The five most recent versions:
-
-- **v0.2.7** — debug log rotation, image retention cleanup (`imageRetentionDays`), reminder parsing unit tests
-- **v0.2.6** — configurable image viewing (`visionMode: tool/native` native multimodal attachments + `visionToolName`)
-- **v0.2.5** — scheduled reminders (group @-trigger / private keyword, survive restarts, `/reminders`)
-- **v0.2.4** — per-chat persistent memory (no amnesia across restarts)
-- **v0.2.3** — safe defaults: empty allowlists mean deny
-
-Full history in [CHANGELOG.md](CHANGELOG.md) (earlier versions in the git history).
+See [CHANGELOG.md](CHANGELOG.md) for per-version features and fixes: v0.2.5 scheduled reminders, v0.2.4 persistent memory, v0.2.3 safe defaults (empty allowlists = deny), v0.2.2 private image viewing, v0.2.1 stability fixes, v0.2.0 plugin consolidation.
