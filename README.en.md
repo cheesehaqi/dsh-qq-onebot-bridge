@@ -7,6 +7,7 @@ A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ m
 - **Two-way message bridge**: QQ messages (group/private) enter DSH agent sessions; replies are chunked and sent back to QQ (OneBot v11 reverse WebSocket)
 - **Session grouping**: one independent session per group (`sessionMode: chat`) or per sender (`user`); one session per private user, with no context bleed between chats; the agent's system prompt includes the current chat scope
 - **Persistent memory**: each chat's recent conversation is saved to `cwd/qq-memory/` and re-injected into new sessions after host restarts, so the bot remembers previous chats (`memoryEnabled` switch; `/new` clears the memory for that chat)
+- **Scheduled reminders**: "提醒我 30 分钟后喝水" / "明天9点开会" — the bot pings the chat at the set time (groups require @-mentioning the bot; private chats work directly; reminders survive host restarts, `/reminders` lists them)
 - **Speech-to-text (STT)**: in groups, @-mention the bot while quoting (replying to) a voice message → transcribe and reply with the text; private voice messages are transcribed directly. Works with Zhipu GLM-ASR-2512 or any OpenAI-compatible `/audio/transcriptions` endpoint (e.g. SiliconFlow)
 - **Private image viewing**: images/animated stickers sent in private chats are downloaded to `cwd/qq-images/` and injected into the session so the agent can view them with `describe_image` and respond (`privateImageView` switch)
 - **Quote resolution**: quoting text/images/voice while @-mentioning the bot expands them automatically (images saved under `cwd/qq-replies/` for `describe_image`; voices transcribed)
@@ -67,6 +68,8 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `privateImageView` | `true` | In private chats, proactively download and view images/animated stickers the user sends (saved to `cwd/qq-images/`, viewed with describe_image) |
 | `memoryEnabled` | `true` | Per-chat persistent memory (recent conversation saved to `cwd/qq-memory/`, restored after host restarts; `/new` clears it) |
 | `memoryMaxEntries` | `30` | Max conversation lines kept per chat |
+| `reminderEnabled` | `true` | Scheduled reminders (groups require @-mention; private chats work directly; persisted in `cwd/qq-reminders.json` across restarts) |
+| `reminderMaxPerChat` | `10` | Max pending reminders per chat |
 
 ## OneBot side setup
 
