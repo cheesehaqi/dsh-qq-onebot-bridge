@@ -164,3 +164,7 @@ This plugin is provided for technical learning and personal research. Users must
 - With `allowUsers` / `allowGroups` empty, all messages are denied by default — list your own QQ id and groups before use
 - The port listens on 127.0.0.1 only; do not expose it
 - OneBot implementations themselves carry QQ ban risk; assess third-party bot protocols yourself
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for per-version features and fixes: v0.2.5 scheduled reminders, v0.2.4 persistent memory, v0.2.3 safe defaults (empty allowlists = deny), v0.2.2 private image viewing, v0.2.1 stability fixes, v0.2.0 plugin consolidation.
