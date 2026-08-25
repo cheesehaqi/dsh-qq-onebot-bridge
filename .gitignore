@@ -1,6 +1,7 @@
 node_modules/
 qq-faces/
 qq-images/
+qq-memory/
 qq-replies/
 qq-bridge-debug.log
 *.zip
