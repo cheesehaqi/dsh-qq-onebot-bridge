@@ -1,5 +1,18 @@
 # 更新日志 / Changelog
 
+## v0.2.9（2026-08-26）
+
+**群管理套件**
+- `/summary`：基于持久化记忆让 agent 总结本会话最近聊天（谁说了什么、有没有@我）
+- 群投票：「投票：问题？A 选项 B 选项」→ 群友回复字母投票，到时自动公布（`/vote` 查进度、`/vote-end` 提前结束、`voteDurationSeconds` 可配时长）
+- 共享待办：「/todo add xxx」「记一下：xxx」添加；`/todo` 查看、`/todo done N` 完成、`/todo clear` 清除已完成（每会话持久化到 `cwd/qq-todos/`）
+- 管理员命令（`adminUsers` 白名单，生产已配本人）：
+  - `/mute <QQ号或@某人> [分钟]`、`/unmute <QQ号或@某人>`（set_group_ban）
+  - `/kick <QQ号或@某人>` → **需 60 秒内回复「确认踢」二次确认**才执行，回复「取消」放弃
+  - `/clear` 清空当前会话与持久化记忆
+- OneBotServer 新增 `setGroupBan`/`setGroupKick` 动作与 `ats` 透传
+- 新增 `test/grouptools-unit.mjs`（投票解析 + 待办持久化，10 项）
+
 ## v0.2.8（2026-08-26）
 
 **风控与稳定**
