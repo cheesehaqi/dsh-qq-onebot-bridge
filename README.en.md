@@ -175,4 +175,12 @@ This plugin is provided for technical learning and personal research. Users must
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for per-version features and fixes: v0.2.5 scheduled reminders, v0.2.4 persistent memory, v0.2.3 safe defaults (empty allowlists = deny), v0.2.2 private image viewing, v0.2.1 stability fixes, v0.2.0 plugin consolidation.
+The five most recent versions (always kept rolling):
+
+- **v0.2.9** — group management suite: `/summary` chat summary, group votes, shared todos (`/todo`), admin commands `/mute` `/unmute` `/kick` (kick needs a second confirmation) `/clear`
+- **v0.2.8** — opt-in reply rate limiting + inbound message dedup
+- **v0.2.7** — debug log rotation, image retention cleanup, reminder parsing unit tests
+- **v0.2.6** — configurable image viewing (`visionMode: tool/native` native multimodal attachments)
+- **v0.2.5** — scheduled reminders (@-trigger in groups / keyword in private, survive restarts, `/reminders`)
+
+Full history in [CHANGELOG.md](CHANGELOG.md).
