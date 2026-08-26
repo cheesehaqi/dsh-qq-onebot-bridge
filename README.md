@@ -71,6 +71,11 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `imageRetentionDays` | `14` | 下载图片（qq-images/qq-replies）保留天数，宿主启动时清理更旧的 |
 | `memoryEnabled` | `true` | 每会话持久化记忆（最近对话存 `cwd/qq-memory/`，宿主重启后自动恢复；`/new` 清除） |
 | `memoryMaxEntries` | `30` | 每个会话保留的对话条数上限 |
+| `rateLimitEnabled` | `false` | 回复限流开关（默认关闭）；开启后每会话窗口内最多回复 `rateLimitMaxReplies` 条 |
+| `rateLimitMaxReplies` | `10` | 限流窗口内每会话最大回复数 |
+| `rateLimitWindowSeconds` | `60` | 限流滑动窗口（秒） |
+| `dedupEnabled` | `true` | 消息去重（同一 message_id 窗口内重复投递忽略，防重连重发） |
+| `dedupWindowSeconds` | `300` | 去重窗口（秒） |
 | `reminderEnabled` | `true` | 定时提醒总开关（群聊需 @，私聊直接说；存 `cwd/qq-reminders.json` 跨重启保留） |
 | `reminderMaxPerChat` | `10` | 每个会话最多同时保留的提醒数 |
 

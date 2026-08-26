@@ -1,5 +1,12 @@
 # 更新日志 / Changelog
 
+## v0.2.8（2026-08-26）
+
+**风控与稳定**
+- 回复限流（`rateLimitEnabled`，**默认关闭**）：开启后每会话在 `rateLimitWindowSeconds`（默认 60s）内最多回复 `rateLimitMaxReplies`（默认 10）条，超出静默丢弃并记日志
+- 消息去重（`dedupEnabled`，默认开启）：同一 message_id 在 `dedupWindowSeconds`（默认 300s）内重复投递（NapCat 重连重发）会被忽略，避免机器人重复回复
+- 生产配置里已附两组的注释示例，按需开启
+
 ## v0.2.7（2026-08-26）
 
 **维护性优化**

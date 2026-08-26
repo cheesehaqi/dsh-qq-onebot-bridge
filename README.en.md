@@ -70,6 +70,11 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `visionToolName` | `describe_image` | Vision tool used in `tool` mode |
 | `memoryEnabled` | `true` | Per-chat persistent memory (recent conversation saved to `cwd/qq-memory/`, restored after host restarts; `/new` clears it) |
 | `memoryMaxEntries` | `30` | Max conversation lines kept per chat |
+| `rateLimitEnabled` | `false` | Outbound reply rate limiting (off by default); when on, each chat gets at most `rateLimitMaxReplies` replies per window |
+| `rateLimitMaxReplies` | `10` | Max replies per chat per window |
+| `rateLimitWindowSeconds` | `60` | Rate limit sliding window (seconds) |
+| `dedupEnabled` | `true` | Ignore duplicate inbound message ids within the window (reconnect re-delivery) |
+| `dedupWindowSeconds` | `300` | Dedup window (seconds) |
 | `reminderEnabled` | `true` | Scheduled reminders (groups require @-mention; private chats work directly; persisted in `cwd/qq-reminders.json` across restarts) |
 | `reminderMaxPerChat` | `10` | Max pending reminders per chat |
 
