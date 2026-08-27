@@ -9,6 +9,8 @@ QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱�
 - **持久化记忆**：每个群/私聊的最近对话自动落盘到 `cwd/qq-memory/`，宿主重启后自动注入新会话——小鲸鱼不会失忆（`memoryEnabled` 开关；`/new` 清除当前会话的记忆）
 - **定时提醒**：`30分钟后提醒我喝水`、`明天9点提醒我开会`——到点自动发消息提醒（群聊需 @机器人，@ 时可省略"提醒"字样如「明天9点开会」；私聊需带提醒关键词；提醒跨宿主重启保留，`/reminders` 查看待执行列表）
 - **群管理套件**：`/summary` 总结最近聊天；群投票（`投票：问题？A 选项 B 选项`，回复字母投票，自动开奖）；共享待办（`/todo` + 「记一下：xxx」）；管理员命令 `/mute` `/unmute` `/kick`（**踢人需二次确认**）`/clear`（仅 `adminUsers` 白名单可用）
+- **语音回复（TTS）**：文字回复后自动跟一条语音（默认 Azure 晓晓，`ttsProvider` 可切换任意 OpenAI 兼容服务；`ttsEnabled` 默认关闭）
+- **实用小工具**：`/health` 运行诊断、私聊文件自动转存到本机、`/export` 聊天记录导出 markdown
 - **语音转文字（STT）**：群聊中 @机器人并引用（回复）一条语音 → 转写文字并回复；私聊语音直接转写。支持智谱 GLM-ASR-2512 或任意 OpenAI 兼容 `/audio/transcriptions` 端点（如 SiliconFlow）
 - **私聊识图**：私聊中用户发送的图片/动画表情自动下载到 `cwd/qq-images/` 并注入会话，agent 用 `describe_image` 主动查看并回应（`privateImageView` 开关）
 - **引用解析**：@机器人并引用文本/图片/语音时自动展开（图片落盘到 `cwd/qq-replies/` 供 `describe_image` 查看，语音自动转写）
@@ -178,10 +180,10 @@ ws://127.0.0.1:6700/
 
 最近五个版本（始终滚动展示）：
 
+- **v0.3.0** — 语音回复 TTS（默认 Azure 晓晓，可换任意 OpenAI 兼容服务）+ `/health` 诊断、私聊文件转存、`/export` 聊天导出
 - **v0.2.9** — 群管理套件：`/summary` 聊天总结、群投票、共享待办（`/todo`）、管理员命令 `/mute` `/unmute` `/kick`（踢人二次确认）`/clear`
 - **v0.2.8** — 回复限流（默认关闭，可自行开启）+ 消息去重
 - **v0.2.7** — 调试日志轮转、图片保留期清理、提醒解析单元测试
 - **v0.2.6** — 可配置识图方式（`visionMode: tool/native` 原生多模态附件）
-- **v0.2.5** — 定时提醒（@触发/私聊关键词、跨重启保留、`/reminders`）
 
 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
