@@ -179,10 +179,10 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
+- **v0.3.1** — online/offline status push (off by default, supports PushPlus/custom webhook) + GIF frame extraction for image understanding (on by default, uses ffmpeg automatically)
 - **v0.3.0** — voice replies TTS (Azure Xiaoxiao by default, swappable to any OpenAI-compatible service) + `/health` diagnostics, private file transfer, `/export` chat history
 - **v0.2.9** — group management suite: `/summary` chat summary, group votes, shared todos (`/todo`), admin commands `/mute` `/unmute` `/kick` (kick needs a second confirmation) `/clear`
 - **v0.2.8** — opt-in reply rate limiting + inbound message dedup
 - **v0.2.7** — debug log rotation, image retention cleanup, reminder parsing unit tests
-- **v0.2.6** — configurable image viewing (`visionMode: tool/native` native multimodal attachments)
 
 Full history in [CHANGELOG.md](CHANGELOG.md).

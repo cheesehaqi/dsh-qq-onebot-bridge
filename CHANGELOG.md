@@ -1,5 +1,12 @@
 # 更新日志 / Changelog
 
+## v0.3.1（2026-08-28）
+
+**状态通知 + GIF 抽帧**
+- 状态变更通知（`notifyEnabled` 默认关闭）：宿主直连推送服务（PushPlus 或任意 JSON webhook，`notifyPushUrl`/`notifyToken`），机器人上线/掉线/桥就绪时推送——掉线通知不经 QQ，机器人都断了也能送达；`notifyCooldownSeconds` 防抖（默认 300s）
+- GIF 动画表情抽帧（`gifFrameExtract` 默认开启）：识图前用 ffmpeg 把 gif 第一帧抽成 png（`ffmpegPath` 可配），动画表情对识图工具/模型的兼容性显著提升
+- TTS 语音回复保持默认不开启（`ttsEnabled: false`，需 key 与显式开启）
+
 ## v0.3.0（2026-08-26）
 
 **语音回复（TTS）与实用小工具**
