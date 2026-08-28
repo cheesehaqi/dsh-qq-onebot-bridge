@@ -21,14 +21,14 @@ A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ m
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    A["QQ client"] <-->|OneBot v11| B["OneBot implementation<br/>NapCat / LLOneBot / OpenShamrock…"]
-    B -- "reverse WebSocket<br/>ws://127.0.0.1:6700" --> C["dsh-qq-onebot-bridge<br/>(this plugin)"]
-    C -- "ctx.agents.create<br/>followup" --> D["DSH agent sessions<br/>one per group / per private user"]
-    D -- "assistant replies" --> C
-    C -- "send_group_msg / send_private_msg" --> B
-    B --> A
+```
+QQ client ←→ OneBot implementation (NapCat / LLOneBot / OpenShamrock / Lagrange…)
+                │ reverse WebSocket (the OneBot side connects to us)
+                ▼
+      dsh-qq-onebot-bridge (this plugin)
+                │ ctx.agents.create / followup
+                ▼
+      DSH agent sessions (one per group / per private user)
 ```
 
 ## Install / uninstall
