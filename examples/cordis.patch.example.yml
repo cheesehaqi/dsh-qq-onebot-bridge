@@ -27,3 +27,7 @@
     sttBaseUrl: https://open.bigmodel.cn/api/paas/v4
     sttModel: glm-asr-2512      # 或 SiliconFlow: FunAudioLLM/SenseVoiceSmall（baseUrl 换成 https://api.siliconflow.cn/v1）
     sttApiKey: '<你的智谱APIKey>'  # 可复用 DeepEye 的智谱 key
+    # ---- 避开高峰期静默（默认关闭）----
+    quietHoursEnabled: false     # true=开启后工作日静默时段内不回复任何消息
+    quietHours: ['9:00-12:00', '14:00-18:00']  # 本地时间 H:MM-H:MM，可自行修改
+    quietWeekendExempt: true     # 周六/周日不受静默时段限制
