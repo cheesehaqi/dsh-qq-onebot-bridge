@@ -21,14 +21,14 @@ QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱�
 
 ## 架构
 
-```
-QQ 客户端 ←→ OneBot 实现（NapCat / LLOneBot / OpenShamrock / Lagrange…）
-                  │ 反向 WebSocket（OneBot 连我们）
-                  ▼
-        dsh-qq-onebot-bridge（本插件）
-                  │ ctx.agents.create / followup
-                  ▼
-        DSH agent 会话（每群/每私聊用户一个）
+```mermaid
+flowchart LR
+    A["QQ 客户端"] <-->|OneBot v11| B["OneBot 实现<br/>NapCat / LLOneBot / OpenShamrock…"]
+    B -- "反向 WebSocket<br/>ws://127.0.0.1:6700" --> C["dsh-qq-onebot-bridge<br/>（本插件）"]
+    C -- "ctx.agents.create<br/>followup" --> D["DSH agent 会话<br/>每群 / 每私聊用户一个"]
+    D -- "assistant 回复" --> C
+    C -- "send_group_msg / send_private_msg" --> B
+    B --> A
 ```
 
 ## 安装 / 卸载
