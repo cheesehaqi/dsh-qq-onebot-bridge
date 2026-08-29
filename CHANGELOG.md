@@ -1,6 +1,6 @@
 # 更新日志 / Changelog
 
-## v0.4.0（2026-08-28）
+## v0.3.3（2026-08-29）
 
 **本地 TTS：GPT-SoVITS 零成本语音克隆**
 - `ttsProvider` 新增 `local`：接入本地 GPT-SoVITS api_v2 服务（默认 `http://127.0.0.1:9880`），零 API 成本、零云端依赖，3-10 秒参考音频即克隆音色（`ttsLocalRefAudio` + `ttsLocalPromptText`）
