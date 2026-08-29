@@ -195,7 +195,7 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
-- **v0.4.0** — local TTS: `ttsProvider: local` plugs into GPT-SoVITS voice cloning (zero API cost, clones the voice from a reference clip, wav auto-converted to mp3)
+- **v0.3.3** — local TTS: `ttsProvider: local` plugs into GPT-SoVITS voice cloning (zero API cost, clones the voice from a reference clip, wav auto-converted to mp3)
 - **v0.3.2** — avoid-peak-hours silence (off by default): weekdays 9:00-12:00 / 14:00-18:00 the bot replies to nothing, weekends exempt, windows configurable
 - **v0.3.1** — online/offline status push (off by default, supports PushPlus/custom webhook) + GIF frame extraction for image understanding (on by default, uses ffmpeg automatically)
 - **v0.3.0** — voice replies TTS (Azure Xiaoxiao by default, swappable to any OpenAI-compatible service) + `/health` diagnostics, private file transfer, `/export` chat history
