@@ -1,5 +1,14 @@
 # 更新日志 / Changelog
 
+## v0.4.0（2026-08-28）
+
+**本地 TTS：GPT-SoVITS 零成本语音克隆**
+- `ttsProvider` 新增 `local`：接入本地 GPT-SoVITS api_v2 服务（默认 `http://127.0.0.1:9880`），零 API 成本、零云端依赖，3-10 秒参考音频即克隆音色（`ttsLocalRefAudio` + `ttsLocalPromptText`）
+- 本地合成输出 wav 自动用 ffmpeg 转 mp3 后发送（`ttsLocalConvertToMp3` 可关，兼容 QQ/NapCat record 段）
+- 云端方案（azure/openai）保持不变；`ttsEnabled` 依旧默认关闭
+- 新增 `buildLocalTtsRequest`（test/tts-unit.mjs 增至 12 项）
+- 附 `TTS控制.bat` 一键启停本地服务（单实例守护，监听 127.0.0.1:9880）
+
 ## v0.3.2（2026-08-28）
 
 **避开高峰期静默**

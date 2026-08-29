@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-onebot-bridge",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "QQ ↔ DeepSeek Harness agent bridge over OneBot v11 (reverse WebSocket): per-group/per-user session grouping, @-quote voice speech-to-text (GLM-ASR / OpenAI-compatible), quote & image resolution, face/sticker tools, /new /status commands. Independent bundle; remove anytime: dsh plugin --profile web remove dsh-qq-onebot-bridge",
   "type": "module",
   "main": "lib/index.js",

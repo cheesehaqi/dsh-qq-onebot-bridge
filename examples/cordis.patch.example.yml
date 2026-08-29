@@ -31,3 +31,17 @@
     quietHoursEnabled: false     # true=开启后工作日静默时段内不回复任何消息
     quietHours: ['9:00-12:00', '14:00-18:00']  # 本地时间 H:MM-H:MM，可自行修改
     quietWeekendExempt: true     # 周六/周日不受静默时段限制
+    # ---- 语音回复 TTS（默认关闭）----
+    ttsEnabled: false            # true=每条文字回复后跟随一条语音
+    ttsProvider: local           # azure=微软晓晓 | openai=任意 OpenAI 兼容服务 | local=本地 GPT-SoVITS 语音克隆
+    ttsApiKey: ''                # azure/openai 需要；local 不需要
+    ttsVoice: zh-CN-XiaoxiaoNeural
+    ttsStyle: chat
+    ttsMaxChars: 120
+    # ---- 本地 TTS（ttsProvider: local 时生效；先启动本地 api_v2 服务，参考 TTS控制.bat）----
+    ttsLocalUrl: http://127.0.0.1:9880
+    ttsLocalRefAudio: 'D:/voice/xiaojingyu.wav'  # 音色参考音频（3-10 秒 wav，绝对路径，必填）
+    ttsLocalPromptText: ''       # 参考音频台词，可留空
+    ttsLocalTextLang: zh
+    ttsLocalPromptLang: zh
+    ttsLocalConvertToMp3: true   # wav 自动转 mp3（ffmpeg）
