@@ -9,7 +9,7 @@ A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ m
 - **Persistent memory**: each chat's recent conversation is saved to `cwd/qq-memory/` and re-injected into new sessions after host restarts, so the bot remembers previous chats (`memoryEnabled` switch; `/new` clears the memory for that chat)
 - **Scheduled reminders**: "提醒我 30 分钟后喝水" / "明天9点开会" — the bot pings the chat at the set time (groups require @-mentioning the bot; private chats work directly; reminders survive host restarts, `/reminders` lists them)
 - **Group management suite**: `/summary` summarizes recent chat; group votes ("投票：question? A opt B opt", members reply with option letters); shared todos (`/todo` + "记一下：xxx"); admin commands `/mute` `/unmute` `/kick` (**kick requires a second confirmation**) `/clear` (only `adminUsers`)
-- **Voice replies (TTS)**: an optional voice message follows each text reply (Azure Xiaoxiao by default; `ttsProvider` can switch to any OpenAI-compatible service; `ttsEnabled` is off by default)
+- **Voice replies (TTS)**: an optional voice message follows each text reply — cloud (Azure Xiaoxiao by default; `ttsProvider` can switch to any OpenAI-compatible service) or **local GPT-SoVITS voice cloning** (`ttsProvider: local`, zero API cost, clones a voice from a 3-10s reference clip); `ttsEnabled` is off by default
 - **Avoid peak hours**: no replies at all on weekdays 9:00-12:00 and 14:00-18:00 (`quietHoursEnabled` is off by default, windows editable, weekends exempt; already-scheduled reminders/vote publishing still fire)
 - **Utility tools**: `/health` runtime diagnostics, private file auto-save to the local machine, `/export` chat history to markdown
 - **Speech-to-text (STT)**: in groups, @-mention the bot while quoting (replying to) a voice message → transcribe and reply with the text; private voice messages are transcribed directly. Works with Zhipu GLM-ASR-2512 or any OpenAI-compatible `/audio/transcriptions` endpoint (e.g. SiliconFlow)
@@ -84,6 +84,18 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `quietHoursEnabled` | `false` | Avoid-peak-hours switch (**off by default**); while on, the bot replies to no inbound message during the quiet windows on weekdays (no model calls consumed); scheduled reminders and vote publishing still fire |
 | `quietHours` | `['9:00-12:00', '14:00-18:00']` | Quiet windows as local-time `H:MM-H:MM` ranges (full-width colons are normalized; overnight ranges like `22:00-2:00` work) |
 | `quietWeekendExempt` | `true` | Saturdays and Sundays are not subject to quiet hours |
+| `ttsEnabled` | `false` | Voice-reply master switch (off by default; when on, a voice message follows each text reply) |
+| `ttsProvider` | `azure` | Synthesis backend: `azure` (Microsoft Xiaoxiao) / `openai` (any OpenAI-compatible `/audio/speech`) / `local` (**local GPT-SoVITS voice cloning, zero API cost**) |
+| `ttsApiKey` | `''` | Azure / OpenAI-compatible API key (not needed for `local`) |
+| `ttsVoice` | `zh-CN-XiaoxiaoNeural` | Cloud voice id |
+| `ttsStyle` | `chat` | Azure speaking style (cheerful/sad…) |
+| `ttsMaxChars` | `120` | Max chars spoken per voice reply (truncation affects voice only) |
+| `ttsLocalUrl` | `http://127.0.0.1:9880` | Local GPT-SoVITS api_v2 server URL |
+| `ttsLocalRefAudio` | `''` | **Required for local TTS**: absolute path to the reference voice clip (3-10s wav, e.g. `D:/voice/xiaojingyu.wav`) |
+| `ttsLocalPromptText` | `''` | Transcript of the reference clip (may be empty) |
+| `ttsLocalTextLang` | `zh` | Language of the text to synthesize |
+| `ttsLocalPromptLang` | `zh` | Language of the reference clip transcript |
+| `ttsLocalConvertToMp3` | `true` | Auto-convert local wav output to mp3 with ffmpeg before sending (better QQ/NapCat compatibility) |
 
 ## OneBot side setup
 
@@ -183,10 +195,10 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
+- **v0.4.0** — local TTS: `ttsProvider: local` plugs into GPT-SoVITS voice cloning (zero API cost, clones the voice from a reference clip, wav auto-converted to mp3)
 - **v0.3.2** — avoid-peak-hours silence (off by default): weekdays 9:00-12:00 / 14:00-18:00 the bot replies to nothing, weekends exempt, windows configurable
 - **v0.3.1** — online/offline status push (off by default, supports PushPlus/custom webhook) + GIF frame extraction for image understanding (on by default, uses ffmpeg automatically)
 - **v0.3.0** — voice replies TTS (Azure Xiaoxiao by default, swappable to any OpenAI-compatible service) + `/health` diagnostics, private file transfer, `/export` chat history
 - **v0.2.9** — group management suite: `/summary` chat summary, group votes, shared todos (`/todo`), admin commands `/mute` `/unmute` `/kick` (kick needs a second confirmation) `/clear`
-- **v0.2.8** — opt-in reply rate limiting + inbound message dedup
 
 Full history in [CHANGELOG.md](CHANGELOG.md).

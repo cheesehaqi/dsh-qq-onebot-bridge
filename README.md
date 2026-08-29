@@ -9,7 +9,7 @@ QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱�
 - **持久化记忆**：每个群/私聊的最近对话自动落盘到 `cwd/qq-memory/`，宿主重启后自动注入新会话——小鲸鱼不会失忆（`memoryEnabled` 开关；`/new` 清除当前会话的记忆）
 - **定时提醒**：`30分钟后提醒我喝水`、`明天9点提醒我开会`——到点自动发消息提醒（群聊需 @机器人，@ 时可省略"提醒"字样如「明天9点开会」；私聊需带提醒关键词；提醒跨宿主重启保留，`/reminders` 查看待执行列表）
 - **群管理套件**：`/summary` 总结最近聊天；群投票（`投票：问题？A 选项 B 选项`，回复字母投票，自动开奖）；共享待办（`/todo` + 「记一下：xxx」）；管理员命令 `/mute` `/unmute` `/kick`（**踢人需二次确认**）`/clear`（仅 `adminUsers` 白名单可用）
-- **语音回复（TTS）**：文字回复后自动跟一条语音（默认 Azure 晓晓，`ttsProvider` 可切换任意 OpenAI 兼容服务；`ttsEnabled` 默认关闭）
+- **语音回复（TTS）**：文字回复后自动跟一条语音——云端（默认 Azure 晓晓，`ttsProvider` 可切任意 OpenAI 兼容服务）或**本地 GPT-SoVITS 语音克隆**（`ttsProvider: local`，零 API 成本，3-10 秒参考音频即克隆音色）；`ttsEnabled` 默认关闭
 - **避开高峰期**：工作日 9:00-12:00 与 14:00-18:00 不回复任何消息（`quietHoursEnabled` 默认关闭，时段可改，周末自动豁免；已排定的提醒/开奖不受影响）
 - **实用小工具**：`/health` 运行诊断、私聊文件自动转存到本机、`/export` 聊天记录导出 markdown
 - **语音转文字（STT）**：群聊中 @机器人并引用（回复）一条语音 → 转写文字并回复；私聊语音直接转写。支持智谱 GLM-ASR-2512 或任意 OpenAI 兼容 `/audio/transcriptions` 端点（如 SiliconFlow）
@@ -85,6 +85,18 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `quietHoursEnabled` | `false` | 避开高峰期开关（**默认关闭**）；开启后工作日静默时段内不回复任何入站消息（不消耗模型调用），已排定的定时提醒/投票开奖照常 |
 | `quietHours` | `['9:00-12:00', '14:00-18:00']` | 静默时段（本地时间 `H:MM-H:MM`，全角冒号自动归一化；可跨午夜如 `22:00-2:00`） |
 | `quietWeekendExempt` | `true` | 周六/周日不受静默时段限制 |
+| `ttsEnabled` | `false` | 语音回复总开关（默认关闭；开启后每条文字回复后跟随一条语音） |
+| `ttsProvider` | `azure` | 合成方案：`azure`（微软晓晓）/ `openai`（任意 OpenAI 兼容 `/audio/speech`）/ `local`（**本地 GPT-SoVITS 语音克隆，零 API 成本**） |
+| `ttsApiKey` | `''` | Azure / OpenAI 兼容服务的 key（`local` 不需要） |
+| `ttsVoice` | `zh-CN-XiaoxiaoNeural` | 云端音色名 |
+| `ttsStyle` | `chat` | Azure 语气风格（cheerful/sad…） |
+| `ttsMaxChars` | `120` | 语音朗读最大字符数（超出截断，只影响语音不影响文字） |
+| `ttsLocalUrl` | `http://127.0.0.1:9880` | 本地 GPT-SoVITS api_v2 服务地址 |
+| `ttsLocalRefAudio` | `''` | **本地 TTS 必填**：音色参考音频绝对路径（3-10 秒 wav，如 `D:/voice/xiaojingyu.wav`） |
+| `ttsLocalPromptText` | `''` | 参考音频的台词（可留空） |
+| `ttsLocalTextLang` | `zh` | 合成文本语言 |
+| `ttsLocalPromptLang` | `zh` | 参考音频台词语言 |
+| `ttsLocalConvertToMp3` | `true` | 本地 wav 输出用 ffmpeg 自动转 mp3 再发送（QQ/NapCat 兼容性更好） |
 
 ## 用户侧（OneBot 实现）配置
 
@@ -184,10 +196,10 @@ ws://127.0.0.1:6700/
 
 最近五个版本（始终滚动展示）：
 
+- **v0.4.0** — 本地 TTS：`ttsProvider: local` 接入 GPT-SoVITS 语音克隆（零 API 成本，参考音频克隆音色，wav 自动转 mp3）
 - **v0.3.2** — 避开高峰期静默（默认关闭）：工作日 9:00-12:00 / 14:00-18:00 不回复任何消息，周末豁免，时段可配
 - **v0.3.1** — 上下线状态推送（默认关闭，支持 PushPlus/自定义 Webhook）+ GIF 表情抽帧识别（默认开启，自动调用 ffmpeg）
 - **v0.3.0** — 语音回复 TTS（默认 Azure 晓晓，可换任意 OpenAI 兼容服务）+ `/health` 诊断、私聊文件转存、`/export` 聊天导出
 - **v0.2.9** — 群管理套件：`/summary` 聊天总结、群投票、共享待办（`/todo`）、管理员命令 `/mute` `/unmute` `/kick`（踢人二次确认）`/clear`
-- **v0.2.8** — 回复限流（默认关闭，可自行开启）+ 消息去重
 
 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
