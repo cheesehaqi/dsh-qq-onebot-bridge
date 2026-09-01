@@ -45,3 +45,11 @@
     ttsLocalTextLang: zh
     ttsLocalPromptLang: zh
     ttsLocalConvertToMp3: true   # wav 自动转 mp3（ffmpeg）
+    # ---- 互动功能（v0.3.4）----
+    pokeEnabled: true            # 戳一戳卖萌回复
+    voiceReadingEnabled: true    # 语音朗读：@机器人引用文字说"读一下"，或 /读 <文字>
+    # ---- 每日签到 / 入群欢迎语（默认关闭，按需开启）----
+    checkinEnabled: false        # true=群里说"签到"打卡（存 cwd/qq-checkin/）
+    checkinKeyword: 签到
+    welcomeEnabled: false        # true=新人入群自动 @欢迎
+    welcomeText: ''              # 空=内置默认欢迎语

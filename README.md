@@ -11,6 +11,7 @@ QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱�
 - **群管理套件**：`/summary` 总结最近聊天；群投票（`投票：问题？A 选项 B 选项`，回复字母投票，自动开奖）；共享待办（`/todo` + 「记一下：xxx」）；管理员命令 `/mute` `/unmute` `/kick`（**踢人需二次确认**）`/clear`（仅 `adminUsers` 白名单可用）
 - **语音回复（TTS）**：文字回复后自动跟一条语音——云端（默认 Azure 晓晓，`ttsProvider` 可切任意 OpenAI 兼容服务）或**本地 GPT-SoVITS 语音克隆**（`ttsProvider: local`，零 API 成本，3-10 秒参考音频即克隆音色）；`ttsEnabled` 默认关闭
 - **避开高峰期**：工作日 9:00-12:00 与 14:00-18:00 不回复任何消息（`quietHoursEnabled` 默认关闭，时段可改，周末自动豁免；已排定的提醒/开奖不受影响）
+- **互动功能**：`/help` 命令菜单；戳一戳卖萌回复（`pokeEnabled`）；语音朗读（@我引用文字说「读一下」或 `/读 文字`）；每日签到打卡（`checkinEnabled` 默认关闭）；新人入群自动欢迎（`welcomeEnabled` 默认关闭）
 - **实用小工具**：`/health` 运行诊断、私聊文件自动转存到本机、`/export` 聊天记录导出 markdown
 - **语音转文字（STT）**：群聊中 @机器人并引用（回复）一条语音 → 转写文字并回复；私聊语音直接转写。支持智谱 GLM-ASR-2512 或任意 OpenAI 兼容 `/audio/transcriptions` 端点（如 SiliconFlow）
 - **私聊识图**：私聊中用户发送的图片/动画表情自动下载到 `cwd/qq-images/` 并注入会话，agent 用 `describe_image` 主动查看并回应（`privateImageView` 开关）
@@ -97,6 +98,14 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `ttsLocalTextLang` | `zh` | 合成文本语言 |
 | `ttsLocalPromptLang` | `zh` | 参考音频台词语言 |
 | `ttsLocalConvertToMp3` | `true` | 本地 wav 输出用 ffmpeg 自动转 mp3 再发送（QQ/NapCat 兼容性更好） |
+| `pokeEnabled` | `true` | 戳一戳回复开关（白名单会话内被戳随机卖萌回复） |
+| `pokeReplies` | `[...]` | 戳一戳回复文案列表（随机选一条） |
+| `pokeCooldownSeconds` | `15` | 每会话戳一戳回复最小间隔（秒，防刷） |
+| `voiceReadingEnabled` | `true` | 语音朗读：@机器人引用文字说「读一下/念出来」，或 `/读 <文字>`（走 ttsProvider 合成） |
+| `checkinEnabled` | `false` | 每日签到（**默认关闭**）：说「签到」打卡，连续/累计天数存 `cwd/qq-checkin/`；「签到榜」看排行 |
+| `checkinKeyword` | `签到` | 签到触发词 |
+| `welcomeEnabled` | `false` | 入群欢迎语（**默认关闭**）：新人进群自动 @+欢迎文案（机器人自己入群不触发） |
+| `welcomeText` | `''` | 欢迎文案（空=内置默认文案） |
 
 ## 用户侧（OneBot 实现）配置
 
@@ -196,10 +205,10 @@ ws://127.0.0.1:6700/
 
 最近五个版本（始终滚动展示）：
 
+- **v0.3.4** — 第一梯队互动：`/help` 命令菜单、戳一戳卖萌回复、语音朗读（引用文字→TTS 念出）、每日签到（默认关闭）、入群欢迎语（默认关闭）
 - **v0.3.3** — 本地 TTS：`ttsProvider: local` 接入 GPT-SoVITS 语音克隆（零 API 成本，参考音频克隆音色，wav 自动转 mp3）
 - **v0.3.2** — 避开高峰期静默（默认关闭）：工作日 9:00-12:00 / 14:00-18:00 不回复任何消息，周末豁免，时段可配
 - **v0.3.1** — 上下线状态推送（默认关闭，支持 PushPlus/自定义 Webhook）+ GIF 表情抽帧识别（默认开启，自动调用 ffmpeg）
 - **v0.3.0** — 语音回复 TTS（默认 Azure 晓晓，可换任意 OpenAI 兼容服务）+ `/health` 诊断、私聊文件转存、`/export` 聊天导出
-- **v0.2.9** — 群管理套件：`/summary` 聊天总结、群投票、共享待办（`/todo`）、管理员命令 `/mute` `/unmute` `/kick`（踢人二次确认）`/clear`
 
 完整历史见 [CHANGELOG.md](CHANGELOG.md)。

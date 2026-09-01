@@ -1,5 +1,16 @@
 # 更新日志 / Changelog
 
+## v0.3.4（2026-08-29）
+
+**第一梯队互动功能**
+- **`/help` 命令帮助**：`/help` / `帮助` / `菜单` 动态列出可用命令（按功能开关与管理员身份展示）
+- **戳一戳回复**（`pokeEnabled` 默认开启）：OneBot notice poke 事件，白名单会话内被戳时随机卖萌回复（`pokeReplies` 可配，`pokeCooldownSeconds` 限频）
+- **语音朗读**（`voiceReadingEnabled` 默认开启）：@机器人引用文字说「读一下/念出来」，或 `/读 <文字>`——用 TTS 把文字念成语音发回（复用 ttsProvider，wav 自动转 mp3）
+- **每日签到**（`checkinEnabled` **默认关闭**）：说「签到」打卡，连续/累计天数按会话持久化到 `cwd/qq-checkin/`；「签到榜」查看排行（新模块 `lib/checkin.js`）
+- **入群欢迎语**（`welcomeEnabled` **默认关闭**）：notice group_increase 事件，@新人 + 欢迎文案（`welcomeText` 可配；机器人自己入群不触发）
+- onebot.js 新增 `parseNotice` 与 notice 事件、消息透传 `senderName`
+- 新增测试 `test/checkin-unit.mjs`（19 项）+ `test/notice-unit.mjs`（9 项），全套 98 项
+
 ## v0.3.3（2026-08-29）
 
 **本地 TTS：GPT-SoVITS 零成本语音克隆**
