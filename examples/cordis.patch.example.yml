@@ -53,3 +53,12 @@
     checkinKeyword: 签到
     welcomeEnabled: false        # true=新人入群自动 @欢迎
     welcomeText: ''              # 空=内置默认欢迎语
+    # ---- 生图（默认关闭；/画 描述词，群聊需 @机器人）----
+    imageGenEnabled: false
+    imageGenProvider: openai     # openai=任意 OpenAI 兼容 /images/generations（DALL·E/智谱 CogView/SiliconFlow…）；local=本地 SD WebUI
+    imageGenBaseUrl: ''          # 空=按 provider 取默认（api.openai.com 或 127.0.0.1:7860）
+    imageGenApiKey: '<你的生图APIKey>'  # local 不需要
+    imageGenModel: ''            # 空=服务默认（如 gpt-image-1；local 忽略）
+    imageGenSize: 1024x1024
+    imageGenCooldownSeconds: 60  # 每会话生图冷却（成本防护）
+    imageGenDailyLimit: 20       # 每会话每日上限

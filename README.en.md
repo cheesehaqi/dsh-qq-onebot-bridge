@@ -12,6 +12,7 @@ A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ m
 - **Voice replies (TTS)**: an optional voice message follows each text reply — cloud (Azure Xiaoxiao by default; `ttsProvider` can switch to any OpenAI-compatible service) or **local GPT-SoVITS voice cloning** (`ttsProvider: local`, zero API cost, clones a voice from a 3-10s reference clip); `ttsEnabled` is off by default
 - **Avoid peak hours**: no replies at all on weekdays 9:00-12:00 and 14:00-18:00 (`quietHoursEnabled` is off by default, windows editable, weekends exempt; already-scheduled reminders/vote publishing still fire)
 - **Interactions**: `/help` command menu; poke cute-replies (`pokeEnabled`); voice reading (quote text saying "读一下" or `/读 <text>` → TTS read-aloud); daily check-in (`checkinEnabled` off by default); new-member auto welcome (`welcomeEnabled` off by default)
+- **Image generation**: `/画 <prompt>` generates an image and sends it back (`imageGenEnabled` off by default, groups require @; `imageGenProvider: openai` for any OpenAI-compatible `/images/generations`, or `local` for a local Stable Diffusion WebUI — extensible, one branch per backend)
 - **Utility tools**: `/health` runtime diagnostics, private file auto-save to the local machine, `/export` chat history to markdown
 - **Speech-to-text (STT)**: in groups, @-mention the bot while quoting (replying to) a voice message → transcribe and reply with the text; private voice messages are transcribed directly. Works with Zhipu GLM-ASR-2512 or any OpenAI-compatible `/audio/transcriptions` endpoint (e.g. SiliconFlow)
 - **Private image viewing**: images/animated stickers sent in private chats are downloaded to `cwd/qq-images/` and injected into the session so the agent can view them with `describe_image` and respond (`privateImageView` switch)
@@ -105,6 +106,19 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `checkinKeyword` | `签到` | Check-in trigger keyword |
 | `welcomeEnabled` | `false` | New-member welcome (**off by default**): @-mention the newcomer with the welcome text when someone joins (bot itself excluded) |
 | `welcomeText` | `''` | Welcome text (empty = built-in default) |
+| `imageGenEnabled` | `false` | Image generation switch (**off by default**): `/画 <prompt>` generates an image (groups require @-mentioning the bot) |
+| `imageGenProvider` | `openai` | Backend: `openai` = any OpenAI-compatible `/images/generations` (DALL·E/CogView/SiliconFlow…); `local` = local SD WebUI (AUTOMATIC1111) |
+| `imageGenBaseUrl` | `''` | Backend base URL (empty = provider default: api.openai.com or 127.0.0.1:7860) |
+| `imageGenApiKey` | `''` | API key for OpenAI-compatible providers (not needed for local) |
+| `imageGenModel` | `''` | Model id (empty = provider default, e.g. gpt-image-1; ignored by local) |
+| `imageGenSize` | `1024x1024` | Image size WxH (local supports arbitrary sizes like 768x512) |
+| `imageGenSteps` | `20` | Sampling steps (local only) |
+| `imageGenCfgScale` | `7` | CFG scale (local only) |
+| `imageGenSampler` | `''` | Sampler (local only; empty = WebUI default) |
+| `imageGenCooldownSeconds` | `60` | Min seconds between generations per chat (cost/spam guard) |
+| `imageGenDailyLimit` | `20` | Max generations per chat per day |
+| `imageGenMaxPromptChars` | `400` | Max prompt characters (truncated beyond) |
+| `imageGenCommand` | `/画` | Trigger command for image generation |
 
 ## OneBot side setup
 
@@ -204,10 +218,10 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
+- **v0.3.5** — image generation (off by default): `/画 <prompt>` generates an image; `imageGenProvider` supports any OpenAI-compatible service or a local SD WebUI — two extensible backends
 - **v0.3.4** — first-tier interactions: `/help` command menu, poke cute-replies, voice reading (quoted text → TTS read-aloud), daily check-in (off by default), new-member welcome (off by default)
 - **v0.3.3** — local TTS: `ttsProvider: local` plugs into GPT-SoVITS voice cloning (zero API cost, clones the voice from a reference clip, wav auto-converted to mp3)
 - **v0.3.2** — avoid-peak-hours silence (off by default): weekdays 9:00-12:00 / 14:00-18:00 the bot replies to nothing, weekends exempt, windows configurable
 - **v0.3.1** — online/offline status push (off by default, supports PushPlus/custom webhook) + GIF frame extraction for image understanding (on by default, uses ffmpeg automatically)
-- **v0.3.0** — voice replies TTS (Azure Xiaoxiao by default, swappable to any OpenAI-compatible service) + `/health` diagnostics, private file transfer, `/export` chat history
 
 Full history in [CHANGELOG.md](CHANGELOG.md).
