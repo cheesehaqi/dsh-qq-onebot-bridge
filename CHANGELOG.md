@@ -1,5 +1,15 @@
 # 更新日志 / Changelog
 
+## v0.3.5（2026-09-04）
+
+**生图功能（高拓展 provider 抽象）**
+- **`/画 <描述词>` 生图**（`imageGenEnabled` 默认关闭）：群聊需 @机器人（防白嫖），私聊直接可用；生成后自动落盘 `cwd/qq-images/` 并发回图片段
+- **双后端，与 TTS 同款拓展架构**（新模块 `lib/imagegen.js`，新增后端=加一个分支）：
+  - `imageGenProvider: openai`——任意 OpenAI 兼容 `/images/generations`（DALL·E / 智谱 CogView / SiliconFlow…），`imageGenBaseUrl`/`imageGenApiKey`/`imageGenModel`/`imageGenSize` 可配，自动处理 `b64_json` 与 `url` 两种响应
+  - `imageGenProvider: local`——本地 Stable Diffusion WebUI（AUTOMATIC1111 `/sdapi/v1/txt2img`），`imageGenSteps`/`imageGenCfgScale`/`imageGenSampler` 可配
+- 成本/刷屏防护：`imageGenCooldownSeconds`（每会话冷却，默认 60s）+ `imageGenDailyLimit`（每日限额，默认 20）+ `imageGenMaxPromptChars`（描述词长度上限）
+- `/help` 菜单在开启时显示生图用法；新增 `test/imagegen-unit.mjs`（15 项），全套 113 项
+
 ## v0.3.4（2026-09-01）
 
 **第一梯队互动功能**
