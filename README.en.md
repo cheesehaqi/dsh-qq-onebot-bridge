@@ -5,6 +5,9 @@ A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ m
 ## Feature overview
 
 - **Two-way message bridge**: QQ messages (group/private) enter DSH agent sessions; replies are chunked and sent back to QQ (OneBot v11 reverse WebSocket)
+- **Session resume**: the chat → sessionId map is persisted, so after a host restart the bridge resumes the previous session with its full transcript (not just the memory window); only `/new` really starts over
+- **Agent-initiated media**: the agent can call `qq_send_image` / `qq_send_file` / `qq_send_voice` / `qq_recall` to push local images, files and voice into the chat, or withdraw its own recent messages (files are restricted to the session cwd plus `fileSendDirs`; credential-shaped paths are always refused)
+- **Write-action gate**: every risky OneBot write (ban/kick/notice/essence/card/upload/recall/forward/approvals) shares one rate limiter with per-minute and per-day caps plus an audit log at `cwd/qq-actions.log`
 - **Session grouping**: one independent session per group (`sessionMode: chat`) or per sender (`user`); one session per private user, with no context bleed between chats; the agent's system prompt includes the current chat scope
 - **Persistent memory**: each chat's recent conversation is saved to `cwd/qq-memory/` and re-injected into new sessions after host restarts, so the bot remembers previous chats (`memoryEnabled` switch; `/new` clears the memory for that chat)
 - **Scheduled reminders**: "提醒我 30 分钟后喝水" / "明天9点开会" — the bot pings the chat at the set time (groups require @-mentioning the bot; private chats work directly; reminders survive host restarts, `/reminders` lists them)
@@ -67,6 +70,18 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `provider` | `''` | LLM provider override (empty = agent default) |
 | `model` | `''` | LLM model override (empty = agent default) |
 | `maxMessageLength` | `1700` | Max chars per outbound QQ message before chunking |
+| `botName` | `小鲸鱼` | Bot display name used in merged-forward cards |
+| `sessionResumeEnabled` | `true` | Resume the chat's previous session after a host restart (full transcript); `false` = always start a new session |
+| `agentMediaToolsEnabled` | `true` | Expose the `qq_send_image` / `qq_send_file` / `qq_send_voice` / `qq_recall` tools |
+| `fileSendDirs` | `[]` | Extra directories the agent may send files from (the session cwd is always allowed) |
+| `fileSendMaxBytes` | `52428800` | Max size of a file the agent may send (bytes, default 50 MiB) |
+| `imageSendMaxBytes` | `4194304` | Images larger than this (default 4 MiB) are compressed with ffmpeg before sending |
+| `recallWindowSeconds` | `110` | How long an outbound message stays withdrawable via `qq_recall` / `/撤回` |
+| `forwardLongReplies` | `false` | Deliver long group replies as a merged-forward card |
+| `forwardThresholdChars` | `600` | Character count from which a group reply becomes a merged-forward card |
+| `actionRatePerMinute` | `20` | Write-action gate: max OneBot write actions per minute across all chats |
+| `actionRatePerDay` | `500` | Write-action gate: max OneBot write actions per day across all chats |
+| `actionAuditEnabled` | `true` | Append every write action and denial to `cwd/qq-actions.log` |
 | `sttEnabled` | `false` | Speech-to-text master switch |
 | `sttBaseUrl` | `https://open.bigmodel.cn/api/paas/v4` | STT endpoint (OpenAI-compatible `/audio/transcriptions`) |
 | `sttModel` | `glm-asr-2512` | STT model (Zhipu `glm-asr-2512` / SiliconFlow `FunAudioLLM/SenseVoiceSmall`) |
@@ -218,6 +233,7 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
+- **v0.3.6** — agent-initiated actions and session resume: `qq_send_image/qq_send_file/qq_send_voice/qq_recall` tools, resuming the full session after a host restart, merged-forward cards for long replies, a shared write-action gate (rate limits + audit log), and `/撤回`
 - **v0.3.5** — image generation (off by default): `/画 <prompt>` generates an image; `imageGenProvider` supports any OpenAI-compatible service or a local SD WebUI — two extensible backends
 - **v0.3.4** — first-tier interactions: `/help` command menu, poke cute-replies, voice reading (quoted text → TTS read-aloud), daily check-in (off by default), new-member welcome (off by default)
 - **v0.3.3** — local TTS: `ttsProvider: local` plugs into GPT-SoVITS voice cloning (zero API cost, clones the voice from a reference clip, wav auto-converted to mp3)

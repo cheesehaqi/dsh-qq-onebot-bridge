@@ -5,6 +5,9 @@ QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱�
 ## 功能总览
 
 - **双向消息桥**：QQ（群聊/私聊）消息进入 DSH agent 会话；回复自动分段发回 QQ（OneBot v11 反向 WebSocket）
+- **会话续接**：`routeKey → sessionId` 落盘，宿主重启后自动 `resume` 上次的完整会话记录（不是只补记忆窗口）；`/new` 才真正重开
+- **agent 主动能力**：agent 可调用 `qq_send_image` / `qq_send_file` / `qq_send_voice` / `qq_recall`——把本地图片、文件、语音发进当前会话，或撤回自己刚发的消息（只允许 cwd 与 `fileSendDirs` 内的文件，凭据类路径一律拒绝）
+- **写操作闸门**：禁言/踢人/公告/精华/名片/上传/撤回/合并转发等危险写操作统一限频（每分钟/每日上限）+ 审计日志 `cwd/qq-actions.log`
 - **会话分组**：每个群一个独立会话（`sessionMode: chat`）或每群每人一个会话（`user`）；每个私聊用户一个独立会话，互不串上下文；agent 系统提示注入当前会话归属（chatScope）
 - **持久化记忆**：每个群/私聊的最近对话自动落盘到 `cwd/qq-memory/`，宿主重启后自动注入新会话——小鲸鱼不会失忆（`memoryEnabled` 开关；`/new` 清除当前会话的记忆）
 - **定时提醒**：`30分钟后提醒我喝水`、`明天9点提醒我开会`——到点自动发消息提醒（群聊需 @机器人，@ 时可省略"提醒"字样如「明天9点开会」；私聊需带提醒关键词；提醒跨宿主重启保留，`/reminders` 查看待执行列表）
@@ -18,7 +21,7 @@ QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱�
 - **私聊识图**：私聊中用户发送的图片/动画表情自动下载到 `cwd/qq-images/` 并注入会话，agent 用 `describe_image` 主动查看并回应（`privateImageView` 开关）
 - **引用解析**：@机器人并引用文本/图片/语音时自动展开（图片落盘到 `cwd/qq-replies/` 供 `describe_image` 查看，语音自动转写）
 - **表情系统**：黄脸表情表 + 回复里 `[face:名字]` 标记替换 + 图片表情收藏（`autoCollectStickers`）+ 会话内 `qq_face_list` / `qq_face_send` 工具（`faceEnabled` 总开关）
-- **会话命令**：`/new` 重置当前会话、`/status` 查看会话状态
+- **会话命令**：`/new` 重置当前会话、`/status` 查看会话状态、`/撤回` 撤回机器人上一条消息
 - **安全控制**：`allowUsers` / `allowGroups` 白名单、`accessToken` 鉴权、`replyOnlyWhenMentioned` 群聊仅@回复
 - **人设解耦**：插件**不包含任何人设/记忆内容**——人设与群规则经 dsh-mnemon 的 `USER.md`/`MEMORY.md` 注入会话（见文末说明）
 
@@ -67,6 +70,18 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `provider` | `''` | LLM provider 覆盖（空=agent 默认） |
 | `model` | `''` | LLM 模型覆盖（空=agent 默认） |
 | `maxMessageLength` | `1700` | 单条出站消息最大字符数（超出自动分段） |
+| `botName` | `小鲸鱼` | 机器人显示名（合并转发卡片的署名） |
+| `sessionResumeEnabled` | `true` | 宿主重启后 `resume` 上次会话（完整记录续接）；关掉则每次重启都新建会话 |
+| `agentMediaToolsEnabled` | `true` | 暴露 `qq_send_image` / `qq_send_file` / `qq_send_voice` / `qq_recall` 工具 |
+| `fileSendDirs` | `[]` | agent 允许发送文件的额外目录（会话 cwd 始终允许） |
+| `fileSendMaxBytes` | `52428800` | agent 可发送的单文件大小上限（字节，默认 50 MiB） |
+| `imageSendMaxBytes` | `4194304` | 图片超过此大小（默认 4 MiB）先用 ffmpeg 压缩再发 |
+| `recallWindowSeconds` | `110` | 出站消息可被 `qq_recall` / `/撤回` 撤回的时间窗（秒） |
+| `forwardLongReplies` | `false` | 群聊超长回复改发合并转发卡片 |
+| `forwardThresholdChars` | `600` | 触发合并转发的字数阈值 |
+| `actionRatePerMinute` | `20` | 写操作闸门：全部会话合计每分钟上限 |
+| `actionRatePerDay` | `500` | 写操作闸门：全部会话合计每日上限 |
+| `actionAuditEnabled` | `true` | 写操作与拒绝记录写入 `cwd/qq-actions.log` |
 | `sttEnabled` | `false` | 语音转文字总开关 |
 | `sttBaseUrl` | `https://open.bigmodel.cn/api/paas/v4` | STT 端点（OpenAI 兼容 `/audio/transcriptions`） |
 | `sttModel` | `glm-asr-2512` | STT 模型（智谱 `glm-asr-2512` / SiliconFlow `FunAudioLLM/SenseVoiceSmall`） |
@@ -219,10 +234,10 @@ ws://127.0.0.1:6700/
 
 最近五个版本（始终滚动展示）：
 
+- **v0.3.6** — agent 主动能力与会话续接：`qq_send_image/qq_send_file/qq_send_voice/qq_recall` 工具、宿主重启后 `resume` 完整会话、合并转发长回复、统一写操作闸门（限频+审计）、`/撤回`
 - **v0.3.5** — 生图功能（默认关闭）：`/画 描述词` 生成图片，`imageGenProvider` 支持任意 OpenAI 兼容服务或本地 SD WebUI，高拓展双后端
 - **v0.3.4** — 第一梯队互动：`/help` 命令菜单、戳一戳卖萌回复、语音朗读（引用文字→TTS 念出）、每日签到（默认关闭）、入群欢迎语（默认关闭）
 - **v0.3.3** — 本地 TTS：`ttsProvider: local` 接入 GPT-SoVITS 语音克隆（零 API 成本，参考音频克隆音色，wav 自动转 mp3）
 - **v0.3.2** — 避开高峰期静默（默认关闭）：工作日 9:00-12:00 / 14:00-18:00 不回复任何消息，周末豁免，时段可配
-- **v0.3.1** — 上下线状态推送（默认关闭，支持 PushPlus/自定义 Webhook）+ GIF 表情抽帧识别（默认开启，自动调用 ffmpeg）
 
 完整历史见 [CHANGELOG.md](CHANGELOG.md)。

@@ -1,5 +1,24 @@
 # 更新日志 / Changelog
 
+## v0.3.6（2026-09-11）
+
+**agent 主动能力 + 会话续接 + 写操作闸门**
+
+- **会话续接（`sessionResumeEnabled` 默认开）**：`routeKey → sessionId` 落盘 `cwd/qq-sessions.json`，宿主重启后第一条消息用 `ctx.agents.resume()` 接回上一次的**完整会话记录**（不再只靠 `qq-memory/` 的 30 行窗口续命）；续接失败自动回退新建会话，`/new` 会同时清掉映射真正重开
+- **agent 主动发送工具**（`agentMediaToolsEnabled` 默认开，新模块 `lib/send.js` 做校验）：
+  - `qq_send_image`：把本地图片发进当前会话（超过 `imageSendMaxBytes` 自动用 ffmpeg 压缩到 1920px JPEG 再发）
+  - `qq_send_file`：把本地文件发进当前会话（群=群文件 `upload_group_file`，私聊=`upload_private_file`）
+  - `qq_send_voice`：按需合成一条语音（复用 `ttsProvider`，含本地 GPT-SoVITS）
+  - `qq_recall`：撤回机器人自己最近发出的消息（默认 1 条，最多 5 条）
+  - **安全边界**：只允许发送 cwd（+ `fileSendDirs`）内的文件，`.ssh/.dsh/.env/credentials/*.pem/*.key` 等凭据类路径一律拒绝，超出 `fileSendMaxBytes` 拒绝
+- **写操作闸门（`lib/actions.js`）**：所有危险 OneBot 写操作（禁言/踢人/公告/精华/名片/上传/撤回/合并转发/好友与入群审批）统一走令牌桶 + 每日上限 `actionRatePerMinute`/`actionRatePerDay` + 审计日志 `cwd/qq-actions.log`（含被拒记录）——新增功能不会悄悄放大账号风控面
+- **合并转发卡片（`forwardLongReplies` 默认关）**：群聊里超长回复（默认 ≥ `forwardThresholdChars` 600 字）改发合并转发"聊天记录"卡片，失败自动回退普通文本
+- **`/撤回` 命令**：免模型撤回机器人上一条消息（默认 110 秒内可撤，`recallWindowSeconds`）
+- **统一存储层（`lib/store.js`）**：原子写（临时文件+rename）、mtime+size 缓存、损坏 JSON 容错，供会话映射等新状态使用
+- **onebot.js 传输层大扩充**：新增 request 帧解析（入群/加好友请求事件）、`delete_msg`/`set_group_card`/`set_group_special_title`/`set_group_whole_ban`/`set_group_leave`/`set_essence_msg`/`_send_group_notice`/`set_msg_emoji_like`/`set_group_add_request`/`set_friend_add_request`/`upload_group_file`/`upload_private_file`/`send_group_forward_msg`/`send_private_forward_msg`/`get_group_member_list`/`get_group_member_info`/`get_group_info`/`get_friend_list`/`get_group_honor_info`/`_get_group_notice`/`get_essence_msg_list`/`get_group_msg_history`/`get_version_info`/`get_status`；`parseNotice` 补 `messageId`/`duration`
+- **`/health` 扩展**：会话续接状态、写操作闸门拒绝次数与审计开关
+- 新增测试：`test/actions-unit.mjs`（28）、`test/send-unit.mjs`（35）、`test/onebot-api-unit.mjs`（32，起真实反向 WS 服务器+客户端验证全部写操作负载与 request/notice 事件）
+
 ## v0.3.5（2026-09-04）
 
 **生图功能（高拓展 provider 抽象）**
