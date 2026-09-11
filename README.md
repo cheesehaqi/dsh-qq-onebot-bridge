@@ -16,6 +16,7 @@ QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱�
 - **避开高峰期**：工作日 9:00-12:00 与 14:00-18:00 不回复任何消息（`quietHoursEnabled` 默认关闭，时段可改，周末自动豁免；已排定的提醒/开奖不受影响）
 - **互动功能**：`/help` 命令菜单；戳一戳卖萌回复（`pokeEnabled`）；语音朗读（@我引用文字说「读一下」或 `/读 文字`）；每日签到打卡（`checkinEnabled` 默认关闭）；新人入群自动欢迎（`welcomeEnabled` 默认关闭）
 - **生图**：`/画 描述词` 生成图片发回（`imageGenEnabled` 默认关闭，群聊需 @；`imageGenProvider: openai` 接任意 OpenAI 兼容 `/images/generations`，或 `local` 接本地 Stable Diffusion WebUI——高拓展，加后端只需一个分支）
+- **群洞察与日报**：`statsEnabled` 发言统计（`/统计` 今日榜、`/周榜` 周榜）；`/荣誉` `/公告` `/群精华` 只读查询；`dailyReportEnabled` 每日定时群日报（agent 总结当天聊天）；`/mc <地址>` 查询 MC 服务器状态；`recurringReminderEnabled` 支持「每天8点」「每周一9点」「每个工作日15点」重复提醒
 - **防撤回与群规**：`antiRecallEnabled` 补发被撤回的消息（含图片）；`filterEnabled` 敏感词过滤（提醒/撤回/禁言三种处置，词表热重载）；`floodEnabled` 刷屏警告与阶梯禁言；入群/加好友验证（`verifyEnabled`，管理员 `/同意 <序号>` 审批、口令或答对验证题自动放行）
 - **群管套件**：`/mute` `/unmute` `/kick` `/clear`，以及 `/公告` `/精华` `/名片` `/头衔` `/全员禁言`（全部走统一写操作闸门）
 - **零成本互动包**：关键词问答库（`/kw add`，命中即回、零 token）、今日人品/运势/抽签/塔罗（按 QQ 号+日期确定性生成）、骰子与随机抽人、积分经济（发言/签到得积分、`/转账`）、群内小游戏（成语接龙 373 词库、猜数字）——全部本地计算，不消耗模型
@@ -117,6 +118,15 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `verifyKeyword` | `''` | 口令：验证消息包含它则自动放行（空=全部人工审批） |
 | `verifyTimeoutSeconds` | `300` | 请求超时时间（超时出队并提醒管理员） |
 | `verifyMaxPending` | `20` | 待审队列上限 |
+| `statsEnabled` | `false` | 发言统计（**默认关闭**）：`/统计` 今日活跃榜、`/周榜` 周榜，并作为日报数据源 |
+| `statsKeepDays` | `30` | 发言统计保留天数 |
+| `groupReadEnabled` | `true` | 只读群信息：`/荣誉` `/公告` `/群精华` |
+| `mcStatusEnabled` | `true` | `/mc <host[:port]>` 查询 Minecraft Java 服务器状态（Server List Ping，无 Key） |
+| `mcStatusTimeoutMs` | `5000` | MC 状态查询超时（毫秒） |
+| `recurringReminderEnabled` | `true` | 重复提醒：「每天8点」「每周一9点」「每个工作日15点」 |
+| `dailyReportEnabled` | `false` | 每日群日报（**默认关闭**）：到点让 agent 总结当天聊天并发到群里 |
+| `dailyReportTime` | `22:00` | 日报时间（本地 HH:mm） |
+| `dailyReportChats` | `[]` | 固定接收日报的会话（如 `["g:100000001"]`；为空则用 `/日报 on` 的开关，再为空则回落到全部群白名单） |
 | `sttEnabled` | `false` | 语音转文字总开关 |
 | `sttBaseUrl` | `https://open.bigmodel.cn/api/paas/v4` | STT 端点（OpenAI 兼容 `/audio/transcriptions`） |
 | `sttModel` | `glm-asr-2512` | STT 模型（智谱 `glm-asr-2512` / SiliconFlow `FunAudioLLM/SenseVoiceSmall`） |
@@ -269,10 +279,10 @@ ws://127.0.0.1:6700/
 
 最近五个版本（始终滚动展示）：
 
+- **v0.3.9** — 群洞察与定时播报：发言统计（`/统计` `/周榜`）、`/荣誉` `/公告` `/群精华` 只读查询、每日群日报（默认关闭）、重复提醒（每天/每周/工作日）、`/mc` 查 MC 服务器状态
 - **v0.3.8** — 防撤回、敏感词/刷屏防护、入群与加好友验证（管理员 `/同意 <序号>` 审批），群管 API 补齐（`/公告` `/精华` `/名片` `/头衔` `/全员禁言`），既有群管命令纳入写操作闸门
 - **v0.3.7** — 零成本互动包：关键词问答库（默认关闭）、今日人品/运势/抽签/塔罗、骰子与随机抽人、积分经济（默认关闭）、成语接龙（373 词库）与猜数字（默认关闭）；修复 `stop()` disposer 与接龙判定规则
 - **v0.3.6** — agent 主动能力与会话续接：`qq_send_image/qq_send_file/qq_send_voice/qq_recall` 工具、宿主重启后 `resume` 完整会话、合并转发长回复、统一写操作闸门（限频+审计）、`/撤回`
 - **v0.3.5** — 生图功能（默认关闭）：`/画 描述词` 生成图片，`imageGenProvider` 支持任意 OpenAI 兼容服务或本地 SD WebUI，高拓展双后端
-- **v0.3.4** — 第一梯队互动：`/help` 命令菜单、戳一戳卖萌回复、语音朗读（引用文字→TTS 念出）、每日签到（默认关闭）、入群欢迎语（默认关闭）
 
 完整历史见 [CHANGELOG.md](CHANGELOG.md)。

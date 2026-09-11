@@ -16,6 +16,7 @@ A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ m
 - **Avoid peak hours**: no replies at all on weekdays 9:00-12:00 and 14:00-18:00 (`quietHoursEnabled` is off by default, windows editable, weekends exempt; already-scheduled reminders/vote publishing still fire)
 - **Interactions**: `/help` command menu; poke cute-replies (`pokeEnabled`); voice reading (quote text saying "读一下" or `/读 <text>` → TTS read-aloud); daily check-in (`checkinEnabled` off by default); new-member auto welcome (`welcomeEnabled` off by default)
 - **Image generation**: `/画 <prompt>` generates an image and sends it back (`imageGenEnabled` off by default, groups require @; `imageGenProvider: openai` for any OpenAI-compatible `/images/generations`, or `local` for a local Stable Diffusion WebUI — extensible, one branch per backend)
+- **Group insight and daily report**: `statsEnabled` message statistics (`/统计` today, `/周榜` this week); read-only `/荣誉` `/公告` `/群精华`; `dailyReportEnabled` posts an agent-written daily summary at a fixed time; `/mc <address>` pings a Minecraft server; `recurringReminderEnabled` supports "每天8点", "每周一9点" and "每个工作日15点"
 - **Anti-recall and group rules**: `antiRecallEnabled` reposts withdrawn messages (images included); `filterEnabled` sensitive-word filtering (warn / recall / mute, hot-reloaded word list); `floodEnabled` anti-flood warnings and escalation; group/friend join verification (`verifyEnabled` with admin `/同意 <id>` approval, passphrase or correct-answer auto-approval)
 - **Group management suite**: `/mute` `/unmute` `/kick` `/clear` plus `/公告` `/精华` `/名片` `/头衔` `/全员禁言` — all funnelled through the shared write-action gate
 - **Zero-cost interaction pack**: keyword wordbook (`/kw add`, instant replies with zero tokens), 今日人品/运势/抽签/塔罗 (deterministic per QQ id + day), dice and random picks, a points economy (earn by chatting/check-in, `/转账` to transfer) and mini-games (idiom chain with a 373-idiom dictionary, guess-the-number) — all computed locally, no model call
@@ -117,6 +118,15 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `verifyKeyword` | `''` | Passphrase that auto-approves a request (empty = always human approval) |
 | `verifyTimeoutSeconds` | `300` | Request expiry before it leaves the queue and admins are reminded |
 | `verifyMaxPending` | `20` | Max queued requests |
+| `statsEnabled` | `false` | Message statistics (default OFF): `/统计` today, `/周榜` this week; also feeds the daily report |
+| `statsKeepDays` | `30` | Days of per-member counts kept |
+| `groupReadEnabled` | `true` | Read-only group queries: `/荣誉` `/公告` `/群精华` |
+| `mcStatusEnabled` | `true` | `/mc <host[:port]>` Minecraft Java status via Server List Ping (no key) |
+| `mcStatusTimeoutMs` | `5000` | Minecraft status ping timeout |
+| `recurringReminderEnabled` | `true` | Recurring reminders ("每天8点", "每周一9点", "每个工作日15点") |
+| `dailyReportEnabled` | `false` | Daily group report (default OFF): the agent summarizes the day at `dailyReportTime` |
+| `dailyReportTime` | `22:00` | Local time (HH:mm) of the daily report |
+| `dailyReportChats` | `[]` | Chats that always receive the report (e.g. `["g:100000001"]`; empty = chats that ran `/日报 on`, then all allowlisted groups) |
 | `sttEnabled` | `false` | Speech-to-text master switch |
 | `sttBaseUrl` | `https://open.bigmodel.cn/api/paas/v4` | STT endpoint (OpenAI-compatible `/audio/transcriptions`) |
 | `sttModel` | `glm-asr-2512` | STT model (Zhipu `glm-asr-2512` / SiliconFlow `FunAudioLLM/SenseVoiceSmall`) |
@@ -268,12 +278,10 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
+- **v0.3.9** — group insight: message statistics (`/统计` `/周榜`), read-only `/荣誉` `/公告` `/群精华`, a daily group report (off by default), recurring reminders (daily/weekly/weekdays) and `/mc` Minecraft status
 - **v0.3.8** — anti-recall, sensitive-word and flood protection, group/friend join verification (admin `/同意 <id>`), a wider group-admin API (`/公告` `/精华` `/名片` `/头衔` `/全员禁言`) and all admin writes moved behind the shared gate
 - **v0.3.7** — zero-cost interaction pack: keyword wordbook (off by default), local fortune/lot/tarot, dice and random picks, points economy (off by default), idiom chain (373 idioms) and guess-the-number (off by default); fixes the `stop()` disposer and the idiom-chain rule
 - **v0.3.6** — agent-initiated actions and session resume: `qq_send_image/qq_send_file/qq_send_voice/qq_recall` tools, resuming the full session after a host restart, merged-forward cards for long replies, a shared write-action gate (rate limits + audit log), and `/撤回`
 - **v0.3.5** — image generation (off by default): `/画 <prompt>` generates an image; `imageGenProvider` supports any OpenAI-compatible service or a local SD WebUI — two extensible backends
-- **v0.3.4** — first-tier interactions: `/help` command menu, poke cute-replies, voice reading (quoted text → TTS read-aloud), daily check-in (off by default), new-member welcome (off by default)
-- **v0.3.3** — local TTS: `ttsProvider: local` plugs into GPT-SoVITS voice cloning (zero API cost, clones the voice from a reference clip, wav auto-converted to mp3)
-- **v0.3.1** — online/offline status push (off by default, supports PushPlus/custom webhook) + GIF frame extraction for image understanding (on by default, uses ffmpeg automatically)
 
 Full history in [CHANGELOG.md](CHANGELOG.md).

@@ -1,5 +1,19 @@
 # 更新日志 / Changelog
 
+## v0.3.9（2026-09-11）
+
+**群洞察与定时播报：活跃统计、群荣誉/公告/精华、每日群日报、重复提醒、MC 服务器状态**
+
+- **群活跃统计**（`statsEnabled` **默认关闭**，新模块 `lib/stats.js`）：每个会话按天记录成员发言条数（`/` 开头的命令不计入），`/统计` 看今日榜、`/周榜` 看近 7 天榜；数据存 `cwd/qq-stats/<会话>.json`（原子写、`statsKeepDays` 天自动裁剪）
+- **只读群信息查询**（`groupReadEnabled` 默认开）：`/荣誉`（`get_group_honor_info`，龙王/群聊之火/群聊炽焰/快乐源泉）、`/公告`（`_get_group_notice` 读取群公告）、`/群精华`（`get_essence_msg_list`）——全部只读，无风控增量
+- **每日群日报**（`dailyReportEnabled` **默认关闭**）：到 `dailyReportTime`（默认 22:00）自动让 agent 用当天聊天记录 + 发言统计写一份口语化日报发到群里
+  - 目标会话 = `dailyReportChats` 显式配置 ∪ 用 `/日报 on` 自助开启的群（两者都为空时回落到全部 `allowGroups`）
+  - 复用会话续接通路：日报以 followup 进入该群会话，回复走既有出站链路；`/日报` 查看状态、`/日报 on|off` 切换（仅管理员）
+- **重复提醒**（`recurringReminderEnabled` 默认开）：`每天8点提醒我喝水`、`每周一9点开会`、`每个工作日15点打卡`——到点自动重排下一次；`/reminders` 会标注周期（`每天 08:00` / `每周一 09:00` / `每个工作日 15:00`），跨宿主重启保留
+- **MC 服务器状态**（`mcStatusEnabled` 默认开，新模块 `lib/mcping.js`）：`/mc mc.example.com:25565` 走 Java 版 Server List Ping（纯 `node:net`，零依赖零 Key），显示在线人数/上限、版本、延迟与 MOTD；离线给出中文原因
+- `/help` 按开关动态展示新命令
+- 新增测试：`test/insight-unit.mjs`（19，统计/荣誉/公告/精华/MC/日报全链路）、`test/stats-unit.mjs`（28，统计存储、榜单、荣誉文案、日报目标选择）、`test/reminder-unit.mjs` 扩充到 32 项（重复提醒解析与下一次触发时间）
+
 ## v0.3.8（2026-09-11）
 
 **防撤回 + 入群验证 + 敏感词/刷屏 + 群管 API 补齐**
