@@ -1,0 +1,131 @@
+/**
+ * Live end-to-end check against a REAL dsh web host (not a mock).
+ *
+ * Prereqs: the web-profile host is running (dsh web, reverse WS on 6700) and the
+ * production cordis.patch.yml allowlists these ids. Connects a fake OneBot
+ * client, then verifies:
+ *   1. /status   → answered by the bridge itself (no model call)
+ *   2. 今日人品   → answered by the local fortune module (no model call)
+ *   3. plain text → answered by the real agent (validates agents.create,
+ *      per-session tool registration and assistant/message delivery)
+ *   4. an unknown command still reaches the agent (no silent drop)
+ *
+ * Usage: node test/live-e2e.mjs [--group 100000001] [--user 2000000001] [--bot 3000000001]
+ */
+import { WebSocket } from 'ws'
+
+const arg = (name, fallback) => {
+  const index = process.argv.indexOf(`--${name}`)
+  return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback
+}
+const groupId = Number(arg('group', '100000001'))
+const userId = Number(arg('user', '2000000001'))
+const botQq = Number(arg('bot', '3000000001'))
+const url = arg('url', 'ws://127.0.0.1:6700/')
+
+const replies = []
+// 每次运行用不同的 message_id 段，避免命中桥的去重窗口（生产行为，测试需绕开）。
+let messageId = (Date.now() % 100000) * 10
+const ws = new WebSocket(url)
+
+function sendGroup(text) {
+  ws.send(JSON.stringify({
+    post_type: 'message',
+    message_type: 'group',
+    group_id: groupId,
+    user_id: userId,
+    self_id: botQq,
+    message_id: ++messageId,
+    sender: { card: '自检', nickname: '自检' },
+    message: `[CQ:at,qq=${botQq},name=小鲸鱼] ${text}`,
+  }))
+}
+
+function waitFor(predicate, timeoutMs, label, fromIndex = 0) {
+  return new Promise((resolve, reject) => {
+    const started = Date.now()
+    const timer = setInterval(() => {
+      const hit = replies.slice(fromIndex).find(predicate)
+      if (hit) {
+        clearInterval(timer)
+        resolve(hit)
+        return
+      }
+      if (Date.now() - started > timeoutMs) {
+        clearInterval(timer)
+        reject(new Error(`超时等待：${label}`))
+      }
+    }, 250)
+  })
+}
+
+const results = []
+function record(name, ok, detail = '') {
+  results.push({ name, ok, detail })
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`)
+}
+
+ws.on('open', async () => {
+  console.log(`connected ${url} (group=${groupId} user=${userId} bot=${botQq})`)
+  try {
+    // 1) 桥自身命令（无模型）
+    sendGroup('/status')
+    const status = await waitFor((r) => r.includes('QQ 桥状态'), 20_000, '/status 回复')
+    record('活宿主：/status 由桥直接回复', true, status.slice(0, 40))
+
+    // 2) 本地运势（无模型）
+    sendGroup('今日人品')
+    const fortune = await waitFor((r) => /总分|人品|分/.test(r), 20_000, '今日人品回复')
+    record('活宿主：本地运势回复', true, fortune.slice(0, 40))
+
+    // 3) 真 agent 回合（走 agents.create + 工具注册 + session 事件回发）
+    sendGroup('请只回复两个字：收到')
+    const agent = await waitFor((r) => !r.includes('QQ 桥状态') && !/总分|人品/.test(r) && r.length > 0 && r !== fortune, 120_000, 'agent 回复')
+    record('活宿主：agent 回合回复', agent.length > 0, agent.slice(0, 60))
+
+    // 4) 会话已建立（第二条消息复用同一会话，不应报错）
+    const mark = replies.length
+    sendGroup('再说一次：收到')
+    const second = await waitFor((r) => r.includes('收到'), 120_000, 'agent 第二轮回复', mark)
+    record('活宿主：同一会话可连续对话', second.length > 0, second.slice(0, 60))
+
+    // 5) 只读命令的健壮性：假 OneBot 端对所有 action 都只回 {message_id}，
+    //    返回结构与真实实现不同，这里要确认桥不会崩、也不会抛给用户看。
+    const readOnly = ['/help', '/统计', '/荣誉', '/公告', '/群精华', '/mc 127.0.0.1:1']
+    const mark2 = replies.length
+    for (const command of readOnly) sendGroup(command)
+    await new Promise((resolve) => setTimeout(resolve, 8_000))
+    const quiet = replies.slice(mark2)
+    record('活宿主：只读命令不崩溃', !quiet.some((text) => /Agent 处理失败|处理失败|Cannot read/.test(text)), `${quiet.length} 条回复`)
+    record('活宿主：/help 有回复', quiet.some((text) => text.includes('小鲸鱼使用指南')), quiet.find((text) => text.includes('指南'))?.slice(0, 30) ?? '')
+  } catch (error) {
+    record(error.message, false)
+  }
+  const failed = results.filter((r) => !r.ok).length
+  console.log(`\n${results.length - failed} passed, ${failed} failed`)
+  try { ws.close() } catch {}
+  process.exit(failed > 0 ? 1 : 0)
+})
+
+ws.on('message', (data) => {
+  const frame = JSON.parse(String(data))
+  if (!frame.action) return
+  const text = typeof frame.params?.message === 'string'
+    ? frame.params.message
+    : (frame.params?.message ?? []).map((segment) => segment.data?.text ?? '').join('')
+  if (text) {
+    replies.push(text)
+    console.log(`  ← [${frame.action}] ${text.replace(/\n/g, ' | ').slice(0, 100)}`)
+  }
+  ws.send(JSON.stringify({ status: 'ok', retcode: 0, data: { message_id: messageId }, echo: frame.echo }))
+})
+
+ws.on('error', (error) => {
+  console.log(`FAIL 连接失败：${error.message}`)
+  process.exit(1)
+})
+
+setTimeout(() => {
+  console.log('FAIL 总超时（180s）')
+  process.exit(1)
+}, 180_000)

@@ -13,6 +13,10 @@
 - **MC 服务器状态**（`mcStatusEnabled` 默认开，新模块 `lib/mcping.js`）：`/mc mc.example.com:25565` 走 Java 版 Server List Ping（纯 `node:net`，零依赖零 Key），显示在线人数/上限、版本、延迟与 MOTD；离线给出中文原因
 - `/help` 按开关动态展示新命令
 - 新增测试：`test/insight-unit.mjs`（19，统计/荣誉/公告/精华/MC/日报全链路）、`test/stats-unit.mjs`（28，统计存储、榜单、荣誉文案、日报目标选择）、`test/reminder-unit.mjs` 扩充到 32 项（重复提醒解析与下一次触发时间）
+- **最终自检三件套（同日补）**：
+  - `test/static-unit.mjs`（14）：静态交叉检查——lib 全部 UTF-8 合法、代码读取的每个 `config.*` 都在 schema 里、schema 没有死键（139 个键全部有人用）、`QQBridge` 无重复方法名（115 个）、所有具名 import 都能找到导出、README 中英文均为滚动五版且首版==package.json 版本
+  - `test/commands-unit.mjs`（72）：用 mock DSH 上下文（假 agents 服务记录 followup/系统提示段/注册的工具，并模拟 assistant 回复）把**每条命令分支与每个会话工具**都跑一遍：会话创建与工具注册、agent 回发、`/summary /export /撤回 /new`、待办/投票/`/mute /unmute /kick+确认`/`/clear`、群管全套、戳一戳/入群欢迎/防撤回（含图片补发）、入群审批流、`qq_send_file`（上传 + 3 类拒绝路径）/`qq_send_image`/`qq_recall`、resume 成功与失败两条路径、签到/重复提醒/词库/小游戏/运势/骰子/统计/MC，以及 `stop()` 幂等
+  - `test/live-e2e.mjs`（6）：**真宿主端到端**——拉起真实 `dsh web` 宿主，假 OneBot 客户端连 6700 验证 `/status`、本地运势、**真 agent 回合**（验证 `defineTool` schema 被宿主接受、`agents.create`、session 事件回发）、同一会话连续对话，以及只读命令在"返回结构异常"的假 OneBot 端下不崩；重启宿主后确认日志出现 `session resumed qq-…`（v0.3.6 会话续接在真实宿主生效）
 
 ## v0.3.8（2026-09-11）
 

@@ -1,0 +1,134 @@
+/**
+ * Static cross-checks between the shipped files (no bridge instance needed):
+ *   - every `config.<key>` read in lib/ exists in the schemastery schema
+ *   - every schema key is actually used somewhere in lib/ (no dead config)
+ *   - no duplicated class method names (silent override)
+ *   - every named import exists as an export in the target module
+ *   - all sources are valid UTF-8 (no mojibake from a bad editor round-trip)
+ */
+import { readFileSync, readdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { Config } from '../lib/index.js'
+
+let passed = 0
+let failed = 0
+function check(name, ok, extra = '') {
+  if (ok) { passed++; console.log('PASS', name, extra) }
+  else { failed++; console.log('FAIL', name, extra) }
+}
+
+const libDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'lib')
+const files = readdirSync(libDir).filter((name) => name.endsWith('.js')).sort()
+
+// ---- UTF-8 完整性（防止编辑器/脚本把文件写坏成乱码）----
+const badEncoding = []
+for (const name of files) {
+  const buffer = readFileSync(join(libDir, name))
+  const text = buffer.toString('utf8')
+  if (text.includes('\uFFFD')) badEncoding.push(name)
+}
+check('lib/ 全部为合法 UTF-8（无乱码替换字符）', badEncoding.length === 0, badEncoding.join(','))
+
+// ---- 配置键：代码里读的必须在 schema 里 ----
+const schemaKeys = new Set(Object.keys(Config({})))
+const skipKeys = new Set(['then', 'constructor', 'name', 'length', 'toString', 'valueOf', 'hasOwnProperty'])
+const readKeys = new Map()   // key -> [file:line]
+for (const name of files) {
+  const lines = readFileSync(join(libDir, name), 'utf8').split(/\r?\n/)
+  lines.forEach((line, index) => {
+    for (const match of line.matchAll(/(?:this\.)?config\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
+      const key = match[1]
+      if (skipKeys.has(key)) continue
+      if (!readKeys.has(key)) readKeys.set(key, [])
+      readKeys.get(key).push(`${name}:${index + 1}`)
+    }
+  })
+}
+const unknownKeys = [...readKeys.keys()].filter((key) => !schemaKeys.has(key))
+check('代码读取的配置键都存在', unknownKeys.length === 0, unknownKeys.map((key) => `${key}(${readKeys.get(key)[0]})`).join(', '))
+
+// 反向：schema 里的键必须有人在用（避免“配了不生效”的死开关）
+const corpus = files.map((name) => readFileSync(join(libDir, name), 'utf8')).join('\n')
+const unusedKeys = [...schemaKeys].filter((key) => {
+  const pattern = new RegExp(`config\\.${key}\\b`)
+  return !pattern.test(corpus)
+})
+check('schema 中没有完全没人用的死配置键', unusedKeys.length === 0, unusedKeys.join(', '))
+check('配置键数量合理（>120）', schemaKeys.size > 120, `keys=${schemaKeys.size}`)
+
+// ---- 类方法重复（后者静默覆盖前者）----
+const bridgeSource = readFileSync(join(libDir, 'bridge.js'), 'utf8')
+const seenMethods = new Map()
+const duplicates = []
+bridgeSource.split(/\r?\n/).forEach((line, index) => {
+  const match = /^ {2}(?:async\s+)?#?([A-Za-z_][A-Za-z0-9_]*)\(/.exec(line)
+  if (!match) return
+  const name = match[1]
+  if (seenMethods.has(name)) duplicates.push(`${name}@${seenMethods.get(name)},${index + 1}`)
+  else seenMethods.set(name, index + 1)
+})
+check('QQBridge 无重复方法名', duplicates.length === 0, duplicates.join(' '))
+check('QQBridge 方法数量合理（>100）', seenMethods.size > 100, `methods=${seenMethods.size}`)
+
+// ---- 具名 import 必须真的被导出 ----
+const exportCache = new Map()
+function exportsOf(file) {
+  if (exportCache.has(file)) return exportCache.get(file)
+  let text = ''
+  try { text = readFileSync(file, 'utf8') } catch { /* 缺失文件下面单独报 */ }
+  const names = new Set()
+  for (const match of text.matchAll(/^export\s+(?:async\s+)?(?:function|class|const|let|var)\s+([A-Za-z_$][\w$]*)/gm)) names.add(match[1])
+  for (const match of text.matchAll(/^export\s*\{([^}]*)\}/gm)) {
+    for (const part of match[1].split(',')) {
+      const piece = part.trim()
+      if (!piece) continue
+      const alias = / as ([\w$]+)$/.exec(piece)
+      names.add(alias ? alias[1] : piece.split(/\s+/)[0])
+    }
+  }
+  if (/^export\s+default\b/m.test(text)) names.add('default')
+  exportCache.set(file, names)
+  return names
+}
+
+const missingExports = []
+for (const name of files) {
+  const lines = readFileSync(join(libDir, name), 'utf8').split(/\r?\n/)
+  for (const line of lines) {
+    const match = /^import\s*\{([^}]+)\}\s*from\s*'(\.\/[^']+)'/.exec(line.trim())
+    if (!match) continue
+    const target = join(libDir, match[2].replace(/^\.\//, ''))
+    const available = exportsOf(target)
+    for (const part of match[1].split(',')) {
+      const piece = part.trim()
+      if (!piece) continue
+      const imported = /^([\w$]+)\s+as\s+/.exec(piece)?.[1] ?? piece
+      if (!available.has(imported)) missingExports.push(`${name} 引用了 ${match[2]} 的 ${imported}`)
+    }
+  }
+}
+check('所有具名 import 都能在目标模块找到导出', missingExports.length === 0, missingExports.join('; '))
+
+// ---- package.json 与入口一致 ----
+const pkg = JSON.parse(readFileSync(join(libDir, '..', 'package.json'), 'utf8'))
+check('package.json 版本与 CHANGELOG 顶部一致', (() => {
+  const changelog = readFileSync(join(libDir, '..', 'CHANGELOG.md'), 'utf8')
+  const top = /^## v([0-9.]+)/m.exec(changelog.replace(/^#[^\n]*\n+/, ''))
+  return top !== null && top[1] === pkg.version
+})(), `package=${pkg.version}`)
+check('package.json main 指向 lib/index.js', pkg.main === 'lib/index.js')
+check('入口声明了 bundle patch', pkg.dsh?.bundle?.patch === './cordis.patch.yml')
+
+// ---- README 惯例：更新日志只展示最近五版 ----
+const readme = readFileSync(join(libDir, '..', 'README.md'), 'utf8')
+const versionBullets = [...readme.matchAll(/^- \*\*v([0-9.]+)\*\* —/gm)].map((match) => match[1])
+check('README 更新日志恰好五版（滚动）', versionBullets.length === 5, versionBullets.join(','))
+check('README 首版为当前版本', versionBullets[0] === pkg.version, `${versionBullets[0]} vs ${pkg.version}`)
+const readmeEn = readFileSync(join(libDir, '..', 'README.en.md'), 'utf8')
+const versionBulletsEn = [...readmeEn.matchAll(/^- \*\*v([0-9.]+)\*\* —/gm)].map((match) => match[1])
+check('README.en 更新日志恰好五版', versionBulletsEn.length === 5, versionBulletsEn.join(','))
+check('英文 README 首版同版本', versionBulletsEn[0] === pkg.version, versionBulletsEn[0])
+
+console.log(`\n${passed} passed, ${failed} failed`)
+process.exit(failed > 0 ? 1 : 0)
