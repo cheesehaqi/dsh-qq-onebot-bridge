@@ -16,6 +16,7 @@ A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ m
 - **Avoid peak hours**: no replies at all on weekdays 9:00-12:00 and 14:00-18:00 (`quietHoursEnabled` is off by default, windows editable, weekends exempt; already-scheduled reminders/vote publishing still fire)
 - **Interactions**: `/help` command menu; poke cute-replies (`pokeEnabled`); voice reading (quote text saying "读一下" or `/读 <text>` → TTS read-aloud); daily check-in (`checkinEnabled` off by default); new-member auto welcome (`welcomeEnabled` off by default)
 - **Image generation**: `/画 <prompt>` generates an image and sends it back (`imageGenEnabled` off by default, groups require @; `imageGenProvider: openai` for any OpenAI-compatible `/images/generations`, or `local` for a local Stable Diffusion WebUI — extensible, one branch per backend)
+- **Zero-cost interaction pack**: keyword wordbook (`/kw add`, instant replies with zero tokens), 今日人品/运势/抽签/塔罗 (deterministic per QQ id + day), dice and random picks, a points economy (earn by chatting/check-in, `/转账` to transfer) and mini-games (idiom chain with a 373-idiom dictionary, guess-the-number) — all computed locally, no model call
 - **Utility tools**: `/health` runtime diagnostics, private file auto-save to the local machine, `/export` chat history to markdown
 - **Speech-to-text (STT)**: in groups, @-mention the bot while quoting (replying to) a voice message → transcribe and reply with the text; private voice messages are transcribed directly. Works with Zhipu GLM-ASR-2512 or any OpenAI-compatible `/audio/transcriptions` endpoint (e.g. SiliconFlow)
 - **Private image viewing**: images/animated stickers sent in private chats are downloaded to `cwd/qq-images/` and injected into the session so the agent can view them with `describe_image` and respond (`privateImageView` switch)
@@ -82,6 +83,18 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `actionRatePerMinute` | `20` | Write-action gate: max OneBot write actions per minute across all chats |
 | `actionRatePerDay` | `500` | Write-action gate: max OneBot write actions per day across all chats |
 | `actionAuditEnabled` | `true` | Append every write action and denial to `cwd/qq-actions.log` |
+| `keywordEnabled` | `false` | Keyword wordbook (default OFF): matching messages are answered from a local JSON file without calling the model or requiring an @-mention |
+| `keywordFile` | `''` | Wordbook path (empty = `cwd/qq-keywords.json`); exact/contains/regex triggers, random reply pools, images, scopes and cooldowns |
+| `fortuneEnabled` | `true` | Local fortune features: 今日人品/运势, 抽签, 塔罗 (deterministic per QQ id + day) |
+| `diceEnabled` | `true` | Dice (`.r 3d6`) and random picks (`/抽一个 A B C`) |
+| `pointsEnabled` | `false` | Points economy (default OFF): `/积分`, `/排行榜`, `/转账 @user amount` |
+| `pointsPerMessage` | `1` | Points earned per chat message (0 = chatting earns nothing) |
+| `pointsDailyCap` | `20` | Max points a member can earn from chatting per day |
+| `pointsCheckinBonus` | `5` | Extra points for the daily check-in |
+| `gameEnabled` | `false` | Chat mini-games (default OFF): idiom chain and guess-the-number |
+| `idiomChainTimeoutSeconds` | `120` | Idle timeout of an idiom-chain round |
+| `guessNumberMax` | `100` | Upper bound of guess-the-number |
+| `guessNumberMaxTries` | `10` | Allowed guesses in guess-the-number |
 | `sttEnabled` | `false` | Speech-to-text master switch |
 | `sttBaseUrl` | `https://open.bigmodel.cn/api/paas/v4` | STT endpoint (OpenAI-compatible `/audio/transcriptions`) |
 | `sttModel` | `glm-asr-2512` | STT model (Zhipu `glm-asr-2512` / SiliconFlow `FunAudioLLM/SenseVoiceSmall`) |
@@ -233,11 +246,11 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
+- **v0.3.7** — zero-cost interaction pack: keyword wordbook (off by default), local fortune/lot/tarot, dice and random picks, points economy (off by default), idiom chain (373 idioms) and guess-the-number (off by default); fixes the `stop()` disposer and the idiom-chain rule
 - **v0.3.6** — agent-initiated actions and session resume: `qq_send_image/qq_send_file/qq_send_voice/qq_recall` tools, resuming the full session after a host restart, merged-forward cards for long replies, a shared write-action gate (rate limits + audit log), and `/撤回`
 - **v0.3.5** — image generation (off by default): `/画 <prompt>` generates an image; `imageGenProvider` supports any OpenAI-compatible service or a local SD WebUI — two extensible backends
 - **v0.3.4** — first-tier interactions: `/help` command menu, poke cute-replies, voice reading (quoted text → TTS read-aloud), daily check-in (off by default), new-member welcome (off by default)
 - **v0.3.3** — local TTS: `ttsProvider: local` plugs into GPT-SoVITS voice cloning (zero API cost, clones the voice from a reference clip, wav auto-converted to mp3)
-- **v0.3.2** — avoid-peak-hours silence (off by default): weekdays 9:00-12:00 / 14:00-18:00 the bot replies to nothing, weekends exempt, windows configurable
 - **v0.3.1** — online/offline status push (off by default, supports PushPlus/custom webhook) + GIF frame extraction for image understanding (on by default, uses ffmpeg automatically)
 
 Full history in [CHANGELOG.md](CHANGELOG.md).

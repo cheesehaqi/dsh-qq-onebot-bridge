@@ -1,5 +1,22 @@
 # 更新日志 / Changelog
 
+## v0.3.7（2026-09-11）
+
+**零成本互动包（纯本地计算，不消耗模型）**
+
+- **关键词问答库**（`keywordEnabled` **默认关闭**，新模块 `lib/keywords.js`）：本地 JSON 词库 `cwd/qq-keywords.json` 命中即回，**不走模型、秒回、零 token**；支持 `exact/contains/regex` 三种匹配（优先级 exact > contains > regex，同级别长词优先）、随机多答、附带图片（http 链接自动落盘 / 本地路径）、`scope: all|group|private` 作用域、每条独立冷却、`/` 开头的命令不参与匹配；文件被手工编辑后按 mtime 自动重载；管理员用 `/kw add 触发词 回复内容`、`/kw del 触发词`、`/kw list` 维护（写入会话级词条）
+- **今日人品 / 运势 / 抽签 / 塔罗**（`fortuneEnabled` 默认开）：按「QQ 号 + 日期」哈希的**确定性**结果（同一天同一人永远一致），11 档运势评语 + 12 支签 + 22 张大阿卡纳正逆位解读，全部本地（新模块 `lib/fortune.js`）
+- **骰子与随机选择**（`diceEnabled` 默认开）：`.r 3d6`、`掷骰 2d6+1`、`d100`、`/抽一个 火锅 烧烤 面条`、`/随机 A、B、C`（新模块 `lib/dice.js`，含 100 骰/1000 面上限保护）
+- **积分经济**（`pointsEnabled` **默认关闭**，新模块 `lib/points.js`）：发言得积分（`pointsPerMessage`，每日封顶 `pointsDailyCap`）、签到奖励（`pointsCheckinBonus`）、`/积分` 查余额、`/排行榜` 看排行、`/转账 @某人 数量` 转账（余额不足/非法金额/转给自己都有明确中文报错）；每会话一个原子写 JSON
+- **群内小游戏**（`gameEnabled` **默认关闭**，新模块 `lib/games.js`）：
+  - **成语接龙**：内置 **373 条真实四字成语**词库，标准接龙规则（接上一句末字）、同音不同字不算、已用过的不能再用、超时（`idiomChainTimeoutSeconds`）自动收局；进行中的一句直接吃下群消息，**免 @** 让群友顺畅接龙
+  - **猜数字**：1-`guessNumberMax` 随机答案，`guessNumberMaxTries` 次机会，大小提示与次数统计
+- **帮助菜单**：`/help` 按开关动态列出新命令；词库管理只对管理员显示
+- **修复两个既有缺陷**：
+  - `QQBridge#stop()` 把 EventEmitter 当 disposer 存进 `disposers`，卸载插件时抛 `dispose is not a function`（现在通过 `#onServer()` 包装成真正的退订函数）
+  - `IdiomChain` 的判定原本要求「首字 = 上一句**首字**」（非标准接龙），已改为标准规则「首字 = 上一句**末字**」
+- 新增测试：`test/features-unit.mjs`（23，用 mock OneBot 服务器驱动真实 `QQBridge` 验证词库/运势/骰子/积分/接龙/猜数字/私聊关键词/`/撤回` 全链路），`test/games-unit.mjs` 按标准接龙规则重写关键用例
+
 ## v0.3.6（2026-09-11）
 
 **agent 主动能力 + 会话续接 + 写操作闸门**
