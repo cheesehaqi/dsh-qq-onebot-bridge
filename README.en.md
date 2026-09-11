@@ -16,6 +16,8 @@ A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ m
 - **Avoid peak hours**: no replies at all on weekdays 9:00-12:00 and 14:00-18:00 (`quietHoursEnabled` is off by default, windows editable, weekends exempt; already-scheduled reminders/vote publishing still fire)
 - **Interactions**: `/help` command menu; poke cute-replies (`pokeEnabled`); voice reading (quote text saying "读一下" or `/读 <text>` → TTS read-aloud); daily check-in (`checkinEnabled` off by default); new-member auto welcome (`welcomeEnabled` off by default)
 - **Image generation**: `/画 <prompt>` generates an image and sends it back (`imageGenEnabled` off by default, groups require @; `imageGenProvider: openai` for any OpenAI-compatible `/images/generations`, or `local` for a local Stable Diffusion WebUI — extensible, one branch per backend)
+- **Anti-recall and group rules**: `antiRecallEnabled` reposts withdrawn messages (images included); `filterEnabled` sensitive-word filtering (warn / recall / mute, hot-reloaded word list); `floodEnabled` anti-flood warnings and escalation; group/friend join verification (`verifyEnabled` with admin `/同意 <id>` approval, passphrase or correct-answer auto-approval)
+- **Group management suite**: `/mute` `/unmute` `/kick` `/clear` plus `/公告` `/精华` `/名片` `/头衔` `/全员禁言` — all funnelled through the shared write-action gate
 - **Zero-cost interaction pack**: keyword wordbook (`/kw add`, instant replies with zero tokens), 今日人品/运势/抽签/塔罗 (deterministic per QQ id + day), dice and random picks, a points economy (earn by chatting/check-in, `/转账` to transfer) and mini-games (idiom chain with a 373-idiom dictionary, guess-the-number) — all computed locally, no model call
 - **Utility tools**: `/health` runtime diagnostics, private file auto-save to the local machine, `/export` chat history to markdown
 - **Speech-to-text (STT)**: in groups, @-mention the bot while quoting (replying to) a voice message → transcribe and reply with the text; private voice messages are transcribed directly. Works with Zhipu GLM-ASR-2512 or any OpenAI-compatible `/audio/transcriptions` endpoint (e.g. SiliconFlow)
@@ -95,6 +97,26 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `idiomChainTimeoutSeconds` | `120` | Idle timeout of an idiom-chain round |
 | `guessNumberMax` | `100` | Upper bound of guess-the-number |
 | `guessNumberMaxTries` | `10` | Allowed guesses in guess-the-number |
+| `antiRecallEnabled` | `false` | Anti-recall (default OFF): cached messages are reposted when withdrawn |
+| `antiRecallInGroup` | `true` | Post into the group (`false` = private message to the first admin) |
+| `antiRecallImages` | `true` | Re-send withdrawn images (up to 3) |
+| `antiRecallCacheSize` | `50` | Messages cached per chat |
+| `antiRecallMaxAgeMinutes` | `120` | How long a cached message stays recoverable |
+| `antiRecallCooldownSeconds` | `5` | Min seconds between two anti-recall posts in one chat |
+| `filterEnabled` | `false` | Sensitive-word filter (default OFF) |
+| `filterWordsFile` | `''` | Word list path (empty = `cwd/qq-badwords.txt`; `#` comments, `re:` regex, hot reload) |
+| `filterAction` | `warn` | Reaction: `warn` / `recall` / `mute` |
+| `filterMuteSeconds` | `300` | Mute duration for `mute` and flood escalation |
+| `filterWhitelist` | `[]` | Always-allowed words/patterns |
+| `floodEnabled` | `false` | Anti-flood (default OFF) |
+| `floodWindowSeconds` | `10` | Flood detection window |
+| `floodMaxMessages` | `8` | Messages allowed per window |
+| `floodMuteSeconds` | `300` | Mute duration when the flood guard escalates |
+| `floodStrikeLimit` | `3` | Warnings before a flood mute |
+| `verifyEnabled` | `false` | Join/friend verification (default OFF): requests are queued and pushed to admins |
+| `verifyKeyword` | `''` | Passphrase that auto-approves a request (empty = always human approval) |
+| `verifyTimeoutSeconds` | `300` | Request expiry before it leaves the queue and admins are reminded |
+| `verifyMaxPending` | `20` | Max queued requests |
 | `sttEnabled` | `false` | Speech-to-text master switch |
 | `sttBaseUrl` | `https://open.bigmodel.cn/api/paas/v4` | STT endpoint (OpenAI-compatible `/audio/transcriptions`) |
 | `sttModel` | `glm-asr-2512` | STT model (Zhipu `glm-asr-2512` / SiliconFlow `FunAudioLLM/SenseVoiceSmall`) |
@@ -246,6 +268,7 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
+- **v0.3.8** — anti-recall, sensitive-word and flood protection, group/friend join verification (admin `/同意 <id>`), a wider group-admin API (`/公告` `/精华` `/名片` `/头衔` `/全员禁言`) and all admin writes moved behind the shared gate
 - **v0.3.7** — zero-cost interaction pack: keyword wordbook (off by default), local fortune/lot/tarot, dice and random picks, points economy (off by default), idiom chain (373 idioms) and guess-the-number (off by default); fixes the `stop()` disposer and the idiom-chain rule
 - **v0.3.6** — agent-initiated actions and session resume: `qq_send_image/qq_send_file/qq_send_voice/qq_recall` tools, resuming the full session after a host restart, merged-forward cards for long replies, a shared write-action gate (rate limits + audit log), and `/撤回`
 - **v0.3.5** — image generation (off by default): `/画 <prompt>` generates an image; `imageGenProvider` supports any OpenAI-compatible service or a local SD WebUI — two extensible backends

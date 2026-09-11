@@ -1,5 +1,23 @@
 # 更新日志 / Changelog
 
+## v0.3.8（2026-09-11）
+
+**防撤回 + 入群验证 + 敏感词/刷屏 + 群管 API 补齐**
+
+- **防撤回**（`antiRecallEnabled` **默认关闭**，新模块 `lib/recall.js`）：每条入站消息缓存一份（含图片 URL），收到 `group_recall` / `friend_recall` notice 时把内容补发出来
+  - `antiRecallInGroup`（默认 true）= 补发到群里；设 false 则私聊推送给第一个管理员
+  - `antiRecallImages` 补发被撤回的图片（最多 3 张）、`antiRecallCacheSize` 每会话缓存条数、`antiRecallMaxAgeMinutes` 可恢复时长、`antiRecallCooldownSeconds` 防刷屏
+  - 机器人自己撤回的消息不补发；未缓存的消息静默忽略
+- **入群/加好友验证**（`verifyEnabled` **默认关闭**，新模块 `lib/verify.js`）：请求进入待审队列并**私聊推送管理员**（含验证题与序号），默认不自动放行
+  - 管理员命令：`/待审` 列表、`/同意 <序号>`、`/拒绝 <序号>`、`/同意 all`
+  - `verifyKeyword` 口令命中时自动放行；申请人若在验证期私聊答对算术题也会自动放行（`#allowed` 对该申请者临时放行，无需加入白名单）
+  - `verifyTimeoutSeconds` 超时后自动出队并提醒管理员（60 秒一次的后台清扫，timer 已 unref）
+- **敏感词过滤**（`filterEnabled` **默认关闭**，新模块 `lib/filter.js`）：词表文件 `cwd/qq-badwords.txt`（`#` 注释、`re:` 正则、非法正则安全跳过、按 mtime 热重载），`filterAction: warn|recall|mute` 三种处置（撤回走 `delete_msg`、禁言走 `set_group_ban`），`filterWhitelist` 白名单优先，管理员豁免
+- **刷屏防护**（`floodEnabled` **默认关闭**）：滑动窗口（`floodWindowSeconds`/`floodMaxMessages`）先警告、累计 `floodStrikeLimit` 次后禁言 `floodMuteSeconds`
+- **群管 API 补齐**（管理员，`adminEnabled`）：`/公告 <内容>`（`_send_group_notice`）、`/精华` 与 `/取消精华`（引用消息，`set_essence_msg`/`delete_essence_msg`）、`/名片 @某人 名字`（`set_group_card`）、`/头衔 @某人 头衔`（`set_group_special_title`）、`/全员禁言` 与 `/解除全员禁言`（`set_group_whole_ban`）
+- **`/mute` `/unmute` 等既有群管命令也纳入写操作闸门**（限频 + 审计），不再直接调用 OneBot
+- 新增测试：`test/guards-unit.mjs`（12，防撤回/敏感词/刷屏全链路）、`test/verify-flow-unit.mjs`（15，请求队列/口令/答题/好友请求/队列上限）、`test/verify-unit.mjs`（45，队列与命令解析）、`test/stats-unit.mjs`（23，群活跃统计与荣誉文案，为 v0.3.9 打底）；`test/reminders.js` 增加重复提醒解析
+
 ## v0.3.7（2026-09-11）
 
 **零成本互动包（纯本地计算，不消耗模型）**
