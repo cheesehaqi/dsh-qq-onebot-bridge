@@ -12,6 +12,7 @@ import {
   portOf, publicConfig, qrStatus, run, startDetached, summarizePorts, tailLines,
 } from '../control/lib/supervisor.mjs'
 import { createControlServer, createToken, originAllowed, readUi } from '../control/lib/server.mjs'
+import { BROWSER_CANDIDATES, buildOpenCommand, openPanel, pickBrowser } from '../control/lib/open.mjs'
 
 let passed = 0
 let failed = 0
@@ -258,6 +259,25 @@ const killed = await killTree(999999, { exec: (c, a, o, cb) => (typeof o === 'fu
 check('killTree 失败时安全返回', killed.ok === false && killed.stderr === 'no such pid')
 check('inspect 在假 exec 下可用', (await inspect({ ports: DEFAULT_PORTS, exec: okExec })).ports.length === 5)
 check('readUi 缺失文件返回提示', readUi(join(dir, 'no-ui.html')).includes('缺失'))
+
+// ------------------------------------------------------------ app window -----
+const panelUrl = 'http://127.0.0.1:8799/?token=abc'
+check('候选浏览器列表非空且含 msedge', BROWSER_CANDIDATES.length >= 2 && BROWSER_CANDIDATES.some((p) => p.toLowerCase().includes('msedge')), BROWSER_CANDIDATES.join(' | '))
+check('pickBrowser 命中第一个存在的', pickBrowser({ exists: (p) => p.toLowerCase().includes('chrome') }) === BROWSER_CANDIDATES.find((p) => p.toLowerCase().includes('chrome')))
+check('pickBrowser 找不到返回空串', pickBrowser({ exists: () => false }) === '')
+const appCmd = buildOpenCommand(panelUrl, { browser: 'C:/Edge/msedge.exe' })
+check('应用窗口模式用 --app 且无地址栏', appCmd.mode === 'app' && appCmd.args[0] === `--app=${panelUrl}` && appCmd.args[1].startsWith('--window-size='), JSON.stringify(appCmd))
+const defaultCmd = buildOpenCommand(panelUrl, { browser: '' })
+check('无浏览器时回退系统默认浏览器', defaultCmd.mode === 'default' && defaultCmd.command === 'cmd.exe' && defaultCmd.args.includes(panelUrl))
+check('空 URL 不产生命令', buildOpenCommand('').mode === 'none')
+let opened = null
+const openResult = openPanel(panelUrl, { exists: (p) => p.toLowerCase().includes('msedge'), spawnImpl: (command, args) => { opened = { command, args }; return { unref() {} } } })
+check('openPanel 用应用窗口打开', openResult.ok === true && openResult.mode === 'app' && opened.args[0].startsWith('--app='), JSON.stringify(opened))
+let fallbackOpened = null
+const openFallback = openPanel(panelUrl, { exists: () => false, spawnImpl: (command, args) => { fallbackOpened = { command, args }; return { unref() {} } } })
+check('openPanel 无浏览器时回退系统默认浏览器', openFallback.ok === true && openFallback.mode === 'default' && fallbackOpened.command === 'cmd.exe' && fallbackOpened.args.includes(panelUrl), JSON.stringify(fallbackOpened))
+const openThrows = openPanel(panelUrl, { browser: 'C:/Edge/msedge.exe', spawnImpl: () => { throw new Error('boom') }, logger: { warn() {} } })
+check('openPanel 启动失败安全返回', openThrows.ok === false && openThrows.mode === 'app')
 
 rmSync(dir, { recursive: true, force: true })
 console.log(`\n${passed} passed, ${failed} failed`)

@@ -186,7 +186,8 @@ function render(status) {
   napcatStop.disabled = !managed;
   napcatStop.title = managed ? '结束 NapCat 加载器（taskkill /T 会连带其 QQ 子进程）' : '未检测到 NapCat，按钮已禁用以免误杀个人 QQ';
   const hostLink = document.getElementById('hostLink');
-  if (status.hostUrl) { hostLink.href = status.hostUrl; hostLink.style.display = ''; }
+  // 只有宿主确实在监听时才给出 3080 链接（否则会指向上一轮的旧 token）。
+  if (status.hostUrl && host?.listening) { hostLink.href = status.hostUrl; hostLink.style.display = ''; }
   else hostLink.style.display = 'none';
   document.getElementById('napcatLink').href = 'http://127.0.0.1:' + ((status.config?.ports?.napcat) || 6099);
   document.getElementById('stamp').textContent = '刷新于 ' + new Date(status.scannedAt || Date.now()).toLocaleTimeString('zh-CN', { hour12: false });

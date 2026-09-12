@@ -9,10 +9,10 @@
  */
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawn } from 'node:child_process'
 import { createToken, createControlServer, readUi } from '../lib/server.mjs'
 import { loadControlConfig, saveControlConfig, PORT_LABELS, configWarnings } from '../lib/config.mjs'
 import { createSupervisor } from '../lib/supervisor.mjs'
+import { openPanel } from '../lib/open.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..')
@@ -77,7 +77,10 @@ server.listen(config.ports.control, '127.0.0.1', () => {
   }
   console.log('   按 Ctrl+C 退出（不影响已启动的宿主）')
   if (wantsOpen) {
-    try { spawn('cmd.exe', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref() } catch { /* 忽略打开失败 */ }
+    const opened = openPanel(url)
+    console.log(opened.ok
+      ? `   已用${opened.mode === 'app' ? '应用窗口' : '默认浏览器'}打开控制面板`
+      : '   未能自动打开窗口，请手动访问上面的地址')
   }
 })
 
