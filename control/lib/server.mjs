@@ -127,6 +127,11 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
         json(response, 200, { ok: true, events, summary: api.summarize ? api.summarize(events) : undefined })
         return
       }
+      if (request.method === 'GET' && path === '/api/inbox') {
+        const limit = Number(url.searchParams.get('limit')) || 50
+        json(response, 200, { ok: true, ...api.inboxList({ limit }) })
+        return
+      }
       if (request.method === 'GET' && path === '/api/runtime') {
         json(response, 200, { ok: true, runtime: api.runtime() })
         return
@@ -194,6 +199,30 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
           '/api/tts/stop': () => api.stopTts(),
           '/api/all/stop': () => api.stopAll(),
           '/api/port/free': () => api.freePort(String(body.name ?? '')),
+          // 离线回放：在沙箱里跑真实管线，dry-run 拦截一切出站
+          '/api/replay': () => {
+            if (typeof api.replay !== 'function') return { ok: false, reason: '当前控制台不支持回放' }
+            const indices = Array.isArray(body.indices) ? body.indices.slice(0, 20) : null
+            const entries = Array.isArray(body.entries) ? body.entries.slice(0, 20) : null
+            const overrides = body.overrides && typeof body.overrides === 'object' && !Array.isArray(body.overrides) ? body.overrides : {}
+            return api.replay({
+              indices,
+              entries,
+              limit: Number(body.limit) || 5,
+              replyText: typeof body.replyText === 'string' ? body.replyText.slice(0, 500) : '',
+              overrides,
+              budgetMs: Math.min(60000, Math.max(1000, Number(body.budgetMs) || 20000)),
+            })
+          },
+          // 事件注入：写一行到注入队列，桥按间隔轮询后走真实管线（默认 dry-run）
+          '/api/inject': () => {
+            if (typeof api.inject !== 'function') return { ok: false, reason: '当前控制台不支持注入' }
+            return api.inject(body.spec && typeof body.spec === 'object' ? body.spec : body)
+          },
+          '/api/queue/clear': () => {
+            if (typeof api.clearQueue !== 'function') return { ok: false, reason: '当前控制台不支持清空队列' }
+            return api.clearQueue()
+          },
           '/api/config': () => {
             if (typeof saveConfig !== 'function') return { ok: false, reason: '配置保存不可用' }
             const patch = {}

@@ -152,6 +152,37 @@
   </section>
 
   <section class="card" style="grid-column:1/-1">
+    <h2>录制 · 回放 · 注入 <span class="meta" id="inboxMeta">（桥收到的每条消息都被录下来，可离线重跑）</span></h2>
+    <div class="row">
+      <button onclick="loadInbox(true)">刷新录制列表</button>
+      <button onclick="replayRecent(5)">回放最近 5 条</button>
+      <label class="meta">回放条数 <input type="number" id="replayLimit" value="5" min="1" max="20" style="width:64px" /></label>
+      <span class="meta" id="replayState"></span>
+    </div>
+    <div class="stream" style="max-height:260px">
+      <table><thead><tr><th style="width:52px">序号</th><th style="width:132px">时间</th><th style="width:60px">类型</th><th>内容</th><th style="width:150px">操作</th></tr></thead>
+      <tbody id="inbox"><tr><td colspan="5" class="meta">（尚未加载）</td></tr></tbody></table>
+    </div>
+    <h2 style="margin-top:12px">回放结果 <span class="meta">（沙箱内跑真实管线，dry-run 拦截所有出站；模型回复为模拟文本）</span></h2>
+    <pre id="replayOut">（点上面任意一行的「回放」）</pre>
+    <h2 style="margin-top:12px">事件注入 <span class="meta">（写一行到注入队列，桥轮询后走真实管线；默认 dry-run，不会真发 QQ）</span></h2>
+    <div class="row">
+      <select id="injKind">
+        <option value="message">消息 message</option>
+        <option value="notice">通知 notice</option>
+        <option value="request">请求 request</option>
+      </select>
+      <input type="text" id="injGroup" placeholder="群号（私聊留空）" style="max-width:150px" />
+      <input type="text" id="injUser" placeholder="发消息的 QQ 号（必填）" style="max-width:180px" />
+      <input type="text" id="injText" placeholder="消息文本" style="max-width:280px" />
+      <label class="meta"><input type="checkbox" id="injAtMe" checked /> 群里 @ 机器人</label>
+      <button onclick="doInject()">注入</button>
+      <button class="danger" onclick="clearQueue()">清空注入队列（进回收站）</button>
+      <span class="meta" id="injState"></span>
+    </div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
     <h2>日志文件</h2>
     <div class="row">
       <button onclick="setLog('hostOut')">宿主 stdout</button>
@@ -181,6 +212,7 @@ const streamMode = new URLSearchParams(location.search).get('stream') === '0' ? 
 let currentLog = 'hostOut';
 let streamEvents = [];
 let diagReport = null;
+let lastRuntime = null;
 const pageErrors = [];
 
 // 面板自己也要可调试：任何脚本错误 / 未处理的 Promise 失败都直接显示出来。
@@ -380,7 +412,9 @@ async function refresh() {
   try {
     const status = await api('/api/status');
     render(status);
+    lastRuntime = status.runtime ?? null;
     renderRuntime(status.runtime ?? null);
+    renderInboxMeta();
     setConnOk(true);
   } catch (e) {
     setConnOk(false, e.message);
@@ -416,16 +450,109 @@ async function loadHistory() {
   renderStream();
   updateErrPill();
 }
+
+// ---------------------------------------------------- 录制 / 回放 / 注入 ----
+let inboxLoadedAt = 0;
+let lastInbox = null;
+function renderInboxMeta() {
+  const el = document.getElementById('inboxMeta');
+  if (!lastInbox) { el.textContent = '（正在读取录制列表…）'; return; }
+  const injection = lastRuntime?.injection;
+  const queueText = injection
+    ? `注入队列 ${lastInbox.queued} 行 · 本次运行已消费 ${injection.consumed ?? 0} 条 · dry-run=${injection.dryRun ? '开' : '关'}`
+    : `注入队列 ${lastInbox.queued} 行`;
+  el.textContent = `（录制 ${lastInbox.recorded} 条 · ${queueText} · 文件 ${lastInbox.file || '未配置'}${lastInbox.exists ? '' : '（还没生成）'}）`;
+}
+async function loadInbox(force = false) {
+  if (!force && (document.hidden || Date.now() - inboxLoadedAt < 8000)) return;
+  try {
+    const result = await api('/api/inbox?limit=50');
+    const body = document.getElementById('inbox');
+    const entries = result.entries || [];
+    lastInbox = result;
+    renderInboxMeta();
+    if (entries.length === 0) {
+      body.innerHTML = '<tr><td colspan="5" class="meta">还没有录制记录：需要插件配置 recordInbound=true（默认开）且桥至少收到过一条消息。</td></tr>';
+      inboxLoadedAt = Date.now();
+      return;
+    }
+    body.innerHTML = entries.slice().reverse().map((item) => `<tr>
+      <td class="meta">${item.index}</td>
+      <td class="meta">${item.at}</td>
+      <td>${item.kind}</td>
+      <td title="${escapeAttr(JSON.stringify(item.frame || {}))}">${escapeHtml(item.text)}</td>
+      <td><button onclick="replayOne(${item.index})">回放这条</button></td>
+    </tr>`).join('');
+    inboxLoadedAt = Date.now();
+  } catch (error) {
+    document.getElementById('inboxMeta').textContent = `（读取录制失败：${error.message}）`;
+  }
+}
+function escapeHtml(text) { return String(text ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function escapeAttr(text) { return escapeHtml(text).replace(/"/g, '&quot;'); }
+function replayOne(index) { replayEntries({ indices: [index] }); }
+function replayRecent(limit) {
+  const count = Number(document.getElementById('replayLimit')?.value) || limit || 5;
+  replayEntries({ limit: count });
+}
+async function replayEntries(payload) {
+  const out = document.getElementById('replayOut');
+  const state = document.getElementById('replayState');
+  state.textContent = '回放中…（沙箱启动 + 真实管线）';
+  try {
+    const result = await api('/api/replay', { method: 'POST', body: JSON.stringify(payload) });
+    if (result.ok === false && !result.text) {
+      out.textContent = '⚠️ ' + (result.reason || '回放失败');
+      state.textContent = '';
+      return;
+    }
+    out.textContent = result.text || '(空报告)';
+    const t = result.totals || {};
+    state.textContent = `${t.entries || 0} 条：${t.replied || 0} 会回复 / ${t.silent || 0} 静默 / ${t.error || 0} 出错`;
+  } catch (error) {
+    out.textContent = '回放请求失败：' + error.message;
+    state.textContent = '';
+  }
+}
+async function doInject() {
+  const kind = document.getElementById('injKind').value;
+  const rawUser = document.getElementById('injUser').value.trim();
+  if (!/^\d{4,12}$/.test(rawUser)) {
+    document.getElementById('injState').textContent = '⚠️ 请填写发消息的 QQ 号（4-12 位数字）';
+    return;
+  }
+  const spec = {
+    kind,
+    userId: Number(rawUser),
+    groupId: Number(document.getElementById('injGroup').value) || 0,
+    text: document.getElementById('injText').value,
+    atMe: document.getElementById('injAtMe').checked,
+  };
+  if (kind === 'notice') { spec.noticeType = 'notify'; spec.subType = 'poke'; }
+  if (kind === 'request') { spec.requestType = spec.groupId ? 'group' : 'friend'; }
+  const result = await api('/api/inject', { method: 'POST', body: JSON.stringify(spec) });
+  document.getElementById('injState').textContent = (result.ok ? '✅ ' : '⚠️ ') + (result.reason || '');
+  toast((result.ok ? '✅ ' : '⚠️ ') + (result.reason || '完成'));
+  if (result.ok) setTimeout(() => loadInbox(true), 1500);
+}
+async function clearQueue() {
+  if (!confirm('把注入队列移入回收站？（不会真正删除）')) return;
+  const result = await api('/api/queue/clear', { method: 'POST', body: JSON.stringify({}) });
+  document.getElementById('injState').textContent = (result.ok ? '✅ ' : '⚠️ ') + (result.reason || '');
+  loadInbox(true);
+}
 // 静态模式（stream=0）只做一次性加载，不建立长连接也不再轮询：
 // 弱网/远程查看更省流量，也让自动化截图能拿到完整渲染结果。
 refresh();
 loadHistory().then(() => startStream());
 loadLog(true);
+loadInbox(true);
 runDiagnose();
 if (streamMode !== 'off') {
   setInterval(refresh, 4000);
   setInterval(() => loadLog(false), 3000);
   setInterval(runDiagnose, 30000);
+  setInterval(() => { if (!document.hidden) loadInbox(false); }, 15000);
 }
 </script>
 </body>

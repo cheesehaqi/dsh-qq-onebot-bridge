@@ -8,10 +8,20 @@
  */
 import { execFile, spawn } from 'node:child_process'
 import { closeSync, existsSync, openSync, readFileSync, statSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { PORT_LABELS, configWarnings } from './config.mjs'
 import { createTraceTailer, filterEvents, formatChain, groupChains, readRuntime, readTraceFile, summarizeEvents } from './trace.mjs'
 import { formatDiagnose, runDiagnose } from './diagnose.mjs'
 import { buildZip, fileEntry } from './zip.mjs'
+import { createReplayer } from './replay.mjs'
+import { appendCappedLine, moveToTrash } from '../../lib/store.js'
+import { countLines, describeFrame, parseInjectionLine, readInbox } from '../../lib/inbox.js'
+
+/** Plugin repo root, derived from this file's location (control/lib/… → repo). */
+export function defaultPluginRoot() {
+  return join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+}
 
 // ---------------------------------------------------------------- parsing ----
 
@@ -231,6 +241,7 @@ export function publicConfig(config) {
 export function createSupervisor(config, deps = {}) {
   const { exec, spawnImpl, now = () => Date.now() } = deps
   const inspectNow = () => inspect({ ports: config.ports, labels: PORT_LABELS, exec })
+  let replayer = null   // 每个 supervisor 一份，避免跨实例共享沙箱状态
 
   const portRow = (snapshot, name) => (snapshot.ports ?? []).find((item) => item.name === name)
 
@@ -407,6 +418,10 @@ export function createSupervisor(config, deps = {}) {
       games: data.games ?? 0,
       joinsPending: data.joinsPending ?? 0,
       features: data.features ?? {},
+      // 离线回放要用线上真实的决策配置（白名单等），随快照一起带出去
+      replayHints: data.replay ?? null,
+      inbox: data.inbox ?? null,
+      injection: data.injection ?? null,
       gate: data.gate ?? {},
       trace: data.trace ?? {},
     }
@@ -457,9 +472,121 @@ export function createSupervisor(config, deps = {}) {
     return { ok: true, entries: entries.length, bytes: buffer.length, buffer, filename: `qq-diagnose-${new Date(now()).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip` }
   }
 
+  // -------------------------------------------------- 录制 / 回放 / 注入 ----
+
+  const inboxFile = () => config.logs?.inbox || (config.cwd ? join(config.cwd, 'qq-inbox.jsonl') : '')
+  const injectFile = () => config.logs?.inject || (config.cwd ? join(config.cwd, 'qq-inject.jsonl') : '')
+  const trashDir = () => (config.cwd ? join(config.cwd, 'qq-trash') : '')
+
+  /** Recently recorded inbound frames (what the bridge actually received). */
+  function inboxList({ limit = 50 } = {}) {
+    const file = inboxFile()
+    const present = Boolean(file) && existsSync(file)
+    const all = present ? readInbox(file, { limit: 500 }) : []
+    const capped = all.slice(-Math.min(500, Math.max(1, Number(limit) || 50)))
+    return {
+      file,
+      exists: present,
+      recorded: all.length,
+      queued: countLines(injectFile()),
+      entries: capped.map((entry, index) => ({
+        index: all.length - capped.length + index,
+        ts: entry.ts,
+        at: new Date(entry.ts).toLocaleString('zh-CN', { hour12: false }),
+        kind: entry.kind,
+        text: describeFrame(entry),
+        messageId: entry.frame?.messageId ?? '',
+        chatKey: entry.frame?.groupId ? `g:${entry.frame.groupId}` : (entry.frame?.userId ? `u:${entry.frame.userId}` : ''),
+        frame: entry.frame,
+      })),
+    }
+  }
+
+  /** Offline dry-run replay of recorded (or hand-made) frames. */
+  async function replay({ entries = null, indices = null, limit = 5, replyText = '', overrides = {}, budgetMs = 20000 } = {}) {
+    const list = Array.isArray(entries) && entries.length > 0 ? entries : selectEntries(indices, limit)
+    if (list.length === 0) return { ok: false, reason: '没有可回放的记录（qq-inbox.jsonl 为空或未启用录制）' }
+    const replayer = replayerFor()
+    const hints = runtime()?.replayHints ?? null
+    let report
+    try {
+      report = await replayer.run({ entries: list, replyText, overrides, hints, budgetMs, maxEntries: 20 })
+    } catch (error) {
+      return { ok: false, reason: `回放执行失败：${error.message}` }
+    }
+    return { ok: report.ok, reason: report.ok ? '' : (report.reason ?? '回放中有条目出错'), report, text: report.text, totals: report.totals, warnings: report.warnings, sandbox: report.sandbox }
+  }
+
+  function selectEntries(indices, limit) {
+    const all = inboxList({ limit: 500 }).entries
+    if (!all.length) return []
+    if (Array.isArray(indices) && indices.length > 0) {
+      const wanted = new Set(indices.map((index) => Number(index)).filter((index) => Number.isInteger(index) && index >= 0))
+      return all.filter((item) => wanted.has(item.index)).slice(0, 20)
+    }
+    return all.slice(-Math.min(20, Math.max(1, Number(limit) || 5)))
+  }
+
+  function replayerFor() {
+    if (!replayer) {
+      replayer = createReplayer({
+        pluginRoot: config.pluginRoot || defaultPluginRoot(),
+        sourceCwd: config.cwd || '',
+        botQq: runtime()?.replayHints?.botQq ?? 0,
+        logger: deps.logger ?? console,
+        deps,
+      })
+    }
+    return replayer
+  }
+
+  /**
+   * Queue one synthetic frame for the live bridge's injector. The line is validated
+   * with the exact same parser the bridge uses, so a bad spec is rejected here with
+   * a Chinese reason instead of silently doing nothing later.
+   */
+  function inject(spec = {}) {
+    const file = injectFile()
+    if (!file) return { ok: false, reason: '未配置注入文件路径（控制台配置缺少 cwd）' }
+    const botQq = runtime()?.replayHints?.botQq ?? 0
+    let parsed
+    try {
+      parsed = parseInjectionLine(JSON.stringify(spec), { botQq })
+    } catch (error) {
+      return { ok: false, reason: `注入参数不合法：${error.message}` }
+    }
+    const run = runtime()
+    if (run && run.injection && run.injection.enabled === false) {
+      // 不静默失败：通道没开就直说，并给出该改哪个开关。
+      return { ok: false, reason: '桥的注入通道当前未开启（需在插件配置里打开 injectEnabled=true 并重启宿主）', parsed: parsed.frame }
+    }
+    const line = JSON.stringify({ ...spec, __queuedAt: Date.now() })
+    if (!appendCappedLine(file, line, { maxBytes: 1024 * 1024, keepBytes: 128 * 1024 })) {
+      return { ok: false, reason: `写入注入文件失败：${file}` }
+    }
+    return {
+      ok: true,
+      reason: `已入队（桥每 ${run?.injection?.intervalMs ?? 2000}ms 轮询一次，dry-run=${run?.injection?.dryRun !== false ? '开' : '关'}）`,
+      file,
+      preview: describeFrame({ kind: parsed.kind, frame: parsed.frame }),
+      dryRun: run?.injection?.dryRun !== false,
+    }
+  }
+
+  /** Clear the injection queue (moved to the local trash, never deleted). */
+  function clearQueue() {
+    const file = injectFile()
+    if (!file || !existsSync(file)) return { ok: false, reason: '注入队列本来就是空的' }
+    const moved = moveToTrash(file, trashDir())
+    return moved
+      ? { ok: true, reason: `注入队列已移入回收站：${moved}` }
+      : { ok: false, reason: `无法移动 ${file}（可能被占用，已保持原样）` }
+  }
+
   return {
     status, startHost, stopHost, freePort, startNapcat, stopNapcat, startTts, stopTts, stopAll,
     traceEvents, traceChain, runtime, diagnose, exportBundle,
+    inboxList, replay, inject, clearQueue,
     tailer: () => traceTailer ?? (traceTailer = createTraceTailer(config.logs?.trace ?? '')),
     logFile: (name) => {
       if (name === 'trace') return config.logs?.trace ?? ''

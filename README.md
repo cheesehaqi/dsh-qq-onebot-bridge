@@ -33,12 +33,23 @@ QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱�
 
 ```
 QQ 客户端 ←→ OneBot 实现（NapCat / LLOneBot / OpenShamrock / Lagrange…）
-                  │ 反向 WebSocket（OneBot 连我们）
+                  │ 反向 WebSocket（OneBot 连我们；端口 6700）
                   ▼
         dsh-qq-onebot-bridge（本插件）
                   │ ctx.agents.create / followup
                   ▼
         DSH agent 会话（每群/每私聊用户一个）
+
+旁路（都不参与回复决策，出问题也不影响发消息）：
+  每条入站事件 ──► qq-inbox.jsonl          （录制：可离线回放）
+  每个决策点   ──► qq-trace.jsonl          （结构化事件：stage/ok/reason/耗时/traceId）
+  快照每 2s    ──► qq-runtime.json         （会话/闸门/生效配置/录制与注入状态）
+  qq-inject.jsonl ◄── 控制台写、桥轮询读   （注入：默认 dry-run，出站全拦截）
+
+独立控制台 control/（进程 8799，不依赖 DSH 桌面端）
+  ├─ 读：端口/进程、事件流、决策链、体检、录制列表、运行快照
+  ├─ 写：启停宿主/NapCat/TTS、释放端口、离线回放（沙箱 + dry-run）、事件注入
+  └─ 鉴权：仅 127.0.0.1 + token + 同源 Origin 校验
 ```
 
 ## 安装 / 卸载
@@ -182,6 +193,17 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `imageGenDailyLimit` | `20` | 每会话每日生图上限 |
 | `imageGenMaxPromptChars` | `400` | 描述词最大字数（超出截断） |
 | `imageGenCommand` | `/画` | 生图触发命令 |
+| `traceEnabled` | `true` | 全链路结构化事件（每条消息一个 traceId，每个分支带 reason）；关掉则控制台只剩端口/日志能力 |
+| `traceLevel` | `debug` | `debug` 记录全部事件（含每次静默/拒绝）；`warn` 只留问题，用于长期运行省磁盘 |
+| `traceMemorySize` | `500` | 内存里保留的最近事件数（控制台决策链用），落盘另受 4MiB 轮转上限约束 |
+| `traceFile` | `''` | 事件文件路径（空=`cwd/qq-trace.jsonl`） |
+| `recordInbound` | `true` | **录制**：把收到的每条消息/通知/请求写进 `qq-inbox.jsonl`（可离线回放）；只写本机、不影响回复 |
+| `inboxFile` | `''` | 录制文件路径（空=`cwd/qq-inbox.jsonl`，按 2MiB 轮转） |
+| `inboxRedact` | `false` | 录制时把 6 位以上数字（QQ 号）脱敏后再落盘，便于把录制文件发给别人 |
+| `injectEnabled` | `false` | **事件注入通道**（默认关闭）：开启后桥每 `injectIntervalMs` 轮询 `qq-inject.jsonl`，把新行喂进真实管线 |
+| `injectFile` | `''` | 注入队列路径（空=`cwd/qq-inject.jsonl`）；启动时已有的历史行会被跳过并记一条原因 |
+| `injectDryRun` | `true` | **强烈建议保持 `true`**：注入触发的所有出站调用（发消息/撤回/群管…）都被拦截并计数，绝不真发 QQ |
+| `injectIntervalMs` | `2000` | 注入队列轮询间隔（毫秒，最小 500） |
 
 ## 用户侧（OneBot 实现）配置
 
@@ -234,12 +256,26 @@ ws://127.0.0.1:6700/
 
 ## 测试
 
-`test/` 下为 WS 协议模拟脚本（模拟 OneBot 端连入并断言收发）：
+三类脚本，共 1434 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
 
-- `protocol-smoke.mjs` 协议冒烟；`sim-group.mjs` / `sim-private.mjs` 群聊/私聊；`sim-user.mjs` 每用户会话
-- `sim-quote.mjs` 引用解析；`sim-face.mjs` / `sim-sticker*.mjs` 表情链路；`live-status.mjs` 在线状态
+```sh
+# 1) 单元测试：不联网、不起宿主，纯逻辑 + 临时目录（推荐每次改完都跑）
+node test/control-unit.mjs        # 也可以逐个跑：node test/<name>-unit.mjs
+#    34 个文件：桥的分支/命令/守卫、控制台 HTTP 与体检、录制回放与注入…
+#    一次性全跑（PowerShell）：
+#    Get-ChildItem test -Filter '*-unit.mjs' | ForEach-Object { node $_.FullName }
 
-运行（宿主运行时）：`node test/sim-group.mjs`。语音转文字链路建议直接用 QQ 实测（模拟脚本需真实 STT 调用）。
+# 2) 回放的端到端验收：真实桥代码 + 真实 OneBot 服务端，沙箱 + dry-run，不需要宿主
+node test/replay-live.mjs
+
+# 3) 真机脚本（需要宿主/控制台已在运行，自己扮演 OneBot 客户端连 6700）
+node test/live-e2e.mjs        # 消息 → 回复 全链路
+node test/live-stream.mjs     # 实时事件流 / 决策链 / 体检接口（控制台 8799）
+node test/replay-live-host.mjs --token <控制台 token>   # 录制 → 离线回放 → 注入
+```
+
+老版本的 `sim-*.mjs` 协议模拟脚本保留在 `test/` 下，仍可用于手工排查（`node test/sim-group.mjs` 等，需宿主运行）。
+语音转文字链路建议直接用 QQ 实测（模拟脚本需真实 STT 调用）。
 
 ## 记忆与人设说明（重要）
 
@@ -294,6 +330,28 @@ ws://127.0.0.1:6700/
 相关配置：`traceEnabled`（默认开）、`traceLevel`（`debug` 全量 / `warn` 只留问题）、`traceMemorySize`、`traceFile`。
 调试接口（控制台，token + Origin 双重校验）：`/api/trace`、`/api/stream`（SSE）、`/api/runtime`、`/api/diagnose`、`/api/export`。
 
+### 录制 · 离线回放 · 事件注入（v0.4 阶段 3）
+
+前两项解决了"现在发生了什么"，这三项解决"这条消息当时为什么这样、换成别的输入会怎样"。
+
+| 能力 | 怎么用 | 说明 |
+|---|---|---|
+| 录制 | 自动 | 桥收到的每条消息/通知/请求都追加到 `qq-inbox.jsonl`（可 JSON 逐行解析、按大小轮转），只写本机、不改任何回复行为 |
+| 离线回放 | 控制台「录制 · 回放 · 注入」→ 某行「回放这条」／「回放最近 5 条」 | 在**沙箱目录**里用**真实桥代码**重跑这条消息：dry-run 拦截所有出站、不建任何 QQ 连接、源目录一个字节都不改。结论逐条给出"会回复/静默/出错 + 原因 + 会发送什么" |
+| 事件注入 | 控制台填 群号/QQ 号/文本 → 「注入」 | 写一行到 `qq-inject.jsonl`，桥按 `injectIntervalMs`（默认 2s）轮询后**走真实管线**处理；`injectDryRun`（默认开）下所有出站调用被拦截并计数，注入内容永远不会真的发到 QQ |
+
+回放的保真度来自**运行时快照里的线上决策配置**（白名单、安静时段、各功能开关等 28 项，见 `qq-runtime.json` 的 `replay`）：否则插件默认值里"白名单为空 = 拒绝一切"会让回放全部判成静默。回放里**不含真实模型输出**——模型那一轮用一条带 `[回放]` 前缀的模拟回复代替，用来验证链路与分支，不验证措辞。
+
+排障要点：
+
+- 注入通道未开启时会**直接报错并说明开关名**（`injectEnabled`），不会静默丢进队列；
+- 桥启动时若队列里已有历史行，会跳过它们并在事件流里记一条"本次启动跳过 N 行（只处理启动后新增的行）"，避免重启后重放旧注入；
+- 注入的帧不会被二次录制（否则回放/注入会互相激发）；
+- 回放沙箱默认保留最近 5 次，更旧的**移入回收站**（`qq-replay/_trash/<日期>/`），不做物理删除。
+
+相关配置：`recordInbound`（默认开）、`inboxFile`、`inboxRedact`、`injectEnabled`（默认关）、`injectFile`、`injectDryRun`（默认开）、`injectIntervalMs`。
+调试接口：`/api/inbox`、`/api/replay`、`/api/inject`、`/api/queue/clear`。
+
 ## 独立控制台（control/，v0.4.0 本地预发布）
 
 插件自带一个**独立的本地运维端**，不依赖 DSH 桌面端：宿主挂掉时它照常可用，端口与进程一目了然。
@@ -313,6 +371,7 @@ npm run control            # 或 node control/bin/qq-control.mjs --open
 | 日志 | 宿主 stdout / stderr / 桥调试日志，自动跟随、可切行数 |
 | 扫码状态 | 显示 NapCat 二维码图片是否存在、是否新鲜，并一键打开 6099 扫码页 |
 | 配置 | `qq-control.json` 是端口与路径的唯一真源（自动探测 node、dsh bin.js、NapCat、TTS 脚本；可在 UI 里改路径）；**6700 被 NapCat 配置写死，勿改** |
+| 调试 | 「录制 · 回放 · 注入」：列出 `qq-inbox.jsonl` 里录到的每条消息，可一键离线回放（沙箱 + dry-run）或注入合成事件；注入队列状态（行数 / 本次已消费 / dry-run）直接显示 |
 | 安全 | 只绑 `127.0.0.1`；所有 API 需要 token；带 `Origin` 的跨站请求一律拒绝 |
 
 > 以后若想做真正的托盘/桌面程序，直接包一层 Electron/Tauri 复用同一套 HTTP API 即可，逻辑无需重写。
@@ -321,7 +380,7 @@ npm run control            # 或 node control/bin/qq-control.mjs --open
 
 最近五个版本（始终滚动展示）：
 
-- **v0.4.0** — 「一切皆可调试」+ 独立控制台（`control/`）：traceId 全链路结构化事件（每个静默分支都有 reason）、SSE 实时事件流与决策链、一键体检、诊断包导出、运行快照与生效配置；控制台独立进程 8799，端口/进程/日志/扫码总览与启停、启动预检与杀进程护栏、token + Origin 鉴权（**本地预发布，暂未发布**）
+- **v0.4.0** — 「一切皆可调试」+ 独立控制台（`control/`）：traceId 全链路结构化事件（每个静默分支都有 reason）、SSE 实时事件流与决策链、一键体检、诊断包导出、运行快照与生效配置；**录制 / 离线回放 / 事件注入**（`qq-inbox.jsonl` 录制每条入站事件 → 沙箱内用真实桥代码 dry-run 重跑并给出"会回复/静默 + 原因"→ 控制台注入合成事件走真实管线，全链路不碰 QQ）；控制台独立进程 8799，端口/进程/日志/扫码总览与启停、启动预检与杀进程护栏、token + Origin 鉴权（**本地预发布，暂未发布**）
 - **v0.3.9** — 群洞察与定时播报：发言统计（`/统计` `/周榜`）、`/荣誉` `/公告` `/群精华` 只读查询、每日群日报（默认关闭）、重复提醒（每天/每周/工作日）、`/mc` 查 MC 服务器状态
 - **v0.3.8** — 防撤回、敏感词/刷屏防护、入群与加好友验证（管理员 `/同意 <序号>` 审批），群管 API 补齐（`/公告` `/精华` `/名片` `/头衔` `/全员禁言`），既有群管命令纳入写操作闸门
 - **v0.3.7** — 零成本互动包：关键词问答库（默认关闭）、今日人品/运势/抽签/塔罗、骰子与随机抽人、积分经济（默认关闭）、成语接龙（373 词库）与猜数字（默认关闭）；修复 `stop()` disposer 与接龙判定规则

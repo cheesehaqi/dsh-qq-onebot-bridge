@@ -36,6 +36,7 @@ const DEFAULTS = {
   napcatBat: '',
   napcatQr: '',
   ttsBat: '',
+  pluginRoot: '',
   logs: { hostOut: '', hostErr: '', bridge: '' },
   extraDirs: [],
 }
@@ -122,6 +123,9 @@ export function detectPaths(config = {}, { env = process.env, exists = existsSyn
       trace: config.logs?.trace || (cwd ? join(cwd, 'qq-trace.jsonl') : ''),
       audit: config.logs?.audit || (cwd ? join(cwd, 'qq-actions.log') : ''),
       runtime: config.logs?.runtime || (cwd ? join(cwd, 'qq-runtime.json') : ''),
+      // 录制（收到的每条消息）与注入队列（控制台写、桥轮询读）
+      inbox: config.logs?.inbox || (cwd ? join(cwd, 'qq-inbox.jsonl') : ''),
+      inject: config.logs?.inject || (cwd ? join(cwd, 'qq-inject.jsonl') : ''),
     },
     ports: { ...DEFAULT_PORTS, ...(config.ports ?? {}) },
     extraDirs: Array.isArray(config.extraDirs) ? config.extraDirs : [],

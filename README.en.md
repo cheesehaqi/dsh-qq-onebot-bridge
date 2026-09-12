@@ -181,6 +181,17 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `imageGenDailyLimit` | `20` | Max generations per chat per day |
 | `imageGenMaxPromptChars` | `400` | Max prompt characters (truncated beyond) |
 | `imageGenCommand` | `/画` | Trigger command for image generation |
+| `traceEnabled` | `true` | structured end-to-end events (one trace id per message, every branch carries a reason); turning it off leaves the console with ports and logs only |
+| `traceLevel` | `debug` | `debug` records every event including silent drops; `warn` keeps problems only, for long-running deployments |
+| `traceMemorySize` | `500` | recent events kept in memory for the console's decision-chain view (the JSONL file rotates at 4 MiB on top of that) |
+| `traceFile` | `''` | event file path (empty = `cwd/qq-trace.jsonl`) |
+| `recordInbound` | `true` | **recording**: append every inbound message/notice/request to `qq-inbox.jsonl` so it can be replayed offline; local file only, never changes replies |
+| `inboxFile` | `''` | recording file path (empty = `cwd/qq-inbox.jsonl`, rotated at 2 MiB) |
+| `inboxRedact` | `false` | mask 6+ digit runs (QQ ids) before writing, so a recording can be shared for debugging |
+| `injectEnabled` | `false` | **event injection** (off by default): the bridge polls `qq-inject.jsonl` every `injectIntervalMs` and feeds new lines into the real pipeline |
+| `injectFile` | `''` | injection queue path (empty = `cwd/qq-inject.jsonl`); lines already present at startup are skipped and the skip is recorded with a reason |
+| `injectDryRun` | `true` | **keep this true**: every outbound call triggered by an injection (send/recall/moderation…) is intercepted and counted, never sent to QQ |
+| `injectIntervalMs` | `2000` | injection queue poll interval in milliseconds (minimum 500) |
 
 ## OneBot side setup
 
@@ -248,6 +259,28 @@ Every inbound message gets a **trace id**, and every decision point — **includ
 Config: `traceEnabled` (on by default), `traceLevel` (`debug` = everything, `warn` = problems only), `traceMemorySize`, `traceFile`.
 Debug endpoints (console, token + Origin guarded): `/api/trace`, `/api/stream` (SSE), `/api/runtime`, `/api/diagnose`, `/api/export`.
 
+### Recording · offline replay · event injection (v0.4 phase 3)
+
+The first two answer "what is happening right now"; these three answer "why did *this* message go that way, and what would a different input do".
+
+| Capability | How | Detail |
+|---|---|---|
+| Recording | automatic | every inbound message/notice/request is appended to `qq-inbox.jsonl` (JSONL, size-rotated). Local file only, never changes how the bot replies |
+| Offline replay | console → "录制 · 回放 · 注入" → "回放这条" / "回放最近 5 条" | re-runs that message through the **real bridge code** inside a **sandbox directory**: dry-run intercepts every outbound call, no QQ connection is ever created, the live working directory is not touched. Each entry gets a verdict — replied / silent / error — **with the reason** and what it would send |
+| Event injection | console → fill group id / QQ id / text → "注入" | appends a line to `qq-inject.jsonl`; the bridge polls it (`injectIntervalMs`, default 2s) and feeds it through the **real pipeline**. With `injectDryRun` (default on) every outbound call is intercepted and counted, so injected content is never actually sent to QQ |
+
+Replay fidelity comes from the live decision config carried in the runtime snapshot (allowlists, quiet hours, feature switches — 28 keys under `replay` in `qq-runtime.json`); without it the plugin defaults ("empty allowlist = deny everything") would make every replay look silent. Replay does **not** contain real model output: the model turn is replaced by a canned line prefixed with `[回放]`, so it validates the pipeline and the branch, not the wording.
+
+Operational notes:
+
+- if the injection channel is off the console **fails loudly with the switch name** (`injectEnabled`) instead of silently queueing;
+- lines already present when the bridge starts are skipped, with a recorded reason ("skipped N historical lines, only lines appended after start are processed") — a restart never replays old injections;
+- injected frames are never recorded, so injection and replay cannot feed each other;
+- replay sandboxes: the newest 5 are kept, older ones are **moved to the recycle/trash directory** (`qq-replay/_trash/<date>/`), never deleted outright.
+
+Config: `recordInbound` (on), `inboxFile`, `inboxRedact`, `injectEnabled` (off), `injectFile`, `injectDryRun` (on), `injectIntervalMs`.
+Endpoints: `/api/inbox`, `/api/replay`, `/api/inject`, `/api/queue/clear`.
+
 ## Standalone control console (`control/`, v0.4.0 local pre-release)
 
 The plugin ships an independent local operations console that does **not** depend on DSH Desktop: it keeps working when the host is down, and shows every port and process at a glance.
@@ -267,18 +300,33 @@ npm run control            # or: node control/bin/qq-control.mjs --open
 | Logs | host stdout / stderr / bridge debug log with live follow and line count |
 | QR login state | whether the NapCat QR image exists and is fresh, plus a link to the 6099 page |
 | Config | `qq-control.json` is the single source of truth for ports and paths (node, `dsh bin.js`, NapCat, TTS script auto-detected; paths editable in the UI); **6700 is pinned by the NapCat config, do not change it** |
+| Debugging | "录制 · 回放 · 注入": lists every recorded inbound event from `qq-inbox.jsonl`, replays any of them offline (sandbox + dry-run) or injects a synthetic event; the injection queue state (lines / consumed this run / dry-run) is shown inline |
 | Security | binds `127.0.0.1` only, every API needs the token, and any request carrying a cross-site `Origin` is rejected |
 
 > A future tray/desktop build can simply wrap this HTTP API in Electron/Tauri — no logic rewrite needed.
 
 ## Tests
 
-`test/` contains WebSocket protocol simulation scripts (they impersonate the OneBot side and assert send/receive):
+Three kinds, 1434 assertions in `test/*-unit.mjs` plus 3 live scripts:
 
-- `protocol-smoke.mjs` protocol smoke test; `sim-group.mjs` / `sim-private.mjs` group/private; `sim-user.mjs` per-user sessions
-- `sim-quote.mjs` quote resolution; `sim-face.mjs` / `sim-sticker*.mjs` face pipeline; `live-status.mjs` live status
+```sh
+# 1) unit tests: no network, no host, pure logic in temp dirs (run after every change)
+node test/control-unit.mjs        # or one at a time: node test/<name>-unit.mjs
+#    34 files: bridge branches/commands/guards, console HTTP + diagnosis, recording/replay/injection…
+#    run them all (PowerShell):
+#    Get-ChildItem test -Filter '*-unit.mjs' | ForEach-Object { node $_.FullName }
 
-Run with the host up: `node test/sim-group.mjs`. The STT path is best tested with a real QQ voice message (simulated scripts require a real STT call).
+# 2) replay end-to-end acceptance: real bridge code + real OneBot server, sandbox + dry-run, no host needed
+node test/replay-live.mjs
+
+# 3) live scripts (host/console already running; they impersonate the OneBot client on 6700)
+node test/live-e2e.mjs        # message -> reply, full path
+node test/live-stream.mjs     # event stream / decision chain / diagnosis endpoints (console 8799)
+node test/replay-live-host.mjs --token <console token>   # record -> offline replay -> injection
+```
+
+The older `sim-*.mjs` protocol scripts are still in `test/` for manual poking (`node test/sim-group.mjs`, host running).
+The STT path is best tested with a real QQ voice message (simulated scripts require a real STT call).
 
 ## Persona & memory (important)
 
@@ -320,7 +368,7 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
-- **v0.4.0** — "everything debuggable" plus the standalone control console (`control/`): trace-id structured events where every silent drop carries a reason, a live SSE event stream and per-message decision chains, one-click diagnosis, a diagnostic-bundle export, runtime snapshot and effective config; the console is its own process on 8799 with port/process/log/QR overview, host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication (**local pre-release, not published yet**)
+- **v0.4.0** — "everything debuggable" plus the standalone control console (`control/`): trace-id structured events where every silent drop carries a reason, a live SSE event stream and per-message decision chains, one-click diagnosis, a diagnostic-bundle export, runtime snapshot and effective config; **recording / offline replay / event injection** (every inbound event recorded to `qq-inbox.jsonl` → replayed through the real bridge code in a sandbox with dry-run, reporting "would reply / silent + why" → synthetic events injected into the real pipeline from the console, never touching QQ); the console is its own process on 8799 with port/process/log/QR overview, host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication (**local pre-release, not published yet**)
 - **v0.3.9** — group insight: message statistics (`/统计` `/周榜`), read-only `/荣誉` `/公告` `/群精华`, a daily group report (off by default), recurring reminders (daily/weekly/weekdays) and `/mc` Minecraft status
 - **v0.3.8** — anti-recall, sensitive-word and flood protection, group/friend join verification (admin `/同意 <id>`), a wider group-admin API (`/公告` `/精华` `/名片` `/头衔` `/全员禁言`) and all admin writes moved behind the shared gate
 - **v0.3.7** — zero-cost interaction pack: keyword wordbook (off by default), local fortune/lot/tarot, dice and random picks, points economy (off by default), idiom chain (373 idioms) and guess-the-number (off by default); fixes the `stop()` disposer and the idiom-chain rule
