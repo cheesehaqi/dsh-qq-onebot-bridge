@@ -18,6 +18,7 @@
   - **一键体检**（`control/lib/diagnose.mjs`）：把"机器人没反应先查这些"的人工清单自动化成 15-19 项 pass/fail（依赖路径、五个端口、机器人是否连上、桥是否活跃、快照新鲜度、会话/闸门/生效配置、error/warn、静默丢弃汇总、写操作拒绝、事件文件），每项附修复建议与 blocker/warn 分级
   - **诊断包导出**：零依赖 ZIP 写入器（`control/lib/zip.mjs`，store 方式 + CRC32 + UTF-8 名），打包 trace/审计/桥日志/宿主日志/运行快照/体检报告/环境信息
   - 面板新增「实时事件流（可过滤/暂停，点行看决策链）」「决策链时间轴」「一键体检」「运行快照（会话+生效配置）」「错误徽标」，并且**面板自身也自曝脚本错误**；支持 `&stream=0` 静态模式（弱网/远程/自动截图）
+- **删除策略：先回收，不销毁（用户规则 2026-09-12）**：图片保留期清理不再 `unlink`，而是把过期文件**移动**到 `cwd/qq-trash/<日期>/`（`imageTrashEnabled` 默认开、`imageTrashDir` 可改）；移动失败则**保留原文件**并记日志，绝不静默销毁。回收目录不自动清理，由使用者自行处理（本机可用 `scripts/safe-delete.ps1` 送进 Windows 回收站）。新增 `lib/store.js` 的 `expiredFiles()` / `moveToTrash()` 纯函数与 9 项测试
 - 新增测试：`test/trace-unit.mjs`（41）、`test/trace-branches-unit.mjs`（29：11 类静默分支逐一断言带 reason、traceId 贯穿到出站回复、runtime 快照不含密钥）、`test/console-debug-unit.mjs`（70+：trace 读取/尾部增量/过滤/决策链/汇总、体检分支与文本、ZIP CRC 与结构、新接口真实 HTTP 往返、**面板静态校验**——脚本语法/元素 id/调用接口是否存在）、`test/live-stream.mjs`（真宿主 SSE + 决策链实测）
 
 ### 独立控制台（control/）

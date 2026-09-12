@@ -1,9 +1,9 @@
 /** Unit tests for the write-action gate and the atomic JSON store (no network). */
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ActionGate, DEFAULT_ACTION_LIMITS } from '../lib/actions.js'
-import { JsonStore, readJson, writeJsonAtomic, appendCappedLine } from '../lib/store.js'
+import { JsonStore, readJson, writeJsonAtomic, appendCappedLine, expiredFiles, moveToTrash } from '../lib/store.js'
 
 let passed = 0
 let failed = 0
@@ -108,6 +108,31 @@ const capFile = join(dir, 'cap.log')
 for (let i = 0; i < 40; i++) appendCappedLine(capFile, `line-${i}-${'x'.repeat(50)}`, { maxBytes: 500, keepBytes: 200 })
 const capSize = statSync(capFile).size
 check('日志轮转后体积受限', capSize < 1000, `${capSize} bytes`)
+
+// ---- 删除策略（用户规则 2026-09-12）：过期文件移入回收目录，绝不永久删除 ----
+const imagesDir = join(dir, 'qq-images')
+mkdirSync(imagesDir, { recursive: true })
+const freshImage = join(imagesDir, 'fresh.png')
+const oldImage = join(imagesDir, 'old.png')
+writeFileSync(freshImage, 'x')
+writeFileSync(oldImage, 'x')
+const old = new Date(Date.now() - 30 * 86_400_000)
+utimesSync(oldImage, old, old)
+const expired = expiredFiles(imagesDir, 14 * 86_400_000, Date.now())
+check('expiredFiles 只挑过期文件', expired.length === 1 && expired[0].endsWith('old.png'), expired.join(','))
+check('expiredFiles 缺失目录安全', expiredFiles(join(dir, 'nope'), 1000).length === 0)
+
+const trashDir = join(dir, 'qq-trash')
+const moved = moveToTrash(oldImage, trashDir)
+check('moveToTrash 是移动不是删除', moved !== '' && existsSync(moved) && !existsSync(oldImage), moved)
+check('moveToTrash 按日期分桶', /qq-trash[\\/]\d{4}-\d{2}-\d{2}[\\/]old\.png$/.test(moved), moved)
+check('moveToTrash 保留内容', readFileSync(moved, 'utf8') === 'x')
+check('未过期文件未被触碰', existsSync(freshImage))
+writeFileSync(join(imagesDir, 'old.png'), 'y')
+const moved2 = moveToTrash(join(imagesDir, 'old.png'), trashDir)
+check('同名冲突自动改名', moved2 !== moved && moved2.includes('old.1.png'), moved2)
+check('moveToTrash 空回收目录返回空串', moveToTrash(freshImage, '') === '')
+check('moveToTrash 源不存在时安全返回空串', moveToTrash(join(imagesDir, 'ghost.png'), trashDir) === '')
 
 rmSync(dir, { recursive: true, force: true })
 console.log(`\n${passed} passed, ${failed} failed`)
