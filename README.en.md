@@ -190,7 +190,7 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `inboxRedact` | `false` | mask 6+ digit runs (QQ ids) before writing, so a recording can be shared for debugging |
 | `injectEnabled` | `false` | **event injection** (off by default): the bridge polls `qq-inject.jsonl` every `injectIntervalMs` and feeds new lines into the real pipeline |
 | `injectFile` | `''` | injection queue path (empty = `cwd/qq-inject.jsonl`); lines already present at startup are skipped and the skip is recorded with a reason |
-| `injectDryRun` | `true` | **keep this true**: every outbound call triggered by an injection (send/recall/moderation…) is intercepted and counted, never sent to QQ |
+| `injectDryRun` | `true` | **keep this true**: every outbound call triggered by an injection (send/recall/moderation…) is intercepted and counted, never sent to QQ — including the **asynchronous agent turn's reply**, whose text is recorded in the event stream |
 | `injectIntervalMs` | `2000` | injection queue poll interval in milliseconds (minimum 500) |
 
 ## OneBot side setup
@@ -274,6 +274,8 @@ Replay fidelity comes from the live decision config carried in the runtime snaps
 Operational notes:
 
 - if the injection channel is off the console **fails loudly with the switch name** (`injectEnabled`) instead of silently queueing;
+- the injected **agent turn is asynchronous**: the dry-run window only covers the synchronous stage, so the model's actual reply is intercepted separately and recorded in the event stream (`injected turn reply suppressed (dry-run, not sent): <text>`). Injection therefore runs the real pipeline without ever leaking a message; a real inbound message clears the mark immediately;
+- replayed frames are marked `replay: offline replay (sandbox + dry-run, never touches QQ)` while injected frames are marked `inject`, so the two never get confused;
 - lines already present when the bridge starts are skipped, with a recorded reason ("skipped N historical lines, only lines appended after start are processed") — a restart never replays old injections;
 - injected frames are never recorded, so injection and replay cannot feed each other;
 - replay sandboxes: the newest 5 are kept, older ones are **moved to the recycle/trash directory** (`qq-replay/_trash/<date>/`), never deleted outright.
@@ -307,12 +309,13 @@ npm run control            # or: node control/bin/qq-control.mjs --open
 
 ## Tests
 
-Three kinds, 1434 assertions in `test/*-unit.mjs` plus 3 live scripts:
+Three kinds, 1449 assertions in `test/*-unit.mjs` plus 3 live scripts:
 
 ```sh
 # 1) unit tests: no network, no host, pure logic in temp dirs (run after every change)
 node test/control-unit.mjs        # or one at a time: node test/<name>-unit.mjs
-#    34 files: bridge branches/commands/guards, console HTTP + diagnosis, recording/replay/injection…
+#    35 files: bridge branches/commands/guards, console HTTP + diagnosis, recording/replay/injection,
+#    injection safety boundaries…
 #    run them all (PowerShell):
 #    Get-ChildItem test -Filter '*-unit.mjs' | ForEach-Object { node $_.FullName }
 

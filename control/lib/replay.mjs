@@ -418,8 +418,10 @@ export function createReplayer({
         }
         const before = server.dryRunCalls.length
         try {
-          // 走真实入口：OneBotServer 的事件监听器就是桥注册的那几个
-          server.emit(kind, { bot: null, __injected: true, ...frame })
+          // 走真实入口：OneBotServer 的事件监听器就是桥注册的那几个。
+          // 用 __replayed 而不是 __injected：回放不是注入，绝不能命中"注入回合回复拦截"
+          // 那条安全逻辑（否则回放永远看不到本该发出的回复）。
+          server.emit(kind, { bot: null, __replayed: true, ...frame })
         } catch (error) {
           results.push({ ...summarizeEntry({ entry, kind, events: [], calls: [], stages }), input: describeInput(entry), status: 'error', verdict: `回放抛出异常：${error.message}` })
           continue

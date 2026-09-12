@@ -202,7 +202,7 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `inboxRedact` | `false` | 录制时把 6 位以上数字（QQ 号）脱敏后再落盘，便于把录制文件发给别人 |
 | `injectEnabled` | `false` | **事件注入通道**（默认关闭）：开启后桥每 `injectIntervalMs` 轮询 `qq-inject.jsonl`，把新行喂进真实管线 |
 | `injectFile` | `''` | 注入队列路径（空=`cwd/qq-inject.jsonl`）；启动时已有的历史行会被跳过并记一条原因 |
-| `injectDryRun` | `true` | **强烈建议保持 `true`**：注入触发的所有出站调用（发消息/撤回/群管…）都被拦截并计数，绝不真发 QQ |
+| `injectDryRun` | `true` | **强烈建议保持 `true`**：注入触发的所有出站调用（发消息/撤回/群管…）都被拦截并计数，绝不真发 QQ；**异步 agent 回合的回复同样被拦下**（原文记进事件流） |
 | `injectIntervalMs` | `2000` | 注入队列轮询间隔（毫秒，最小 500） |
 
 ## 用户侧（OneBot 实现）配置
@@ -256,12 +256,12 @@ ws://127.0.0.1:6700/
 
 ## 测试
 
-三类脚本，共 1434 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
+三类脚本，共 1449 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
 
 ```sh
 # 1) 单元测试：不联网、不起宿主，纯逻辑 + 临时目录（推荐每次改完都跑）
 node test/control-unit.mjs        # 也可以逐个跑：node test/<name>-unit.mjs
-#    34 个文件：桥的分支/命令/守卫、控制台 HTTP 与体检、录制回放与注入…
+#    35 个文件：桥的分支/命令/守卫、控制台 HTTP 与体检、录制回放与注入、注入安全边界…
 #    一次性全跑（PowerShell）：
 #    Get-ChildItem test -Filter '*-unit.mjs' | ForEach-Object { node $_.FullName }
 
@@ -345,6 +345,8 @@ node test/replay-live-host.mjs --token <控制台 token>   # 录制 → 离线�
 排障要点：
 
 - 注入通道未开启时会**直接报错并说明开关名**（`injectEnabled`），不会静默丢进队列；
+- 注入触发的 **agent 回合是异步的**：dry-run 窗口只在同步阶段开着，所以模型真正的回复会在事件流里被单独拦下（`注入回合的模型回复已被拦截（dry-run，未发送）：<原文>`）——注入既能走真实管线，又不会漏发一条；真人消息不受影响（收到真实消息立即解除该标记）；
+- 回放的帧在事件流里标为 `replay: 离线回放（沙箱 + dry-run，不碰 QQ）`，注入的帧标为 `inject: 来自注入器`，两者不会互相误判；
 - 桥启动时若队列里已有历史行，会跳过它们并在事件流里记一条"本次启动跳过 N 行（只处理启动后新增的行）"，避免重启后重放旧注入；
 - 注入的帧不会被二次录制（否则回放/注入会互相激发）；
 - 回放沙箱默认保留最近 5 次，更旧的**移入回收站**（`qq-replay/_trash/<日期>/`），不做物理删除。

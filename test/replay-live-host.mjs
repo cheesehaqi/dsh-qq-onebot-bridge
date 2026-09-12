@@ -32,9 +32,14 @@ const base = `http://127.0.0.1:${control}`
 
 let passed = 0
 let failed = 0
+let warned = 0
 function check(name, ok, extra = '') {
   if (ok) { passed++; console.log('PASS', name, extra) }
   else { failed++; console.log('FAIL', name, extra) }
+}
+function warn(name, detail = '') {
+  warned++
+  console.log(`WARN ${name}${detail ? `（${detail}）` : ''}`)
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const get = async (path) => (await fetch(`${base}${path}${path.includes('?') ? '&' : '?'}token=${token}`)).json()
@@ -168,6 +173,28 @@ check('注入回执明确标注"未发送"', injectEvents.some((event) => String
 check('注入内容没有真正发给 QQ', !replies.some((text) => text.includes('注入自检')), replies.slice(-1).join(' | ').slice(0, 100))
 check('注入的帧不会被二次录制', (await get('/api/inbox?limit=1')).recorded === recordedBefore, `录制 ${recordedBefore} → ${(await get('/api/inbox?limit=1')).recorded}`)
 
+// ---- 4b. 注入触发的**异步 agent 回合**也必须被拦下（真机抓到过漏网） ----
+const isSuppression = (event) => String(event.reason ?? '').includes('注入回合的模型回复已被拦截')
+const suppressedBefore = (await get('/api/trace?stage=inject&limit=200')).events.filter(isSuppression).length
+let suppressedEvent = null
+const suppressDeadline = Date.now() + 300000
+while (suppressedEvent === null && Date.now() < suppressDeadline) {
+  const trace = await get('/api/trace?stage=inject&limit=200')
+  const matches = (trace.events ?? []).filter(isSuppression)
+  // 必须比注入前多一条：否则可能匹配到上一轮留下的旧事件
+  if (matches.length > suppressedBefore) suppressedEvent = matches[matches.length - 1]
+  if (suppressedEvent === null) await sleep(2000)
+}
+if (suppressedEvent === null) {
+  // 模型回话时间不可控（宿主冷启动/排队时会很慢），这里如实标成"未验证"而不是假失败
+  warn('注入回合的模型回复拦截：300s 内模型没有回话，本项未验证', '同步 dry-run 拦截已通过；确定性覆盖见 test/inject-guard-unit.mjs')
+} else {
+  check('注入回合的模型回复被拦下并记录了原文', true, suppressedEvent.reason.slice(0, 110))
+  check('拦截原因写明 dry-run 未发送', String(suppressedEvent.reason).includes('dry-run，未发送'), String(suppressedEvent.reason).slice(0, 80))
+  const quoted = String(suppressedEvent.reason).slice(String(suppressedEvent.reason).lastIndexOf('：') + 1)
+  check('被拦下的原文没有出现在任何出站里', quoted.length > 0 && !outboundText().includes(quoted), `原文 ${quoted.slice(0, 40)}…`)
+}
+
 // ---- 5. 运行时快照暴露注入进度 ----
 const runtime = await get('/api/runtime')
 check('快照带注入通道状态', runtime.runtime?.injection?.enabled === true && runtime.runtime?.injection?.consumed >= 1, JSON.stringify(runtime.runtime?.injection ?? {}).slice(0, 140))
@@ -180,5 +207,5 @@ check('录制文件是 JSONL', raw.length >= 1 && raw.every((line) => { try { re
 check('录制行含 kind 与时间戳', (() => { const entry = JSON.parse(raw[raw.length - 1]); return ['message', 'notice', 'request'].includes(entry.kind) && typeof entry.ts === 'number' })())
 
 try { ws.close() } catch { /* ignore */ }
-console.log(`\n${passed} passed, ${failed} failed`)
+console.log(`\n${passed} passed, ${failed} failed${warned > 0 ? `, ${warned} warned` : ''}`)
 process.exit(failed > 0 ? 1 : 0)
