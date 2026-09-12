@@ -116,7 +116,12 @@ const quietHit = quietRun.results[0]
 check('安静时段内给出可读的静默原因', quietHit.status === 'silent' && quietHit.verdict.includes('静默'), quietHit.verdict)
 
 // 回放真实录制文件（若线上已有 qq-inbox.jsonl）
-const liveCwd = 'D:\\qq-work'
+// 线上 cwd 不写死在脚本里：优先 --cwd 参数，其次机器本地的 qq-control.json（gitignored）
+const liveCwd = (() => {
+  const index = process.argv.indexOf('--cwd')
+  if (index >= 0 && process.argv[index + 1]) return process.argv[index + 1]
+  try { return JSON.parse(readFileSync(join(pluginRoot, 'qq-control.json'), 'utf8')).cwd || process.cwd() } catch { return process.cwd() }
+})()
 const inbox = join(liveCwd, 'qq-inbox.jsonl')
 if (existsSync(inbox)) {
   const { readInbox } = await import('../lib/inbox.js')

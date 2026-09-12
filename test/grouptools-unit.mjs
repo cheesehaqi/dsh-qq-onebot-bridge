@@ -26,6 +26,13 @@ check('无选项默认赞成反对', v3?.options.length === 2 && v3?.options[0].
 
 check('非投票消息不识别', parseVoteCommand('今天天气怎么样') === null)
 check('普通消息不识别', parseVoteCommand('/status') === null)
+// 回归（真机审计发现）：/vote-end 曾被这一支吃掉，导致投票永远结束不了
+check('/vote-end 不被当成发起投票', parseVoteCommand('/vote-end') === null)
+check('/vote-end 前后空白同样不误判', parseVoteCommand('  /vote-end  ') === null)
+check('/vote-anything 也不误判', parseVoteCommand('/vote-xyz') === null)
+check('裸 /vote 不误判（交给查看分支）', parseVoteCommand('/vote') === null)
+check('/vote 后跟空格仍能发起', parseVoteCommand('/vote 去不去 A 去 B 不去')?.options.length === 2)
+check('/vote:问题 冒号形式仍可', parseVoteCommand('/vote:去哪玩 A 公园 B 家里')?.question === '去哪玩')
 
 // todo store round-trip
 const dir = mkdtempSync(join(tmpdir(), 'qq-todos-test-'))

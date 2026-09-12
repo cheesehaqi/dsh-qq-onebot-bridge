@@ -15,6 +15,7 @@
  */
 import { WebSocket } from 'ws'
 import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 const arg = (name, fallback) => {
@@ -24,10 +25,29 @@ const arg = (name, fallback) => {
 const control = Number(arg('control', '8799'))
 const onebotPort = Number(arg('onebot', '6700'))
 const token = arg('token', '')
-const groupId = Number(arg('group', '100000001'))
-const userId = Number(arg('user', '2000000001'))
-const botQq = Number(arg('bot', '3000000001'))
-const liveCwd = arg('cwd', 'D:\\qq-work')
+// 真实号从机器本地的 profile 配置现取（仓库里只留占位号）：占位号不在生产白名单里，
+// 直接用它们跑真机只会被白名单拦下，看起来像"功能坏了"。
+function privateIds() {
+  try {
+    const text = readFileSync(join(homedir(), '.dsh', 'profiles', 'web', 'cordis.patch.yml'), 'utf8')
+    const pick = (re) => (re.exec(text)?.[1] ?? '').split(',').map((item) => item.trim()).filter(Boolean)
+    return {
+      bot: (/^\s*botQq:\s*(\d+)/m.exec(text)?.[1] ?? ''),
+      user: pick(/^\s*allowUsers:\s*\[([^\]]*)\]/m)[0] ?? '',
+      group: pick(/^\s*allowGroups:\s*\[([^\]]*)\]/m)[0] ?? '',
+    }
+  } catch { return { bot: '', user: '', group: '' } }
+}
+const local = privateIds()
+const groupId = Number(arg('group', local.group || '100000001'))
+const userId = Number(arg('user', local.user || '2000000001'))
+const botQq = Number(arg('bot', local.bot || '3000000001'))
+// 线上 cwd 不写死在脚本里：优先 --cwd，其次机器本地的 qq-control.json（gitignored）
+const liveCwd = (() => {
+  const explicit = arg('cwd', '')
+  if (explicit) return explicit
+  try { return JSON.parse(readFileSync(new URL('../qq-control.json', import.meta.url), 'utf8')).cwd || process.cwd() } catch { return process.cwd() }
+})()
 const base = `http://127.0.0.1:${control}`
 
 let passed = 0

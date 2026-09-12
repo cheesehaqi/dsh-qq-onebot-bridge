@@ -16,6 +16,7 @@ import { formatDiagnose, runDiagnose } from './diagnose.mjs'
 import { buildZip, fileEntry } from './zip.mjs'
 import { createReplayer } from './replay.mjs'
 import { buildAcceptance, formatAcceptance } from './acceptance.mjs'
+import { redactByKind, redactionNote } from './redact.mjs'
 import { appendCappedLine, moveToTrash } from '../../lib/store.js'
 import { countLines, describeFrame, parseInjectionLine, readInbox } from '../../lib/inbox.js'
 
@@ -451,13 +452,19 @@ export function createSupervisor(config, deps = {}) {
     return value
   }
 
-  /** Diagnostic bundle: logs + effective config + snapshot + diagnosis, as a zip. */
-  async function exportBundle() {
+  /**
+   * Diagnostic bundle: logs + effective config + snapshot + diagnosis, as a zip.
+   *
+   * `redact: true` 走"分享安全"通路：QQ 号按位掩码、消息原文只留长度——因为这些
+   * 文件（事件流/录制/日志）天然含用户数据，而这个包的使用场景就是发给别人。
+   */
+  async function exportBundle({ redact = false } = {}) {
     const diagnosis = await diagnose()
     const entries = []
     const take = (file, name, tailBytes) => {
       const entry = fileEntry(file, { name, tailBytes, readFile: deps.readFile ?? readFileSync, stat: deps.stat ?? statSync })
-      if (entry) entries.push(entry)
+      if (!entry) return
+      entries.push(redact ? { ...entry, data: redactByKind(entry.name, String(entry.data)) } : entry)
     }
     take(config.logs?.trace, 'qq-trace.jsonl', 1024 * 1024)
     take(config.logs?.audit, 'qq-actions.log', 256 * 1024)
@@ -465,20 +472,22 @@ export function createSupervisor(config, deps = {}) {
     take(config.logs?.hostOut, 'qq-host-out.log', 128 * 1024)
     take(config.logs?.hostErr, 'qq-host-err.log', 128 * 1024)
     take(config.logs?.runtime, 'qq-runtime.json')
-    entries.push({ name: 'diagnose.json', data: JSON.stringify(diagnosis.report, null, 2) })
-    entries.push({ name: 'diagnose.txt', data: diagnosis.text })
-    entries.push({
-      name: 'environment.json',
-      data: JSON.stringify({
-        generatedAt: new Date(now()).toISOString(),
-        controlConfig: publicConfig(config),
-        ports: (await inspectNow()).ports,
-        runtime: runtime(),
-        traceSummary: summarizeEvents(traceEvents({ limit: 2000 })),
-      }, null, 2),
-    })
+    entries.push({ name: 'diagnose.json', data: JSON.stringify(redact ? redactByKind('x.json', JSON.stringify(diagnosis.report, null, 2)) : diagnosis.report, null, 2) })
+    entries.push({ name: 'diagnose.txt', data: redact ? redactByKind('x.log', diagnosis.text) : diagnosis.text })
+    const environment = {
+      generatedAt: new Date(now()).toISOString(),
+      controlConfig: publicConfig(config),
+      ports: (await inspectNow()).ports,
+      runtime: runtime(),
+      traceSummary: summarizeEvents(traceEvents({ limit: 2000 })),
+    }
+    entries.push({ name: 'environment.json', data: JSON.stringify(redact ? JSON.parse(redactByKind('x.json', JSON.stringify(environment))) : environment, null, 2) })
+    if (redact) entries.push({ name: 'REDACTED.json', data: JSON.stringify(redactionNote(), null, 2) })
     const buffer = buildZip(entries, { now: new Date(now()) })
-    lastExportSummary = { at: now(), entries: entries.length, bytes: buffer.length, filename: `qq-diagnose-${new Date(now()).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip` }
+    lastExportSummary = {
+      at: now(), entries: entries.length, bytes: buffer.length, redacted: redact,
+      filename: `qq-diagnose${redact ? '-redacted' : ''}-${new Date(now()).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip`,
+    }
     return { ok: true, entries: entries.length, bytes: buffer.length, buffer, filename: lastExportSummary.filename }
   }
 
@@ -492,7 +501,6 @@ export function createSupervisor(config, deps = {}) {
       { name: '桥调试日志', file: config.logs?.bridge },
       { name: '宿主 stdout', file: config.logs?.hostOut },
       { name: '运行快照', file: config.logs?.runtime },
-      { name: '入站录制', file: config.logs?.inbox },
     ].map((entry) => ({ name: entry.name, present: Boolean(entry.file) && existsSync(entry.file) }))
   }
 
@@ -651,7 +659,9 @@ export function createSupervisor(config, deps = {}) {
     status, startHost, stopHost, freePort, startNapcat, stopNapcat, startTts, stopTts, stopAll,
     traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance,
     inboxList, replay, inject, clearQueue,
-    tailer: () => traceTailer ?? (traceTailer = createTraceTailer(config.logs?.trace ?? '')),
+    // 每个调用方（每个 SSE 连接）拿一份独立 tailer：共用模块级单例会让两个面板互相"偷"事件，
+    // 也会让同一进程里的第二个 supervisor 读到别人的事件文件。
+    tailer: () => createTraceTailer(config.logs?.trace ?? ''),
     logFile: (name) => {
       if (name === 'trace') return config.logs?.trace ?? ''
       if (name === 'runtime') return config.logs?.runtime ?? ''
@@ -660,5 +670,3 @@ export function createSupervisor(config, deps = {}) {
     },
   }
 }
-
-let traceTailer = null

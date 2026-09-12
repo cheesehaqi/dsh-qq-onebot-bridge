@@ -71,21 +71,28 @@ check('全局事件（无 traceId 的非消息阶段）不误判', evaluateTrace
 ]).status === 'pass')
 
 // -------------------------------------------------------------------- ③ 可回放 --
+const VERIFIED_SAFETY = { dryRun: true, connectedBots: 0, sandboxed: true, sourceUnchanged: true, sourceChanges: [] }
 const replayPass = evaluateReplay({
   inbox: { exists: true, recorded: 12, queued: 3 },
-  lastReplay: { ok: true, at: 1, durationMs: 240, totals: { entries: 1, replied: 1, silent: 0, error: 0 }, safety: { dryRun: true, connectedBots: 0 } },
+  lastReplay: { ok: true, at: 1, durationMs: 240, totals: { entries: 1, replied: 1, silent: 0, error: 0 }, safety: { ...VERIFIED_SAFETY } },
   sandboxCount: 4,
 })
-check('录制 + 成功回放 → 达标', replayPass.status === 'pass' && replayPass.evidence.includes('dry-run=开'), replayPass.evidence)
+check('录制 + 成功回放（含实测安全保证）→ 达标', replayPass.status === 'pass' && replayPass.evidence.includes('dry-run=开'), replayPass.evidence)
 check('回放证据里带沙箱数', replayPass.evidence.includes('沙箱 4 个'))
+check('达标证据写明"源目录实测未改动"', replayPass.evidence.includes('源目录实测未改动'), replayPass.evidence)
 check('没录制 → 告警并指出 recordInbound', evaluateReplay({ inbox: { exists: false, recorded: 0 } }).hint.includes('recordInbound'))
 check('有录制但没跑过回放 → 告警并指出按钮', evaluateReplay({ inbox: { exists: true, recorded: 5 } }).hint.includes('回放最近 5 条'))
 const replayUnsafe = evaluateReplay({ inbox: { exists: true, recorded: 5 }, lastReplay: { ok: true, safety: { dryRun: false, connectedBots: 0 } } })
 check('dry-run 没开 → 不达标（安全第一）', replayUnsafe.status === 'fail' && replayUnsafe.evidence.includes('安全保证不完整'), replayUnsafe.evidence)
 const replayConnected = evaluateReplay({ inbox: { exists: true, recorded: 5 }, lastReplay: { ok: true, safety: { dryRun: true, connectedBots: 1 } } })
 check('回放期间有 QQ 连接 → 不达标', replayConnected.status === 'fail')
-const replayErrored = evaluateReplay({ inbox: { exists: true, recorded: 5 }, lastReplay: { ok: false, safety: { dryRun: true, connectedBots: 0 }, totals: { entries: 2, error: 1 } } })
+const replayErrored = evaluateReplay({ inbox: { exists: true, recorded: 5 }, lastReplay: { ok: false, safety: { ...VERIFIED_SAFETY }, totals: { entries: 2, error: 1 } } })
 check('回放里有出错条目 → 不达标', replayErrored.status === 'fail' && replayErrored.hint.includes('出错'))
+// 审计发现：以前"源目录未改动"是**没验证就写进证据**的。现在不许通过。
+const replayUnverified = evaluateReplay({ inbox: { exists: true, recorded: 5 }, lastReplay: { ok: true, safety: { dryRun: true, connectedBots: 0, sandboxed: true } } })
+check('没实测源目录 → 不达标（不许把未验证写成已验证）', replayUnverified.status === 'fail' && replayUnverified.evidence.includes('源目录未被实测校验'), replayUnverified.evidence)
+const replayChanged = evaluateReplay({ inbox: { exists: true, recorded: 5 }, lastReplay: { ok: true, safety: { ...VERIFIED_SAFETY, sourceUnchanged: false, sourceChanges: ['改动 qq-trace.jsonl'] } } })
+check('源目录被改动 → 不达标并点名文件', replayChanged.status === 'fail' && replayChanged.evidence.includes('qq-trace.jsonl'), replayChanged.evidence)
 
 // -------------------------------------------------------------------- ④ 可体检 --
 check('体检全绿 → 达标', evaluateDiagnose({ report: { summary: { passed: 18, total: 18, failed: 0, blockers: 0, verdict: 'healthy' }, checks: [] } }).status === 'pass')
@@ -103,8 +110,11 @@ check('没有任何产物 → 告警', evaluateExport({ sources: [{ name: 'x', p
 
 // -------------------------------------------------------------------- ⑥ 可注入 --
 const injectPass = evaluateInject({ injection: { enabled: true, dryRun: true, consumed: 4, queued: 6, intervalMs: 2000, lastAt: Date.now() }, injectedEvents: [{ stage: 'inject', reason: '注入回合的模型回复已被拦截（dry-run，未发送）：x' }] })
-check('通道开 + dry-run + 已消费 → 达标', injectPass.status === 'pass' && injectPass.evidence.includes('本次已消费 4 行'), injectPass.evidence)
-check('证据里写出拦下异步回复的次数', injectPass.evidence.includes('1 次拦下了异步 agent 回合的回复'), injectPass.evidence)
+check('通道开 + dry-run + 已消费且有拦截证据 → 达标', injectPass.status === 'pass' && injectPass.evidence.includes('本次已消费 4 行'), injectPass.evidence)
+check('证据里写出拦下出站的次数', injectPass.evidence.includes('1 次拦下了注入触发的出站'), injectPass.evidence)
+// 审计发现：以前"消费过"就给 pass，即使一次拦截证据都没有（泄漏发生时也照样绿）
+const injectUnverified = evaluateInject({ injection: { enabled: true, dryRun: true, consumed: 3, queued: 1, lastAt: Date.now() }, injectedEvents: [{ stage: 'inject', reason: '注入 message（dry-run：不会真发）' }] })
+check('消费过但没有拦截证据 → 告警（不再假绿灯）', injectUnverified.status === 'warn' && injectUnverified.hint.includes('拦截事件'), `${injectUnverified.status}｜${injectUnverified.hint}`)
 const injectDanger = evaluateInject({ injection: { enabled: true, dryRun: false, consumed: 2 } })
 check('dry-run 关闭 → 不达标（会真发 QQ）', injectDanger.status === 'fail' && injectDanger.evidence.includes('真的把消息发到 QQ'), injectDanger.evidence)
 check('通道关闭 → 告警并指出开关名', evaluateInject({ injection: { enabled: false, dryRun: true } }).hint.includes('injectEnabled'))
@@ -116,11 +126,12 @@ const allGreen = buildAcceptance({
   events: [
     { id: 't-1', stage: 'inbound', ok: true, level: 'info' },
     { id: 't-1', stage: 'reply', ok: true, level: 'info' },
-    { id: '', stage: 'inject', ok: true, level: 'info', reason: '注入完成：0 个出站调用被拦截（dry-run，未发送）' },
+    { id: '', stage: 'inject', ok: true, level: 'info', reason: '注入完成：同步阶段 0 次出站被拦；本会话的 agent 回合同样会被拦下' },
+    { id: '', stage: 'inject', ok: true, level: 'info', reason: '注入回合的模型回复已被拦截（dry-run，未发送）：示例' },
   ],
-  runtime: { injection: { enabled: true, dryRun: true, consumed: 2, queued: 2, intervalMs: 2000, lastAt: Date.now() } },
+  runtime: { features: { traceLevel: 'debug' }, injection: { enabled: true, dryRun: true, consumed: 2, queued: 2, intervalMs: 2000, lastAt: Date.now() } },
   inbox: { exists: true, recorded: 9, queued: 2 },
-  lastReplay: { ok: true, at: 1, durationMs: 200, totals: { entries: 1, replied: 1, silent: 0, error: 0 }, safety: { dryRun: true, connectedBots: 0 } },
+  lastReplay: { ok: true, at: 1, durationMs: 200, totals: { entries: 1, replied: 1, silent: 0, error: 0 }, safety: { ...VERIFIED_SAFETY } },
   lastExport: { entries: 8, bytes: 2048, filename: 'x.zip' },
   diagnosis: { report: { summary: { passed: 18, total: 18, failed: 0, blockers: 0, verdict: 'healthy' }, checks: [] } },
   sandboxCount: 2,
@@ -135,7 +146,13 @@ check('空输入不会崩且结论是"证据不足"', buildAcceptance({}).verdic
 check('formatAcceptance 容忍 null', formatAcceptance(null) === '（还没有验收结果）')
 const brokenReport = buildAcceptance({ events: [{ stage: 'reply', ok: false, level: 'error' }], runtime: { injection: { enabled: true, dryRun: false } } })
 check('有不达标项时 ok=false 且 verdict=broken', brokenReport.ok === false && brokenReport.verdict === 'broken' && brokenReport.totals.fail === 2)
-check('未知项单独计数（不算失败）', buildAcceptance({ events: [], runtime: null }).totals.unknown >= 3)
+check('未知项单独计数（不算失败，但也不许当成功）', buildAcceptance({ events: [], runtime: null }).totals.unknown >= 3)
+const unknownReport = buildAcceptance({ events: [], runtime: null })
+check('有 unknown 时 ok=false（脚本不该把"证据不足"当通过）', unknownReport.ok === false && unknownReport.verdict === 'unknown', JSON.stringify(unknownReport.totals))
+// 审计发现：traceLevel != debug 时被拒分支不落盘，① 曾经被误判成达标
+const warnLevel = buildAcceptance({ events: [{ id: 't-1', stage: 'agent', ok: false, level: 'warn', reason: '模型空输出' }], runtime: { features: { traceLevel: 'warn' } } })
+check('traceLevel=warn 时①判"证据不足"而不是达标', warnLevel.items[0].status === 'unknown' && warnLevel.items[0].evidence.includes('traceLevel=warn'), warnLevel.items[0].evidence)
+check('traceLevel=debug 时①正常评估', buildAcceptance({ events: [{ id: 't-1', stage: 'mention', ok: false, reason: '未 @' }], runtime: { features: { traceLevel: 'debug' } } }).items[0].status === 'pass')
 
 // ------------------------------------------------------- 真实 supervisor 汇总 --
 const traceFile = join(cwd, 'qq-trace.jsonl')
@@ -176,7 +193,7 @@ check('② 认出端到端贯穿链路', accepted.report.items[1].status === 'pa
 check('③ 没跑过回放时报告警', accepted.report.items[2].status === 'warn')
 check('③ 的沙箱计数排除回收站', accepted.report.items[2].metric.sandboxCount === 1, String(accepted.report.items[2].metric.sandboxCount))
 check('⑤ 认出在位产物', accepted.report.items[4].evidence.includes('事件流'), accepted.report.items[4].evidence)
-check('⑥ 读到快照里的注入状态', accepted.report.items[5].status === 'pass' && accepted.report.items[5].evidence.includes('已消费 1 行'), accepted.report.items[5].evidence)
+check('⑥ 读到快照里的注入状态（无拦截证据时如实告警）', accepted.report.items[5].status === 'warn' && accepted.report.items[5].evidence.includes('已消费 1 行'), `${accepted.report.items[5].status}｜${accepted.report.items[5].evidence}`)
 check('文本视图与结构化结果一致', accepted.text.includes('硬约束验收') && accepted.text.includes('① 无静默分支'))
 const cachedDiag = await sup.acceptance()
 check('体检结果被复用（两次汇总结论一致）', cachedDiag.report.items[3].evidence === accepted.report.items[3].evidence)

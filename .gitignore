@@ -1,13 +1,28 @@
 node_modules/
-qq-faces/
-qq-images/
-qq-memory/
-qq-replies/
-qq-bridge-debug.log
-qq-reminders.json
-qq-control.json
-qq-trace.jsonl
-qq-runtime.json
-qq-actions.log
-qq-inbox.jsonl
 *.zip
+
+# ---- 运行产物（含隐私：消息原文 / QQ 号 / 会话与追踪）----------------------
+# 桥与控制台在工作目录里写的所有文件；用通配规则兜住未来新增的产物，
+# 避免"cwd 恰好在仓库里"时把用户数据误提交。
+qq-*/
+qq-*.json
+qq-*.jsonl
+qq-*.log
+
+# 明确列出（可读性 + 防止有人用 ! 规则重新包含）
+qq-control.json
+qq-runtime.json
+qq-reminders.json
+qq-sessions.json
+qq-keywords.json
+qq-counters.json
+qq-dailyreport.json
+qq-trace.jsonl
+qq-inbox.jsonl
+qq-inject.jsonl
+qq-actions.log
+qq-bridge-debug.log
+qq-host-out.log
+qq-host-err.log
+qq-replay/
+qq-trash/

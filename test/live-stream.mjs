@@ -7,17 +7,34 @@
  * Usage: node test/live-stream.mjs [--token <control token>] [--control 8799] [--onebot 6700]
  */
 import { WebSocket } from 'ws'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 const arg = (name, fallback) => {
   const index = process.argv.indexOf(`--${name}`)
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback
 }
+
+/** 真实号从本机 profile 配置现取：仓库里只有占位号，而占位号不在生产白名单里。 */
+function privateIds() {
+  try {
+    const text = readFileSync(join(homedir(), '.dsh', 'profiles', 'web', 'cordis.patch.yml'), 'utf8')
+    const pick = (re) => (re.exec(text)?.[1] ?? '').split(',').map((item) => item.trim()).filter(Boolean)
+    return {
+      bot: (/^\s*botQq:\s*(\d+)/m.exec(text)?.[1] ?? ''),
+      user: pick(/^\s*allowUsers:\s*\[([^\]]*)\]/m)[0] ?? '',
+      group: pick(/^\s*allowGroups:\s*\[([^\]]*)\]/m)[0] ?? '',
+    }
+  } catch { return { bot: '', user: '', group: '' } }
+}
+const local = privateIds()
 const control = Number(arg('control', '8799'))
 const onebotPort = Number(arg('onebot', '6700'))
 const token = arg('token', '')
-const groupId = Number(arg('group', '100000001'))
-const userId = Number(arg('user', '2000000001'))
-const botQq = Number(arg('bot', '3000000001'))
+const groupId = Number(arg('group', local.group || '100000001'))
+const userId = Number(arg('user', local.user || '2000000001'))
+const botQq = Number(arg('bot', local.bot || '3000000001'))
 
 let passed = 0
 let failed = 0

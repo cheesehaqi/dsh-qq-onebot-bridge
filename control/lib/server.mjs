@@ -34,12 +34,19 @@ function readBody(request) {
   return new Promise((resolve) => {
     let size = 0
     const chunks = []
+    let tooLarge = false
     request.on('data', (chunk) => {
       size += chunk.length
-      if (size > MAX_BODY_BYTES) { request.destroy(); resolve(null); return }
+      if (size > MAX_BODY_BYTES) {
+        // 之前直接 request.destroy()，客户端只会看到连接被重置；改成读完余量后回 413
+        tooLarge = true
+        chunks.length = 0
+        return
+      }
       chunks.push(chunk)
     })
     request.on('end', () => {
+      if (tooLarge) { resolve({ __tooLarge: true }); return }
       const text = Buffer.concat(chunks).toString('utf8')
       if (!text) { resolve({}); return }
       try { resolve(JSON.parse(text)) } catch { resolve(null) }
@@ -151,12 +158,15 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
         return
       }
       if (request.method === 'GET' && path === '/api/export') {
-        const bundle = await api.exportBundle()
+        // redact=1 → 分享安全通路：QQ 号掩码、消息原文只留长度（诊断包的使用场景就是发给别人）
+        const redact = ['1', 'true', 'yes'].includes(String(url.searchParams.get('redact') ?? '').toLowerCase())
+        const bundle = await api.exportBundle({ redact })
         response.writeHead(200, {
           'content-type': 'application/zip',
           'content-disposition': `attachment; filename="${bundle.filename}"`,
           'content-length': String(bundle.buffer.length),
           'cache-control': 'no-store',
+          'x-redacted': redact ? '1' : '0',
         })
         response.end(bundle.buffer)
         return
@@ -189,6 +199,10 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
       }
       if (request.method === 'POST') {
         const body = await readBody(request)
+        if (body?.__tooLarge === true) {
+          json(response, 413, { ok: false, reason: `请求体过大（上限 ${Math.round(MAX_BODY_BYTES / 1024)} KiB）` })
+          return
+        }
         if (body === null) {
           json(response, 400, { ok: false, reason: '请求体不是合法 JSON 或过大' })
           return

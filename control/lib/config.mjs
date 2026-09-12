@@ -6,7 +6,7 @@
  * Config file: <repo>/qq-control.json   (machine-local, git-ignored)
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, parse, resolve } from 'node:path'
 
 /** Ports the console cares about. 6700 is pinned by the OneBot client config. */
 export const DEFAULT_PORTS = {
@@ -71,32 +71,60 @@ export function detectDshBin({ roots = [], readdir = readdirSync, exists = exist
   return resolve(found[0])
 }
 
+/**
+ * npx cache roots worth probing, derived from the ENVIRONMENT and the location of
+ * the running node — never from a hardcoded absolute path (a published plugin must
+ * not carry the author's `C:\Users\<name>` or `D:\...` layout).
+ */
+export function npxCacheRoots({ env = process.env, execPath = process.execPath } = {}) {
+  const home = env.USERPROFILE || env.HOME || ''
+  const localAppData = env.LOCALAPPDATA || (home ? join(home, 'AppData', 'Local') : '')
+  const roamingAppData = env.APPDATA || (home ? join(home, 'AppData', 'Roaming') : '')
+  const roots = []
+  const push = (value) => { if (value && !roots.includes(value)) roots.push(value) }
+  // 1) 显式覆盖优先
+  for (const key of ['DSH_NPX_CACHE', 'npm_config_cache', 'NPM_CONFIG_CACHE']) {
+    const value = env[key]
+    if (!value) continue
+    push(value.endsWith('_npx') ? value : join(value, '_npx'))
+  }
+  // 2) npm 默认缓存位置
+  if (localAppData) push(join(localAppData, 'npm-cache', '_npx'))
+  if (roamingAppData) push(join(roamingAppData, 'npm-cache', '_npx'))
+  // 3) 以 node 自身位置为锚：<node>\..\_npx、<node>\node_cache\_npx、<盘>:\nodejs\node_cache\_npx
+  try {
+    const nodeDir = dirname(execPath)
+    const driveRoot = parse(execPath).root
+    push(join(nodeDir, '_npx'))
+    push(join(nodeDir, 'node_cache', '_npx'))
+    if (driveRoot) {
+      push(join(driveRoot, 'nodejs', 'node_cache', '_npx'))
+      push(join(driveRoot, 'node_cache', '_npx'))
+    }
+  } catch { /* 拿不到 node 位置就只用环境变量 */ }
+  return roots
+}
+
 /** Fill in everything that can be discovered on this machine. */
 export function detectPaths(config = {}, { env = process.env, exists = existsSync, readdir = readdirSync } = {}) {
   const home = env.USERPROFILE || env.HOME || ''
   const localAppData = env.LOCALAPPDATA || (home ? join(home, 'AppData', 'Local') : '')
-  const cwd = config.cwd || env.DSH_QQ_CWD || (exists('D:\\qq-work') ? 'D:\\qq-work' : process.cwd())
+  // cwd 只能来自配置或环境变量（默认当前目录）：插件不该假设任何人的工作目录路径
+  const cwd = config.cwd || env.DSH_QQ_CWD || process.cwd()
 
   const dshBin = firstExisting([
     config.dshBin,
     env.DSH_WEB_BIN,
-    detectDshBin({
-      roots: [
-        localAppData ? join(localAppData, 'npm-cache', '_npx') : '',
-        env.DSH_NPX_CACHE || '',
-        'D:\\nodejs\\node_cache\\_npx',
-        'C:\\Users\\<user>\\AppData\\Roaming\\npm-cache\\_npx',
-      ],
-      readdir,
-      exists,
-    }),
+    detectDshBin({ roots: npxCacheRoots({ env }), readdir, exists }),
     join(localAppData, 'Programs', 'DSH Desktop', 'resources', 'app.asar.unpacked', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
   ])
 
   const napcatBat = firstExisting([
     config.napcatBat,
     localAppData ? join(localAppData, 'Programs', 'NapCat', 'bootmain', 'napcat.bat') : '',
-    'C:\\Users\\<user>\\AppData\\Local\\Programs\\NapCat\\bootmain\\napcat.bat',
+    env.ProgramFiles ? join(env.ProgramFiles, 'NapCat', 'bootmain', 'napcat.bat') : '',
+    env['ProgramFiles(x86)'] ? join(env['ProgramFiles(x86)'], 'NapCat', 'bootmain', 'napcat.bat') : '',
+    home ? join(home, '.dsh-qq', 'napcat.bat') : '',
   ])
   const napcatQr = firstExisting([
     config.napcatQr,

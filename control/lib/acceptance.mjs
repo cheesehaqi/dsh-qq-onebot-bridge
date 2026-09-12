@@ -27,7 +27,15 @@ const item = (key, status, evidence, hint = '', metric = {}) => {
 }
 
 /** ① 无静默分支：被拒/失败事件必须带 reason。 */
-export function evaluateSilent(events = []) {
+export function evaluateSilent(events = [], { traceLevel = '' } = {}) {
+  // 被拒/丢弃埋点是 info 级，而 traceLevel 过滤发生在**写文件与内存环之前**：
+  // 非 debug 时这些证据根本不存在，此时必须判"证据不足"，不能因为"文件里没有失败"就判达标。
+  if (traceLevel && traceLevel !== 'debug') {
+    return item('silent', 'unknown',
+      `当前 traceLevel=${traceLevel}：被拒/丢弃分支（info 级）不会落盘，无法据此验收这一条`,
+      '把 traceLevel 改回 debug（默认值）后再验收；或用 `mark` 的可选 level 参数把关键分支提升为 warn',
+      { traceLevel })
+  }
   const rejections = events.filter((event) => event.ok === false)
   const missing = rejections.filter((event) => String(event.reason ?? '').trim() === '')
   const errors = events.filter((event) => event.level === 'error')
@@ -92,16 +100,26 @@ export function evaluateReplay({ inbox = null, lastReplay = null, sandboxCount =
   }
   const totals = lastReplay.totals ?? {}
   const safety = lastReplay.safety ?? {}
-  const safe = safety.dryRun === true && safety.connectedBots === 0
+  // 「源目录未改动」必须是**实测**出来的（replay.mjs 在回放前后各取一次清单），
+  // 没测到就不许写成已验证；sandboxed 也参与判定（它是自证字段，但一样要真）。
+  const sandboxed = safety.sandboxed !== false
+  const sourceUnchanged = safety.sourceUnchanged === true
+  const safe = safety.dryRun === true && safety.connectedBots === 0 && sandboxed && sourceUnchanged
   const evidence = `已录制 ${recorded} 条；最近一次回放 ${totals.entries ?? 0} 条（${totals.replied ?? 0} 会回复 / ${totals.silent ?? 0} 静默 / ${totals.error ?? 0} 出错），耗时 ${lastReplay.durationMs ?? 0}ms；沙箱 ${sandboxCount} 个`
   if (!safe) {
-    return item('replay', 'fail', `${evidence}；但安全保证不完整（dry-run=${safety.dryRun ? '开' : '关'}、QQ 连接=${safety.connectedBots ?? '?'}）`,
-      '回放必须全程 dry-run 且零连接；检查 control/lib/replay.mjs 的 sandboxConfig', { recorded, lastReplayAt: lastReplay.at })
+    const missing = [
+      safety.dryRun === true ? '' : `dry-run=${safety.dryRun ? '开' : '关'}`,
+      safety.connectedBots === 0 ? '' : `QQ 连接=${safety.connectedBots ?? '?'}`,
+      sandboxed ? '' : 'cwd 未沙箱化',
+      sourceUnchanged ? '' : (safety.sourceUnchanged === false ? `源目录有改动（${(safety.sourceChanges ?? []).slice(0, 3).join('、') || '见报告'}）` : '源目录未被实测校验'),
+    ].filter(Boolean)
+    return item('replay', 'fail', `${evidence}；安全保证不完整：${missing.join('、')}`,
+      '回放必须全程 dry-run、零连接、cwd 在沙箱内，且回放前后源目录清单一致', { recorded, lastReplayAt: lastReplay.at })
   }
   if (lastReplay.ok === false) {
     return item('replay', 'fail', `${evidence}；本次回放里有条目出错`, '看回放结果文本里的「出错」条目原因', { recorded, lastReplayAt: lastReplay.at })
   }
-  return item('replay', 'pass', `${evidence}；dry-run=开、QQ 连接 0、源目录未改动`, '', { recorded, lastReplayAt: lastReplay.at, sandboxCount })
+  return item('replay', 'pass', `${evidence}；dry-run=开、QQ 连接 0、cwd 沙箱化、源目录实测未改动`, '', { recorded, lastReplayAt: lastReplay.at, sandboxCount })
 }
 
 /** ④ 可体检：体检跑过且没有 blocker。 */
@@ -156,14 +174,18 @@ export function evaluateInject({ injection = null, injectedEvents = [] } = {}) {
     return item('inject', 'fail', `${evidence}；**dry-run 关闭**：注入会真的把消息发到 QQ`,
       '把 injectDryRun 改回 true（默认值），除非你明确要用注入真发消息', { enabled, dryRun, consumed, queued })
   }
-  const suppressed = injectedEvents.filter((event) => String(event.reason ?? '').includes('注入回合的模型回复已被拦截')).length
+  // 消费过 ≠ 验证过：只有真的出现过"拦下出站"的证据（模型回复/工具/延时发送），才能说这一条达标
+  const suppressed = injectedEvents.filter((event) => String(event.reason ?? '').includes('已被拦截')).length
   const consumedRecently = lastAt > 0 && Date.now() - lastAt < 24 * 3600 * 1000
+  const verified = suppressed > 0
   const detail = consumed > 0
-    ? `；已消费 ${consumed} 行（其中 ${suppressed} 次拦下了异步 agent 回合的回复）`
+    ? `；已消费 ${consumed} 行，其中 ${suppressed} 次拦下了注入触发的出站（模型回复/工具/延时发送）`
     : '；还没消费过注入——发一条试试，注意出站会被拦下'
-  return item('inject', consumed === 0 ? 'warn' : 'pass',
+  return item('inject', consumed === 0 || !verified ? 'warn' : 'pass',
     `${evidence}${detail}`,
-    consumedRecently ? '' : '点上面的「注入」按钮，或在控制台注入一条消息验证链路',
+    consumed === 0
+      ? '点上面的「注入」按钮，或在控制台注入一条消息验证链路'
+      : (verified ? '' : '已消费过注入，但还没出现"拦下出站"的证据：确认桥的 dry-run 拦截事件是否被记录（stage=inject）'),
     { enabled, dryRun, consumed, queued, suppressed })
 }
 
@@ -183,7 +205,7 @@ export function buildAcceptance({
 } = {}) {
   const injectedEvents = events.filter((event) => event.stage === 'inject')
   const items = [
-    evaluateSilent(events),
+    evaluateSilent(events, { traceLevel: runtime?.features?.traceLevel ?? '' }),
     evaluateTrace(events),
     evaluateReplay({ inbox, lastReplay, sandboxCount }),
     evaluateDiagnose(diagnosis),
@@ -198,7 +220,8 @@ export function buildAcceptance({
     unknown: items.filter((entry) => entry.status === 'unknown').length,
   }
   const verdict = totals.fail > 0 ? 'broken' : (totals.unknown > 0 ? 'unknown' : (totals.warn > 0 ? 'partial' : 'all-green'))
-  return { ok: totals.fail === 0, verdict, totals, items, generatedAt, checks: items.length }
+  // ok 同时要求"没有 fail"和"没有 unknown"：只读 ok 的脚本/监控不该把"证据不足"当通过
+  return { ok: totals.fail === 0 && totals.unknown === 0, verdict, totals, items, generatedAt, checks: items.length }
 }
 
 /** 可读文本（控制台/CLI 通用）。 */

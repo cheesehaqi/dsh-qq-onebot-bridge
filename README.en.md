@@ -388,11 +388,25 @@ This plugin is provided for technical learning and personal research. Users must
 - The port listens on 127.0.0.1 only; do not expose it
 - OneBot implementations themselves carry QQ ban risk; assess third-party bot protocols yourself
 
+## Privacy and redaction
+
+Debugging usually means sending logs to someone else, so the plugin is explicit about where data goes:
+
+| Item | Rule |
+|---|---|
+| Diagnostic bundle | "导出诊断包" exports **redacted by default**: QQ ids are masked digit-by-digit (first two kept) and message bodies become "[已脱敏 N 字]"; the bundle carries a `REDACTED.json` describing the policy. Unchecking the box exports plaintext (with a warning toast) |
+| Runtime artefacts | `qq-inbox.jsonl` (message bodies), `qq-trace.jsonl` (chat keys + text snippets), `qq-runtime.json`, `qq-actions.log` are written to the local working directory only and are **all covered by `.gitignore`** (`qq-*/`, `qq-*.json`, `qq-*.jsonl`, `qq-*.log` plus explicit entries), so a cwd inside the repo still cannot commit them |
+| Recording redaction | `inboxRedact: true` masks QQ ids already at record time |
+| The repository | contains no keys, passwords or real QQ ids: secrets live only in your DSH profile config (outside the repo), and `test/privacy-unit.mjs` re-scans every tracked file on each test run (the private ids are read from your machine-local config or `DSH_QQ_PRIVATE_IDS`, never stored in the test) |
+| Console | binds `127.0.0.1` only, every endpoint needs the token (kept in the ignored `qq-control.json`), cross-site Origins are rejected |
+
+> Deployment fact: this plugin is a **DSH bundle** and runs inside a DSH profile; peer dependencies (`@deepseek-ai/dsh-*`, `@deepseek-ai/schemastery` — the bare `schemastery` alias is injected by DSH) are provided by the host. Copying `lib/` out and running it standalone will not work by design.
+
 ## Changelog
 
 The five most recent versions (always kept rolling):
 
-- **v0.4.0** — "Everything Debuggable": end-to-end debuggability — trace-id structured events where every silent drop carries a reason, a live SSE event stream and per-message decision chains, one-click diagnosis, a diagnostic-bundle export, runtime snapshot and effective config; **recording / offline replay / event injection** (every inbound event recorded to `qq-inbox.jsonl` → replayed through the real bridge code in a sandbox with dry-run, reporting "would reply / silent + why" → synthetic events injected into the real pipeline from the console, with the asynchronous agent-turn reply intercepted too, never touching QQ); a **hard-constraint acceptance page** (live evidence and a next step for each of the 6 constraints); ships its own standalone control console (`control/`, port 8799) with port/process/log/QR overview, host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication
+- **v0.4.0** — "Everything Debuggable": end-to-end debuggability — trace-id structured events where every silent drop carries a reason, a live SSE event stream and per-message decision chains, one-click diagnosis, a diagnostic-bundle export, runtime snapshot and effective config; **recording / offline replay / event injection** (every inbound event recorded to `qq-inbox.jsonl` → replayed through the real bridge code in a sandbox with dry-run, reporting "would reply / silent + why" → synthetic events injected into the real pipeline from the console, one injection = one dedicated turn with that whole turn's replies and tool calls intercepted, never touching QQ); a **hard-constraint acceptance page** (live evidence and a next step for each of the 6 constraints); **redacted diagnostic exports by default**, `.gitignore` covering every runtime artefact and `test/privacy-unit.mjs` as a privacy regression guard; ships its own standalone control console (`control/`, port 8799) with port/process/log/QR overview, host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication
 - **v0.3.9** — group insight: message statistics (`/统计` `/周榜`), read-only `/荣誉` `/公告` `/群精华`, a daily group report (off by default), recurring reminders (daily/weekly/weekdays) and `/mc` Minecraft status
 - **v0.3.8** — anti-recall, sensitive-word and flood protection, group/friend join verification (admin `/同意 <id>`), a wider group-admin API (`/公告` `/精华` `/名片` `/头衔` `/全员禁言`) and all admin writes moved behind the shared gate
 - **v0.3.7** — zero-cost interaction pack: keyword wordbook (off by default), local fortune/lot/tarot, dice and random picks, points economy (off by default), idiom chain (373 idioms) and guess-the-number (off by default); fixes the `stop()` disposer and the idiom-chain rule

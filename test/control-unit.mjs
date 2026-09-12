@@ -91,9 +91,9 @@ const overridden = detectPaths({ ports: { control: 9999 } }, { env: {}, exists: 
 check('端口部分覆盖保留其余默认值', overridden.ports.control === 9999 && overridden.ports.onebot === 6700)
 check('nodeExe 默认指向当前 node', overridden.nodeExe === process.execPath)
 check('配置可保存并回读', (() => {
-  const ok = saveControlConfig(configFile, { ports: { control: 8799, host: 3080, onebot: 6700, napcat: 6099, tts: 9880 }, cwd: 'D:\\qq-work' })
+  const ok = saveControlConfig(configFile, { ports: { control: 8799, host: 3080, onebot: 6700, napcat: 6099, tts: 9880 }, cwd: 'D:\\qq-bridge-work' })
   const back = JSON.parse(readFileSync(configFile, 'utf8'))
-  return ok && back.cwd === 'D:\\qq-work' && back.ports.onebot === 6700
+  return ok && back.cwd === 'D:\\qq-bridge-work' && back.ports.onebot === 6700
 })())
 
 const detected = detectDshBin({
@@ -241,16 +241,39 @@ for (const [path, needle] of [['/api/host/start', '宿主已启动'], ['/api/hos
 }
 const freeResponse = await fetch(base + '/api/port/free?token=' + token, { method: 'POST', body: JSON.stringify({ name: 'onebot' }) })
 check('POST /api/port/free 透传端口名', (await freeResponse.json()).reason === '已释放 onebot')
-const cfgResponse = await fetch(base + '/api/config?token=' + token, { method: 'POST', body: JSON.stringify({ cwd: 'D:\\qq-work', ports: { host: 3081, onebot: 999999 } }) })
+const cfgResponse = await fetch(base + '/api/config?token=' + token, { method: 'POST', body: JSON.stringify({ cwd: 'D:\\qq-bridge-work', ports: { host: 3081, onebot: 999999 } }) })
 const cfgBody = await cfgResponse.json()
-check('POST /api/config 过滤非法端口', cfgBody.ok === true && savedPatch.cwd === 'D:\\qq-work' && savedPatch.ports.host === 3081 && savedPatch.ports.onebot === 6700, JSON.stringify(savedPatch))
+check('POST /api/config 过滤非法端口', cfgBody.ok === true && savedPatch.cwd === 'D:\\qq-bridge-work' && savedPatch.ports.host === 3081 && savedPatch.ports.onebot === 6700, JSON.stringify(savedPatch))
 const emptyCfg = await fetch(base + '/api/config?token=' + token, { method: 'POST', body: '{}' })
 check('空配置更新被拒', (await emptyCfg.json()).ok === false)
 const badJson = await fetch(base + '/api/host/start?token=' + token, { method: 'POST', body: '{oops' })
 check('非法 JSON 返回 400', badJson.status === 400)
 const wrongVerb = await fetch(base + '/api/host/start?token=' + token)
 check('GET 调 mutation 返回 404/405', [404, 405].includes(wrongVerb.status), String(wrongVerb.status))
+// 审计发现：以前超大请求体直接 destroy socket，客户端只看到连接重置
+const tooLarge = await fetch(base + '/api/host/start?token=' + token, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ pad: 'x'.repeat(70 * 1024) }),
+})
+check('超大请求体返回 413 而不是断开连接', tooLarge.status === 413, String(tooLarge.status))
+check('413 带可读原因', (await tooLarge.json()).reason.includes('请求体过大'))
 server.close()
+
+// ------------------------------------------------- 事件流 tailer 隔离（审计） --
+const traceA = join(dir, 'a-trace.jsonl')
+const traceB = join(dir, 'b-trace.jsonl')
+const traceLine = (id) => `${JSON.stringify({ v: 1, ts: Date.now(), id, level: 'info', module: 'bridge', stage: 'inbound', ok: true, reason: '' })}\n`
+writeFileSync(traceA, traceLine('t-a'), 'utf8')
+writeFileSync(traceB, traceLine('t-b'), 'utf8')
+const supA = createSupervisor({ ...config, cwd: dir, logs: { ...config.logs, trace: traceA } }, { exec: okExec, logger: { info() {}, warn() {}, error() {} } })
+const supB = createSupervisor({ ...config, cwd: dir, logs: { ...config.logs, trace: traceB } }, { exec: okExec, logger: { info() {}, warn() {}, error() {} } })
+check('不同 supervisor 的 tailer 相互独立', supA.tailer() !== supB.tailer())
+check('第二个 supervisor 不会读到第一个的事件文件', supB.tailer().poll().every((event) => event.id === 't-b'), JSON.stringify(supB.tailer().poll()))
+const conn1 = supA.tailer()
+const conn2 = supA.tailer()
+check('同一 supervisor 的两次取用也是两份 tailer', conn1 !== conn2)
+check('两个连接都能各自拿到完整历史（不互相偷事件）', conn1.poll().length >= 1 && conn2.poll().length >= 1, `${conn1.poll().length}/${conn2.poll().length}`)
 
 // --------------------------------------------------------------- helpers -----
 const ran = await run('cmd.exe', ['/c', 'echo', 'hi'])

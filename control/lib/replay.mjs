@@ -18,7 +18,7 @@
  */
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { moveToTrash } from '../../lib/store.js'
 
@@ -259,7 +259,7 @@ export function formatReplayText(report) {
   lines.push(`离线回放：${report.results.length} 条（${report.totals.replied} 条会回复 / ${report.totals.silent} 条静默 / ${report.totals.error} 条出错），耗时 ${report.durationMs}ms`)
   lines.push(`沙箱：${report.sandbox}`)
   if (report.safety) {
-    lines.push(`安全：dry-run=${report.safety.dryRun ? '开' : '关'}、QQ 连接数=${report.safety.connectedBots}、cwd 已沙箱化=${report.safety.sandboxed ? '是' : '否'}`)
+    lines.push(`安全：dry-run=${report.safety.dryRun ? '开' : '关'}、QQ 连接数=${report.safety.connectedBots}、cwd 已沙箱化=${report.safety.sandboxed ? '是' : '否'}、源目录实测未改动=${report.safety.sourceUnchanged ? '是' : `否（${(report.safety.sourceChanges ?? []).join('、')}）`}`)
   }
   if (report.copied.length > 0) lines.push(`已复制状态：${report.copied.join('、')}`)
   for (const warning of report.warnings) lines.push(`提示：${warning}`)
@@ -377,6 +377,8 @@ export function createReplayer({
     }
 
     const copy = copySandboxState(sourceCwd, sandbox, deps)
+    // 回放前给线上目录拍一张清单：跑完再拍一张做对比，报告里的"源目录未改动"才算实测
+    const sourceBefore = sourceCwd ? snapshotTree(sourceCwd) : new Map()
     if (copy.failed.length > 0) warnings.push(`以下状态未能复制，回放结果可能与线上不同：${copy.failed.join('、')}`)
     for (const dir of copy.skippedMedia) warnings.push(`未复制媒体目录 ${dir}（回放中引用旧图片/语音会走"文件缺失"分支）`)
 
@@ -448,11 +450,16 @@ export function createReplayer({
       error: results.filter((item) => item.status === 'error').length,
       action: results.filter((item) => item.status === 'action').length,
     }
-    // 安全保证：出站全部被 dry-run 拦截，且从未建立任何 QQ 连接
+    // 安全保证：出站全部被 dry-run 拦截、从未建立任何 QQ 连接，且线上目录**实测**未被改动
+    const sourceAfter = sourceCwd ? snapshotTree(sourceCwd) : new Map()
+    const sourceChanges = sourceCwd ? diffTrees(sourceBefore, sourceAfter) : []
     const safety = {
       dryRun: server.dryRun === true,
       connectedBots: typeof server.currentSocket === 'function' && server.currentSocket() ? 1 : 0,
       sandboxed: String(config.cwd) === sandbox,
+      sourceUnchanged: sourceCwd ? sourceChanges.length === 0 : true,
+      sourceChanges,
+      sourceFiles: sourceAfter.size,
       forcedOff: ['notifyEnabled', 'ttsEnabled', 'sttEnabled', 'injectEnabled', 'recordInbound'],
     }
     const report = {
@@ -480,6 +487,43 @@ export function createReplayer({
   return { run, sandboxRoot: root }
 }
 
+/** Snapshot a directory tree (bounded depth) so a replay can PROVE it left the live files alone. */
+export function snapshotTree(root, { maxDepth = 2, maxEntries = 4000, skip = new Set(['node_modules', '.git', 'qq-replay', '_trash']) } = {}) {
+  const out = new Map()
+  const walk = (dir, depth) => {
+    if (depth > maxDepth || out.size >= maxEntries) return
+    let entries = []
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (out.size >= maxEntries) return
+      if (skip.has(entry.name)) continue
+      const file = join(dir, entry.name)
+      if (entry.isDirectory()) { walk(file, depth + 1); continue }
+      try {
+        const info = statSync(file)
+        out.set(file, `${info.size}:${Math.round(info.mtimeMs)}`)
+      } catch { /* 读不到就跳过 */ }
+    }
+  }
+  walk(root, 0)
+  return out
+}
+
+/** Compare two snapshots and list what changed (capped). */
+export function diffTrees(before, after, limit = 10) {
+  const changes = []
+  for (const [file, stamp] of after) {
+    if (!before.has(file)) changes.push(`新增 ${basename(file)}`)
+    else if (before.get(file) !== stamp) changes.push(`改动 ${basename(file)}`)
+    if (changes.length >= limit) return changes
+  }
+  for (const file of before.keys()) {
+    if (!after.has(file)) changes.push(`消失 ${basename(file)}`)
+    if (changes.length >= limit) return changes
+  }
+  return changes
+}
+
 /** A report-shaped failure (so callers and the text view never see a half object). */
 function failedReport({ started, sandbox, sourceCwd, botQq, warnings, reason, copied = [], now = () => Date.now() }) {
   const report = {
@@ -495,8 +539,7 @@ function failedReport({ started, sandbox, sourceCwd, botQq, warnings, reason, co
     copied,
     skippedMedia: [],
     warnings,
-    safety: null,
-    totals: { entries: 0, replied: 0, silent: 0, error: 0, action: 0 },
+    safety: null,    totals: { entries: 0, replied: 0, silent: 0, error: 0, action: 0 },
     results: [],
   }
   report.text = `离线回放无法进行：${reason}`

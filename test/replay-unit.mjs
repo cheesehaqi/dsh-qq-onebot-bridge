@@ -226,7 +226,7 @@ check('报告带文本视图与耗时', typeof report.text === 'string' && repor
 check('沙箱目录真实存在且独立于源目录', exists(report.sandbox) && report.sandbox !== sourceCwd)
 check('沙箱内不写入源目录', readFileSync(join(sourceCwd, 'qq-keywords.json'), 'utf8') === '{}')
 check('状态被复制进沙箱', report.copied.includes('qq-keywords.json') && exists(join(report.sandbox, 'qq-keywords.json')))
-check('cwd 覆盖被拒绝并留下提示', (await replayer.run({ entries: entries.slice(0, 1), overrides: { cwd: 'D:\\qq-work' } })).warnings.some((line) => line.includes('cwd 覆盖')))
+check('cwd 覆盖被拒绝并留下提示', (await replayer.run({ entries: entries.slice(0, 1), overrides: { cwd: 'D:\\somewhere-else' } })).warnings.some((line) => line.includes('cwd 覆盖')))
 
 const silentRun = await createReplayer({ pluginRoot: dir, sourceCwd, sandboxRoot: join(dir, 'replay-runs'), loaders: stubLoaders({ silent: true }) }).run({ entries })
 check('静默分支被如实报告', silentRun.results[0].status === 'silent' && silentRun.results[0].verdict.includes('不在白名单'))

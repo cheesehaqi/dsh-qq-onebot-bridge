@@ -40,7 +40,7 @@
     ttsMaxChars: 120
     # ---- 本地 TTS（ttsProvider: local 时生效；先启动本地 api_v2 服务，参考 TTS控制.bat）----
     ttsLocalUrl: http://127.0.0.1:9880
-    ttsLocalRefAudio: 'D:/voice/xiaojingyu.wav'  # 音色参考音频（3-10 秒 wav，绝对路径，必填）
+    ttsLocalRefAudio: 'D:/voice/your-voice.wav'  # 音色参考音频（3-10 秒 wav，绝对路径，必填）
     ttsLocalPromptText: ''       # 参考音频台词，可留空
     ttsLocalTextLang: zh
     ttsLocalPromptLang: zh

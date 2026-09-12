@@ -10,17 +10,35 @@
  *      per-session tool registration and assistant/message delivery)
  *   4. an unknown command still reaches the agent (no silent drop)
  *
- * Usage: node test/live-e2e.mjs [--group 100000001] [--user 2000000001] [--bot 3000000001]
+ * Usage: node test/live-e2e.mjs [--group <真实群号>] [--user <真实QQ>] [--bot <机器人QQ>]
+ * 不给参数时从机器本地的 profile 配置现取（仓库里只有占位号）。
  */
 import { WebSocket } from 'ws'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 const arg = (name, fallback) => {
   const index = process.argv.indexOf(`--${name}`)
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback
 }
-const groupId = Number(arg('group', '100000001'))
-const userId = Number(arg('user', '2000000001'))
-const botQq = Number(arg('bot', '3000000001'))
+
+/** 真实号从本机 profile 配置现取：占位号不在生产白名单里，直接用会被白名单拦下。 */
+function privateIds() {
+  try {
+    const text = readFileSync(join(homedir(), '.dsh', 'profiles', 'web', 'cordis.patch.yml'), 'utf8')
+    const pick = (re) => (re.exec(text)?.[1] ?? '').split(',').map((item) => item.trim()).filter(Boolean)
+    return {
+      bot: (/^\s*botQq:\s*(\d+)/m.exec(text)?.[1] ?? ''),
+      user: pick(/^\s*allowUsers:\s*\[([^\]]*)\]/m)[0] ?? '',
+      group: pick(/^\s*allowGroups:\s*\[([^\]]*)\]/m)[0] ?? '',
+    }
+  } catch { return { bot: '', user: '', group: '' } }
+}
+const local = privateIds()
+const groupId = Number(arg('group', local.group || '100000001'))
+const userId = Number(arg('user', local.user || '2000000001'))
+const botQq = Number(arg('bot', local.bot || '3000000001'))
 const url = arg('url', 'ws://127.0.0.1:6700/')
 
 const replies = []
