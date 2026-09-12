@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto'
 import { tailLines } from './supervisor.mjs'
 
 const MAX_BODY_BYTES = 64 * 1024
-const LOG_NAMES = ['hostOut', 'hostErr', 'bridge']
+const LOG_NAMES = ['hostOut', 'hostErr', 'bridge', 'trace', 'audit', 'runtime']
 const CONFIG_KEYS = ['cwd', 'dshBin', 'nodeExe', 'napcatBat', 'ttsBat']
 
 export function createToken() {
@@ -107,6 +107,70 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
         }
         const lines = Math.min(1000, Math.max(10, Number(url.searchParams.get('lines')) || 200))
         json(response, 200, { ok: true, name, lines: tailLines(api.logFile(name), lines) })
+        return
+      }
+      if (request.method === 'GET' && path === '/api/trace') {
+        const traceId = url.searchParams.get('traceId') ?? ''
+        if (traceId) {
+          const chain = api.traceChain(traceId)
+          json(response, 200, { ok: true, traceId, chain })
+          return
+        }
+        const okParam = url.searchParams.get('ok')
+        const events = api.traceEvents({
+          limit: Math.min(2000, Math.max(1, Number(url.searchParams.get('limit')) || 300)),
+          chatKey: url.searchParams.get('chatKey') ?? '',
+          level: url.searchParams.get('level') ?? '',
+          stage: url.searchParams.get('stage') ?? '',
+          ok: okParam === null || okParam === '' ? null : okParam === 'false' ? false : true,
+        })
+        json(response, 200, { ok: true, events, summary: api.summarize ? api.summarize(events) : undefined })
+        return
+      }
+      if (request.method === 'GET' && path === '/api/runtime') {
+        json(response, 200, { ok: true, runtime: api.runtime() })
+        return
+      }
+      if (request.method === 'GET' && path === '/api/diagnose') {
+        const result = await api.diagnose()
+        json(response, 200, { ok: true, ...result })
+        return
+      }
+      if (request.method === 'GET' && path === '/api/export') {
+        const bundle = await api.exportBundle()
+        response.writeHead(200, {
+          'content-type': 'application/zip',
+          'content-disposition': `attachment; filename="${bundle.filename}"`,
+          'content-length': String(bundle.buffer.length),
+          'cache-control': 'no-store',
+        })
+        response.end(bundle.buffer)
+        return
+      }
+      if (request.method === 'GET' && path === '/api/stream') {
+        // Server-Sent Events: push new trace events as the bridge writes them.
+        response.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        })
+        response.write('retry: 3000\n\n')
+        const tailer = api.tailer()
+        let closed = false
+        const timer = setInterval(() => {
+          if (closed) return
+          try {
+            const events = tailer.poll()
+            for (const event of events) response.write(`data: ${JSON.stringify(event)}\n\n`)
+            response.write(': ping\n\n')
+          } catch (error) {
+            logger?.warn?.(`trace stream failed: ${error.message}`)
+          }
+        }, 1000)
+        request.on('close', () => {
+          closed = true
+          clearInterval(timer)
+        })
         return
       }
       if (request.method === 'POST') {

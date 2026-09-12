@@ -8,36 +8,49 @@
   :root { --bg:#0f1720; --panel:#17222e; --line:#243447; --fg:#e6edf3; --dim:#8aa0b4; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --accent:#4a9eff; }
   * { box-sizing: border-box; }
   body { margin:0; font:14px/1.5 "Microsoft YaHei",system-ui,sans-serif; background:var(--bg); color:var(--fg); }
-  header { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  header { display:flex; align-items:center; gap:10px; padding:12px 18px; border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
   header h1 { font-size:16px; margin:0; font-weight:600; }
   header .spacer { flex:1; }
-  .pill { padding:2px 10px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--dim); }
+  .pill { padding:2px 10px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--dim); white-space:nowrap; }
   .pill.on { color:#0d1117; background:var(--ok); border-color:var(--ok); }
   .pill.off { color:var(--bad); border-color:var(--bad); }
-  main { padding:16px 18px 40px; display:grid; gap:16px; grid-template-columns: minmax(320px,1fr) minmax(360px,1.2fr); align-items:start; }
-  @media (max-width: 900px) { main { grid-template-columns:1fr; } }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
-  .card h2 { font-size:13px; margin:0 0 10px; color:var(--dim); font-weight:600; letter-spacing:.5px; }
+  .pill.warn { color:#0d1117; background:var(--warn); border-color:var(--warn); cursor:pointer; }
+  main { padding:14px 18px 60px; display:grid; gap:14px; grid-template-columns: minmax(320px,1fr) minmax(380px,1.15fr); align-items:start; }
+  @media (max-width: 1000px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; min-width:0; }
+  .card h2 { font-size:13px; margin:0 0 10px; color:var(--dim); font-weight:600; letter-spacing:.5px; display:flex; align-items:center; gap:8px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
-  td, th { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
+  td, th { text-align:left; padding:5px 4px; border-bottom:1px solid var(--line); }
   th { color:var(--dim); font-weight:500; }
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; background:var(--bad); }
   .dot.on { background:var(--ok); }
-  .dot.warn { background:var(--warn); }
-  button { background:#22303f; color:var(--fg); border:1px solid var(--line); border-radius:7px; padding:7px 11px; cursor:pointer; font-size:13px; }
-  button:hover { border-color:var(--accent); }
+  button, select, input { background:#22303f; color:var(--fg); border:1px solid var(--line); border-radius:7px; padding:6px 10px; cursor:pointer; font-size:13px; }
+  button:hover, select:hover { border-color:var(--accent); }
   button.primary { background:var(--accent); border-color:var(--accent); color:#06121f; font-weight:600; }
   button.danger { border-color:#5c2b2b; color:#ffb4ae; }
   button:disabled { opacity:.45; cursor:not-allowed; }
-  .row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
-  pre { margin:0; padding:10px; background:#0b131b; border:1px solid var(--line); border-radius:8px; max-height:340px; overflow:auto; font-size:12px; line-height:1.45; white-space:pre-wrap; word-break:break-all; }
+  input[type=text] { cursor:text; width:100%; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; align-items:center; }
+  pre { margin:0; padding:10px; background:#0b131b; border:1px solid var(--line); border-radius:8px; max-height:300px; overflow:auto; font-size:12px; line-height:1.45; white-space:pre-wrap; word-break:break-all; }
   .meta { color:var(--dim); font-size:12px; }
   .warnbox { border-color:#5a4620; background:#241d0f; color:#f0d08a; }
-  a { color:var(--accent); }
-  input { background:#0b131b; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px 8px; width:100%; }
+  .badbox { border-color:#5c2b2b; background:#241010; color:#ffb4ae; }
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-  .toast { position:fixed; right:16px; bottom:16px; background:#1d2a38; border:1px solid var(--line); padding:10px 14px; border-radius:8px; max-width:50ch; opacity:0; transition:.2s; }
+  .stream { max-height:360px; overflow:auto; }
+  .stream table { font-size:12px; }
+  .stream tr { cursor:pointer; }
+  .stream tr:hover { background:#1d2a38; }
+  .lv { font-weight:600; }
+  .lv.error { color:var(--bad); } .lv.warn { color:var(--warn); } .lv.info { color:var(--accent); } .lv.debug { color:var(--dim); }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .chain li { margin-bottom:4px; font-family:Consolas,monospace; font-size:12px; }
+  .check { display:flex; gap:8px; align-items:flex-start; padding:3px 0; border-bottom:1px solid #1c2836; }
+  .check .hint { color:var(--dim); font-size:12px; }
+  .toast { position:fixed; right:16px; bottom:16px; background:#1d2a38; border:1px solid var(--line); padding:10px 14px; border-radius:8px; max-width:60ch; opacity:0; transition:.2s; z-index:20; }
   .toast.show { opacity:1; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:12px; }
+  .kv b { color:var(--dim); font-weight:500; }
+  code { background:#0b131b; padding:0 4px; border-radius:4px; }
 </style>
 </head>
 <body>
@@ -45,9 +58,14 @@
   <h1>🐋 小鲸鱼控制台</h1>
   <span id="botPill" class="pill">机器人：未知</span>
   <span id="hostPill" class="pill">宿主：未知</span>
+  <span id="bridgePill" class="pill">桥：未知</span>
+  <span id="errPill" class="pill" title="最近事件里的 error / warn">事件：-</span>
+  <span id="connPill" class="pill off" style="display:none">⚠️ 面板连接失败</span>
   <span class="spacer"></span>
   <span class="meta" id="stamp"></span>
   <button onclick="refresh()">刷新</button>
+  <button onclick="runDiagnose()">一键体检</button>
+  <button onclick="exportBundle()">导出诊断包</button>
 </header>
 
 <main>
@@ -78,29 +96,75 @@
       <a id="hostLink" href="#" target="_blank" style="display:none"><button>打开机器人控制台（3080）</button></a>
       <a id="napcatLink" href="#" target="_blank"><button>打开 NapCat 扫码页</button></a>
     </div>
-    <div class="grid2" style="margin-top:12px">
+    <div class="grid2" style="margin-top:10px">
       <label class="meta">宿主工作目录<input id="cfgCwd" /></label>
       <label class="meta">dsh bin.js 路径<input id="cfgDshBin" /></label>
       <label class="meta">NapCat 启动脚本<input id="cfgNapcatBat" /></label>
       <label class="meta">GPT-SoVITS 启动脚本<input id="cfgTtsBat" /></label>
     </div>
-    <div class="row" style="margin-top:10px">
+    <div class="row" style="margin-top:8px">
       <button onclick="saveConfig()">保存路径配置</button>
-      <span class="meta">端口改动请直接编辑 qq-control.json（避免误改 6700）</span>
+      <span class="meta">端口改动请编辑 qq-control.json（避免误改 6700）</span>
     </div>
   </section>
 
   <section class="card" style="grid-column:1/-1">
-    <h2>日志</h2>
+    <h2>实时事件流 <span class="meta" id="streamMeta">（桥的每个决策都在这里，含静默丢弃）</span></h2>
+    <div class="row">
+      <select id="fLevel" onchange="renderStream()">
+        <option value="">全部级别</option>
+        <option value="error">error</option>
+        <option value="warn">warn</option>
+        <option value="info">info</option>
+        <option value="debug">debug</option>
+      </select>
+      <select id="fOk" onchange="renderStream()">
+        <option value="">全部结果</option>
+        <option value="false">仅被拒/失败</option>
+        <option value="true">仅成功</option>
+      </select>
+      <input type="text" id="fStage" placeholder="stage 过滤（如 mention / agent / reply）" style="max-width:260px" oninput="renderStream()" />
+      <input type="text" id="fChat" placeholder="会话过滤（如 g:2007407）" style="max-width:200px" oninput="renderStream()" />
+      <label class="meta"><input type="checkbox" id="pauseStream" /> 暂停</label>
+      <label class="meta"><input type="checkbox" id="autoScroll" checked /> 自动滚动</label>
+      <button onclick="clearStream()">清屏</button>
+      <span class="meta" id="streamCount"></span>
+    </div>
+    <div class="stream" id="streamBox">
+      <table><thead><tr><th style="width:88px">时间</th><th style="width:58px">级别</th><th style="width:78px">阶段</th><th>原因 / 详情</th><th style="width:64px">耗时</th><th style="width:96px">会话</th></tr></thead>
+      <tbody id="stream"></tbody></table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>决策链 <span class="meta" id="chainId">（点事件流里的任意一行）</span></h2>
+    <pre id="chain">（尚未选择 trace）</pre>
+  </section>
+
+  <section class="card">
+    <h2>一键体检 <span class="meta" id="diagMeta"></span></h2>
+    <div id="diag" class="meta">点右上角「一键体检」运行。</div>
+  </section>
+
+  <section class="card">
+    <h2>运行快照 <span class="meta" id="runtimeMeta"></span></h2>
+    <div id="runtime" class="meta">宿主/桥未运行时没有快照。</div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
+    <h2>日志文件</h2>
     <div class="row">
       <button onclick="setLog('hostOut')">宿主 stdout</button>
       <button onclick="setLog('hostErr')">宿主 stderr</button>
       <button onclick="setLog('bridge')">桥调试日志</button>
-      <span class="spacer"></span>
+      <button onclick="setLog('trace')">事件文件</button>
+      <button onclick="setLog('audit')">写操作审计</button>
       <label class="meta"><input type="checkbox" id="follow" checked /> 自动跟随</label>
     </div>
     <pre id="log">（选择一份日志）</pre>
   </section>
+
+  <section class="card badbox" id="pageErrors" style="grid-column:1/-1; display:none"></section>
 
   <section class="card warnbox" id="warnCard" style="grid-column:1/-1; display:none">
     <h2>配置提醒</h2>
@@ -112,7 +176,23 @@
 
 <script>
 const token = new URLSearchParams(location.search).get('token') || '';
+// stream=0 → 静态模式：不建立 SSE 长连接（弱网/远程查看/自动截图时用）。
+const streamMode = new URLSearchParams(location.search).get('stream') === '0' ? 'off' : 'on';
 let currentLog = 'hostOut';
+let streamEvents = [];
+let diagReport = null;
+const pageErrors = [];
+
+// 面板自己也要可调试：任何脚本错误 / 未处理的 Promise 失败都直接显示出来。
+function reportPageError(text) {
+  pageErrors.push(`${new Date().toLocaleTimeString('zh-CN', { hour12: false })} ${text}`);
+  const el = document.getElementById('pageErrors');
+  if (!el) return;
+  el.style.display = '';
+  el.innerHTML = '<h2>面板脚本错误（请连同这条截图反馈）</h2>' + pageErrors.map((line) => `<div class="check"><span>❌</span><div>${line}</div></div>`).join('');
+}
+window.addEventListener('error', (event) => reportPageError(`${event.message} @ ${event.filename}:${event.lineno}`));
+window.addEventListener('unhandledrejection', (event) => reportPageError(`Promise 失败：${event.reason?.message ?? event.reason}`));
 
 function api(path, options = {}) {
   const url = path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
@@ -121,13 +201,11 @@ function api(path, options = {}) {
 function toast(text) {
   const el = document.getElementById('toast');
   el.textContent = text; el.classList.add('show');
-  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 4000);
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 4500);
 }
 async function act(path) {
-  if (path.endsWith('/stop') || path.endsWith('/free')) {
-    const labels = { '/api/host/stop': '停止宿主', '/api/napcat/stop': '停止 NapCat/QQ', '/api/tts/stop': '停止 GPT-SoVITS', '/api/all/stop': '全部停止' };
-    if (!confirm((labels[path] || '执行') + '？')) return;
-  }
+  const labels = { '/api/host/stop': '停止宿主', '/api/napcat/stop': '停止 NapCat/QQ', '/api/tts/stop': '停止 GPT-SoVITS', '/api/all/stop': '全部停止' };
+  if (labels[path] && !confirm(labels[path] + '？')) return;
   const result = await api(path, { method: 'POST', body: JSON.stringify({}) });
   toast((result.ok === false ? '⚠️ ' : '✅ ') + (result.reason || '完成'));
   setTimeout(refresh, 1200);
@@ -138,27 +216,106 @@ function freePort(name) {
 }
 function setLog(name) { currentLog = name; loadLog(true); }
 async function loadLog(force) {
-  if (!force && !document.getElementById('follow').checked) return;
-  const result = await api('/api/logs?name=' + currentLog + '&lines=200');
-  const el = document.getElementById('log');
-  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
-  el.textContent = (result.lines || []).join('\n') || '（空）';
-  if (atBottom) el.scrollTop = el.scrollHeight;
+  if (!force && (!document.getElementById('follow').checked || document.hidden)) return;
+  try {
+    const result = await api('/api/logs?name=' + currentLog + '&lines=200');
+    const el = document.getElementById('log');
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+    el.textContent = (result.lines || []).join('\n') || '（空）';
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  } catch { /* 轮询失败不打断界面 */ }
+}
+function exportBundle() {
+  window.location = '/api/export?token=' + encodeURIComponent(token);
+  toast('正在下载诊断包（日志+配置+体检+快照）');
+}
+async function runDiagnose() {
+  const result = await api('/api/diagnose');
+  diagReport = result.report;
+  renderDiagnose();
+}
+function renderDiagnose() {
+  if (!diagReport) return;
+  const s = diagReport.summary;
+  document.getElementById('diagMeta').textContent = `${s.passed}/${s.total} 通过 · ${s.verdict}`;
+  document.getElementById('diag').innerHTML = diagReport.checks.map((c) => {
+    const icon = c.ok ? '✅' : (c.severity === 'warn' ? '⚠️' : '❌');
+    return `<div class="check"><span>${icon}</span><div><b>${c.title}</b> — ${c.detail}${c.hint ? `<div class="hint">↳ ${c.hint}</div>` : ''}</div></div>`;
+  }).join('');
+}
+function renderRuntime(runtime) {
+  const el = document.getElementById('runtime');
+  if (!runtime) { el.textContent = '宿主/桥未运行时没有快照。'; document.getElementById('runtimeMeta').textContent = ''; return; }
+  document.getElementById('runtimeMeta').textContent = `v${runtime.version} · 更新于 ${runtime.ageSeconds}s 前 · 运行 ${Math.round((runtime.uptimeSeconds || 0) / 60)} 分钟`;
+  const sessions = runtime.sessions || [];
+  const features = runtime.features || {};
+  const off = Object.entries(features).filter(([, v]) => v === false).map(([k]) => k);
+  el.innerHTML = `
+    <div class="kv">
+      <b>会话数</b><span>${runtime.sessionCount}（提醒 ${runtime.reminders} · 投票 ${runtime.votes} · 游戏 ${runtime.games} · 待审 ${runtime.joinsPending}）</span>
+      <b>写操作闸门</b><span>已拒绝 ${runtime.gate?.denied ?? 0} 次</span>
+      <b>事件计数</b><span>${runtime.trace?.total ?? 0} 条（error ${runtime.trace?.byLevel?.error ?? 0} / warn ${runtime.trace?.byLevel?.warn ?? 0}）</span>
+      <b>关闭中的开关</b><span>${off.slice(0, 10).join('、') || '无'}${off.length > 10 ? ` 等 ${off.length} 项` : ''}</span>
+    </div>
+    ${sessions.length ? `<table style="margin-top:8px"><thead><tr><th>会话</th><th>sessionId</th><th>状态</th><th>来源</th><th>最近回合</th></tr></thead><tbody>
+      ${sessions.map((s) => `<tr><td>${s.chatKey}</td><td class="meta">${String(s.sessionId).slice(0, 12)}</td><td>${s.status}</td><td>${s.resumed ? '续接' : '新建'}</td><td class="meta">${s.lastTurnAt ? new Date(s.lastTurnAt).toLocaleTimeString('zh-CN', { hour12: false }) : '-'}</td></tr>`).join('')}
+    </tbody></table>` : '<div class="meta" style="margin-top:6px">当前没有活跃会话（发一条消息给机器人即可建立）。</div>'}`;
+}
+function renderStream() {
+  const level = document.getElementById('fLevel').value;
+  const okFilter = document.getElementById('fOk').value;
+  const stage = document.getElementById('fStage').value.trim().toLowerCase();
+  const chat = document.getElementById('fChat').value.trim();
+  const rows = streamEvents.filter((e) => {
+    if (level && e.level !== level) return false;
+    if (okFilter === 'false' && e.ok !== false) return false;
+    if (okFilter === 'true' && e.ok === false) return false;
+    if (stage && !(e.stage || '').toLowerCase().includes(stage)) return false;
+    if (chat && !(e.chatKey || '').includes(chat)) return false;
+    return true;
+  }).slice(-400).reverse();
+  const box = document.getElementById('stream');
+  box.innerHTML = rows.map((e, index) => {
+    const time = new Date(e.ts).toLocaleTimeString('zh-CN', { hour12: false });
+    const detail = [e.reason, e.data ? JSON.stringify(e.data) : ''].filter(Boolean).join(' ');
+    return `<tr onclick="openChain('${e.id}')" title="点击查看该消息的完整决策链">
+      <td class="meta">${time}</td>
+      <td class="lv ${e.level}">${e.level}${e.ok === false ? ' ✗' : ''}</td>
+      <td>${e.stage || ''}</td>
+      <td>${detail.slice(0, 220)}</td>
+      <td class="meta">${e.ms ? e.ms + 'ms' : ''}</td>
+      <td class="meta">${e.chatKey || ''}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('streamCount').textContent = `${rows.length}/${streamEvents.length} 条`;
+  if (document.getElementById('autoScroll').checked && !document.getElementById('pauseStream').checked) {
+    const streamBox = document.getElementById('streamBox');
+    streamBox.scrollTop = 0;
+  }
+}
+function clearStream() { streamEvents = []; renderStream(); }
+async function openChain(traceId) {
+  if (!traceId) return;
+  const result = await api('/api/trace?traceId=' + encodeURIComponent(traceId));
+  document.getElementById('chainId').textContent = `trace ${traceId}`;
+  const chain = result.chain;
+  if (!chain) { document.getElementById('chain').textContent = '没有这条 trace 的事件（可能已被轮转清理）。'; return; }
+  document.getElementById('chain').textContent =
+    `会话 ${chain.chatKey} · 总耗时 ${chain.durationMs}ms · ${chain.reachedReply ? '已回复' : '未回复'}` +
+    (chain.stoppedAt ? ` · 停在 ${chain.stoppedAt}：${chain.stoppedReason}` : '') + '\n\n' +
+    chain.timeline.join('\n');
 }
 function render(status) {
   const tbody = document.getElementById('ports');
   tbody.innerHTML = '';
   for (const item of status.ports || []) {
     const tr = document.createElement('tr');
-    const state = item.listening
-      ? `<span class="dot on"></span>监听${item.established ? `（${item.established} 条连接）` : ''}`
-      : '<span class="dot"></span>未监听';
+    const state = item.listening ? `<span class="dot on"></span>监听${item.established ? `（${item.established} 条连接）` : ''}` : '<span class="dot"></span>未监听';
     tr.innerHTML = `<td>${item.port}</td><td>${item.label}</td><td>${state}</td><td class="meta">${item.pid || '-'} ${item.process || ''}</td>`;
     const td = document.createElement('td');
     if (item.listening && item.name !== 'control') {
       const btn = document.createElement('button');
-      btn.textContent = '释放';
-      btn.className = 'danger';
+      btn.textContent = '释放'; btn.className = 'danger';
       btn.onclick = () => freePort(item.name);
       td.appendChild(btn);
     }
@@ -172,21 +329,22 @@ function render(status) {
   const botPill = document.getElementById('botPill');
   botPill.textContent = '机器人：' + (status.botOnline ? '在线' : '离线');
   botPill.className = 'pill ' + (status.botOnline ? 'on' : 'off');
+  const bridgePill = document.getElementById('bridgePill');
+  const bridgeAlive = (status.runtime?.ageSeconds ?? 9999) < 900;
+  bridgePill.textContent = '桥：' + (bridgeAlive ? '活跃' : '无快照');
+  bridgePill.className = 'pill ' + (bridgeAlive ? 'on' : 'off');
   const napcat = status.processes?.napcatLoaders || [];
   const qqClients = status.processes?.qqClients || [];
-  const tts = status.processes?.tts || [];
-  const qr = status.qr || {};
   const managed = status.processes?.napcatManaged === true;
+  const qr = status.qr || {};
   document.getElementById('procMeta').innerHTML =
     `NapCat 加载器：${napcat.length ? napcat.map((p) => `${p.name}#${p.pid}`).join('、') : '未运行'}｜` +
     `个人 QQ 客户端：${qqClients.length} 个${managed ? '（受 NapCat 管理）' : '（<b>不受管，控制台不会结束它们</b>）'}｜` +
-    `Python 进程：${tts.length}｜` +
     `扫码图：${qr.exists ? (qr.fresh ? `新鲜（${qr.ageSeconds}s 前）` : `较旧（${Math.round(qr.ageSeconds / 60)} 分钟前）`) : '未生成'}`;
   const napcatStop = document.getElementById('napcatStopBtn');
   napcatStop.disabled = !managed;
   napcatStop.title = managed ? '结束 NapCat 加载器（taskkill /T 会连带其 QQ 子进程）' : '未检测到 NapCat，按钮已禁用以免误杀个人 QQ';
   const hostLink = document.getElementById('hostLink');
-  // 只有宿主确实在监听时才给出 3080 链接（否则会指向上一轮的旧 token）。
   if (status.hostUrl && host?.listening) { hostLink.href = status.hostUrl; hostLink.style.display = ''; }
   else hostLink.style.display = 'none';
   document.getElementById('napcatLink').href = 'http://127.0.0.1:' + ((status.config?.ports?.napcat) || 6099);
@@ -211,13 +369,64 @@ async function saveConfig() {
   }) });
   toast((result.ok ? '✅ ' : '⚠️ ') + result.reason);
 }
-async function refresh() {
-  try { render(await api('/api/status')); } catch (e) { toast('status 失败：' + e.message); }
+function updateErrPill() {
+  const errors = streamEvents.filter((e) => e.level === 'error').length;
+  const warns = streamEvents.filter((e) => e.level === 'warn').length;
+  const pill = document.getElementById('errPill');
+  pill.textContent = `事件：${streamEvents.length}（error ${errors} / warn ${warns}）`;
+  pill.className = 'pill ' + (errors > 0 ? 'off' : (warns > 0 ? 'warn' : 'on'));
 }
+async function refresh() {
+  try {
+    const status = await api('/api/status');
+    render(status);
+    renderRuntime(status.runtime ?? null);
+    setConnOk(true);
+  } catch (e) {
+    setConnOk(false, e.message);
+  }
+}
+function setConnOk(ok, detail = '') {
+  const pill = document.getElementById('connPill');
+  if (!pill) return;
+  pill.style.display = ok ? 'none' : '';
+  pill.textContent = ok ? '' : '⚠️ 面板连接失败，重试中' + (detail ? `（${detail}）` : '');
+}
+function startStream() {
+  if (streamMode === 'off') {
+    document.getElementById('streamMeta').textContent = '（静态模式：实时流已关闭，点「刷新」看最近事件）';
+    return;
+  }
+  const source = new EventSource('/api/stream?token=' + encodeURIComponent(token));
+  source.onmessage = (message) => {
+    if (document.getElementById('pauseStream').checked) return;
+    try {
+      const event = JSON.parse(message.data);
+      streamEvents.push(event);
+      if (streamEvents.length > 2000) streamEvents = streamEvents.slice(-1500);
+      renderStream();
+      updateErrPill();
+    } catch { /* ignore */ }
+  };
+  source.onerror = () => { /* 浏览器会自动重连 */ };
+}
+async function loadHistory() {
+  const result = await api('/api/trace?limit=300');
+  streamEvents = result.events || [];
+  renderStream();
+  updateErrPill();
+}
+// 静态模式（stream=0）只做一次性加载，不建立长连接也不再轮询：
+// 弱网/远程查看更省流量，也让自动化截图能拿到完整渲染结果。
 refresh();
+loadHistory().then(() => startStream());
 loadLog(true);
-setInterval(refresh, 4000);
-setInterval(() => loadLog(false), 3000);
+runDiagnose();
+if (streamMode !== 'off') {
+  setInterval(refresh, 4000);
+  setInterval(() => loadLog(false), 3000);
+  setInterval(runDiagnose, 30000);
+}
 </script>
 </body>
 </html>

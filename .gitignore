@@ -6,4 +6,8 @@ qq-replies/
 qq-bridge-debug.log
 qq-reminders.json
 qq-control.json
+qq-trace.jsonl
+qq-runtime.json
+qq-actions.log
+qq-inbox.jsonl
 *.zip

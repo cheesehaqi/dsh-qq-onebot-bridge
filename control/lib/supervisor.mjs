@@ -9,6 +9,9 @@
 import { execFile, spawn } from 'node:child_process'
 import { closeSync, existsSync, openSync, readFileSync, statSync } from 'node:fs'
 import { PORT_LABELS, configWarnings } from './config.mjs'
+import { createTraceTailer, filterEvents, formatChain, groupChains, readRuntime, readTraceFile, summarizeEvents } from './trace.mjs'
+import { formatDiagnose, runDiagnose } from './diagnose.mjs'
+import { buildZip, fileEntry } from './zip.mjs'
 
 // ---------------------------------------------------------------- parsing ----
 
@@ -221,7 +224,6 @@ export function publicConfig(config) {
     ports: { ...config.ports },
   }
 }
-
 /**
  * The real supervisor: every action re-inspects the machine first, so a stale
  * PID can never be killed and a busy port is reported instead of half-started.
@@ -237,6 +239,8 @@ export function createSupervisor(config, deps = {}) {
     const hostLog = tailLines(config.logs?.hostOut, 120, deps).join('\n')
     return {
       ...snapshot,
+      // 运行时快照一并返回：面板只发一个轮询请求，避免和 SSE 抢 HTTP/1.1 的并发名额。
+      runtime: runtime(),
       hostUrl: extractHostUrl(hostLog),
       hostStartedHint: /dsh web: http:\/\/127\.0\.0\.1/.test(hostLog),
       qr: qrStatus(config.napcatQr, now(), deps),
@@ -370,5 +374,100 @@ export function createSupervisor(config, deps = {}) {
     return { ok: true, reason: results.join('；') }
   }
 
-  return { status, startHost, stopHost, freePort, startNapcat, stopNapcat, startTts, stopTts, stopAll, logFile: (name) => config.logs?.[name] ?? '' }
+  // ------------------------------------------------------------ debugging ----
+
+  /** Recent trace events (the bridge's decision stream), filtered. */
+  function traceEvents(options = {}) {
+    const events = readTraceFile(config.logs?.trace ?? '', { readFile: deps.readFile })
+    return filterEvents(events, { limit: options.limit ?? 300, chatKey: options.chatKey ?? '', level: options.level ?? '', stage: options.stage ?? '', traceId: options.traceId ?? '', ok: options.ok ?? null })
+  }
+
+  /** Full decision chain for one trace id. */
+  function traceChain(traceId, { limit = 500 } = {}) {
+    const events = readTraceFile(config.logs?.trace ?? '', { readFile: deps.readFile })
+    const filtered = events.filter((event) => event.id === traceId).slice(-limit)
+    const chain = groupChains(filtered)[0] ?? null
+    return chain ? { ...chain, timeline: formatChain(chain) } : null
+  }
+
+  /** Latest runtime snapshot written by the bridge plugin. */
+  function runtime() {
+    const data = readRuntime(config.logs?.runtime ?? '', { readFile: deps.readFile })
+    if (!data) return null
+    return {
+      updatedAt: data.updatedAt,
+      ageSeconds: Math.round((now() - (data.updatedAt ?? 0)) / 1000),
+      pid: data.pid,
+      version: data.version,
+      uptimeSeconds: data.uptimeSeconds,
+      sessions: data.sessions ?? [],
+      sessionCount: data.sessionCount ?? 0,
+      reminders: data.reminders ?? 0,
+      votes: data.votes ?? 0,
+      games: data.games ?? 0,
+      joinsPending: data.joinsPending ?? 0,
+      features: data.features ?? {},
+      gate: data.gate ?? {},
+      trace: data.trace ?? {},
+    }
+  }
+
+  /** One-click diagnosis (the automated "why is it silent" checklist). */
+  async function diagnose() {
+    const snapshot = await inspectNow()
+    const events = traceEvents({ limit: 400 })
+    const report = runDiagnose({
+      config: { ...config, auditLog: config.logs?.audit ?? '' },
+      snapshot,
+      runtime: runtime(),
+      events,
+      now: now(),
+      files: deps,
+    })
+    return { ok: report.summary.blockers === 0, report, text: formatDiagnose(report) }
+  }
+
+  /** Diagnostic bundle: logs + effective config + snapshot + diagnosis, as a zip. */
+  async function exportBundle() {
+    const diagnosis = await diagnose()
+    const entries = []
+    const take = (file, name, tailBytes) => {
+      const entry = fileEntry(file, { name, tailBytes, readFile: deps.readFile ?? readFileSync, stat: deps.stat ?? statSync })
+      if (entry) entries.push(entry)
+    }
+    take(config.logs?.trace, 'qq-trace.jsonl', 1024 * 1024)
+    take(config.logs?.audit, 'qq-actions.log', 256 * 1024)
+    take(config.logs?.bridge, 'qq-bridge-debug.log', 256 * 1024)
+    take(config.logs?.hostOut, 'qq-host-out.log', 128 * 1024)
+    take(config.logs?.hostErr, 'qq-host-err.log', 128 * 1024)
+    take(config.logs?.runtime, 'qq-runtime.json')
+    entries.push({ name: 'diagnose.json', data: JSON.stringify(diagnosis.report, null, 2) })
+    entries.push({ name: 'diagnose.txt', data: diagnosis.text })
+    entries.push({
+      name: 'environment.json',
+      data: JSON.stringify({
+        generatedAt: new Date(now()).toISOString(),
+        controlConfig: publicConfig(config),
+        ports: (await inspectNow()).ports,
+        runtime: runtime(),
+        traceSummary: summarizeEvents(traceEvents({ limit: 2000 })),
+      }, null, 2),
+    })
+    const buffer = buildZip(entries, { now: new Date(now()) })
+    return { ok: true, entries: entries.length, bytes: buffer.length, buffer, filename: `qq-diagnose-${new Date(now()).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip` }
+  }
+
+  return {
+    status, startHost, stopHost, freePort, startNapcat, stopNapcat, startTts, stopTts, stopAll,
+    traceEvents, traceChain, runtime, diagnose, exportBundle,
+    tailer: () => traceTailer ?? (traceTailer = createTraceTailer(config.logs?.trace ?? '')),
+    logFile: (name) => {
+      if (name === 'trace') return config.logs?.trace ?? ''
+      if (name === 'runtime') return config.logs?.runtime ?? ''
+      if (name === 'audit') return config.logs?.audit ?? ''
+      return config.logs?.[name] ?? ''
+    },
+  }
 }
+
+let traceTailer = null

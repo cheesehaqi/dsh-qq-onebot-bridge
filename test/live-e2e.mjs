@@ -41,6 +41,20 @@ function sendGroup(text) {
   }))
 }
 
+/** Same as sendGroup but WITHOUT the @-mention: must be dropped AND traced with a reason. */
+function sendGroupWithoutMention(text) {
+  ws.send(JSON.stringify({
+    post_type: 'message',
+    message_type: 'group',
+    group_id: groupId,
+    user_id: userId,
+    self_id: botQq,
+    message_id: ++messageId,
+    sender: { card: '自检', nickname: '自检' },
+    message: text,
+  }))
+}
+
 function waitFor(predicate, timeoutMs, label, fromIndex = 0) {
   return new Promise((resolve, reject) => {
     const started = Date.now()
@@ -98,6 +112,13 @@ ws.on('open', async () => {
     const quiet = replies.slice(mark2)
     record('活宿主：只读命令不崩溃', !quiet.some((text) => /Agent 处理失败|处理失败|Cannot read/.test(text)), `${quiet.length} 条回复`)
     record('活宿主：/help 有回复', quiet.some((text) => text.includes('小鲸鱼使用指南')), quiet.find((text) => text.includes('指南'))?.slice(0, 30) ?? '')
+
+    // 6) 该被静默丢弃的消息：群聊未 @ 机器人 —— 不应有任何回复，
+    //    但必须在事件流里留下带原因的记录（「一切皆可调试」的核心约束）。
+    const mark3 = replies.length
+    sendGroupWithoutMention('这条没有 @ 机器人，应该被静默丢弃')
+    await new Promise((resolve) => setTimeout(resolve, 4_000))
+    record('活宿主：未 @ 的消息被静默丢弃', replies.length === mark3, `${replies.length - mark3} 条回复`)
   } catch (error) {
     record(error.message, false)
   }
