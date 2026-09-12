@@ -2,6 +2,8 @@
 
 A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ messages drive DSH agent sessions directly, and agent replies are sent back to QQ automatically.
 
+> **v0.4.0 theme: Everything Debuggable.** One trace id per message, a Chinese reason attached to every silent drop, any recorded message replayable offline through the real pipeline, synthetic events injectable into the live pipeline — and all 6 hard constraints are continuously verifiable in the bundled console (see [Debugging](#debugging-v04-everything-debuggable) and [Hard-constraint acceptance page](#hard-constraint-acceptance-page-v04-phase-4)).
+
 ## Feature overview
 
 - **Two-way message bridge**: QQ messages (group/private) enter DSH agent sessions; replies are chunked and sent back to QQ (OneBot v11 reverse WebSocket)
@@ -301,7 +303,7 @@ The two features above answer "what is happening" and "why did this message go t
 
 Every row has a "去看 →" link that jumps to the matching card; the verdict is one of `all-green / partial / unknown / broken`. The evaluator is a pure function (`control/lib/acceptance.mjs`) with every branch asserted in tests, refreshed every 30s and immediately after a replay finishes.
 
-## Standalone control console (`control/`, v0.4.0 local pre-release)
+## Standalone control console (`control/`, v0.4.0)
 
 The plugin ships an independent local operations console that does **not** depend on DSH Desktop: it keeps working when the host is down, and shows every port and process at a glance.
 
@@ -390,7 +392,7 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
-- **v0.4.0** — "everything debuggable" plus the standalone control console (`control/`): trace-id structured events where every silent drop carries a reason, a live SSE event stream and per-message decision chains, one-click diagnosis, a diagnostic-bundle export, runtime snapshot and effective config; **recording / offline replay / event injection** (every inbound event recorded to `qq-inbox.jsonl` → replayed through the real bridge code in a sandbox with dry-run, reporting "would reply / silent + why" → synthetic events injected into the real pipeline from the console, with the asynchronous agent-turn reply intercepted too, never touching QQ); a **hard-constraint acceptance page** (live evidence and a next step for each of the 6 constraints); the console is its own process on 8799 with port/process/log/QR overview, host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication (**local pre-release, not published yet**)
+- **v0.4.0** — "Everything Debuggable": end-to-end debuggability — trace-id structured events where every silent drop carries a reason, a live SSE event stream and per-message decision chains, one-click diagnosis, a diagnostic-bundle export, runtime snapshot and effective config; **recording / offline replay / event injection** (every inbound event recorded to `qq-inbox.jsonl` → replayed through the real bridge code in a sandbox with dry-run, reporting "would reply / silent + why" → synthetic events injected into the real pipeline from the console, with the asynchronous agent-turn reply intercepted too, never touching QQ); a **hard-constraint acceptance page** (live evidence and a next step for each of the 6 constraints); ships its own standalone control console (`control/`, port 8799) with port/process/log/QR overview, host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication
 - **v0.3.9** — group insight: message statistics (`/统计` `/周榜`), read-only `/荣誉` `/公告` `/群精华`, a daily group report (off by default), recurring reminders (daily/weekly/weekdays) and `/mc` Minecraft status
 - **v0.3.8** — anti-recall, sensitive-word and flood protection, group/friend join verification (admin `/同意 <id>`), a wider group-admin API (`/公告` `/精华` `/名片` `/头衔` `/全员禁言`) and all admin writes moved behind the shared gate
 - **v0.3.7** — zero-cost interaction pack: keyword wordbook (off by default), local fortune/lot/tarot, dice and random picks, points economy (off by default), idiom chain (373 idioms) and guess-the-number (off by default); fixes the `stop()` disposer and the idiom-chain rule
