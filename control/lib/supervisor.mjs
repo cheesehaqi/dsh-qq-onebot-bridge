@@ -7,7 +7,7 @@
  * to touch (see `assertKillAllowed`).
  */
 import { execFile, spawn } from 'node:child_process'
-import { closeSync, existsSync, openSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PORT_LABELS, configWarnings } from './config.mjs'
@@ -15,6 +15,7 @@ import { createTraceTailer, filterEvents, formatChain, groupChains, readRuntime,
 import { formatDiagnose, runDiagnose } from './diagnose.mjs'
 import { buildZip, fileEntry } from './zip.mjs'
 import { createReplayer } from './replay.mjs'
+import { buildAcceptance, formatAcceptance } from './acceptance.mjs'
 import { appendCappedLine, moveToTrash } from '../../lib/store.js'
 import { countLines, describeFrame, parseInjectionLine, readInbox } from '../../lib/inbox.js'
 
@@ -242,6 +243,9 @@ export function createSupervisor(config, deps = {}) {
   const { exec, spawnImpl, now = () => Date.now() } = deps
   const inspectNow = () => inspect({ ports: config.ports, labels: PORT_LABELS, exec })
   let replayer = null   // 每个 supervisor 一份，避免跨实例共享沙箱状态
+  let diagnoseCache = null   // { at, value }：体检结果的短时缓存
+  let lastReplaySummary = null   // 验收台要看"最近一次回放"的证据
+  let lastExportSummary = null   // 验收台要看"最近一次导出"的证据
 
   const portRow = (snapshot, name) => (snapshot.ports ?? []).find((item) => item.name === name)
 
@@ -428,7 +432,10 @@ export function createSupervisor(config, deps = {}) {
   }
 
   /** One-click diagnosis (the automated "why is it silent" checklist). */
-  async function diagnose() {
+  async function diagnose(force = false) {
+    const nowMs = now()
+    // 体检要跑 netstat+tasklist：5 秒内复用同一份，避免面板与验收台同时刷新时重复扫进程
+    if (!force && diagnoseCache && nowMs - diagnoseCache.at < 5000) return diagnoseCache.value
     const snapshot = await inspectNow()
     const events = traceEvents({ limit: 400 })
     const report = runDiagnose({
@@ -439,7 +446,9 @@ export function createSupervisor(config, deps = {}) {
       now: now(),
       files: deps,
     })
-    return { ok: report.summary.blockers === 0, report, text: formatDiagnose(report) }
+    const value = { ok: report.summary.blockers === 0, report, text: formatDiagnose(report) }
+    diagnoseCache = { at: nowMs, value }
+    return value
   }
 
   /** Diagnostic bundle: logs + effective config + snapshot + diagnosis, as a zip. */
@@ -469,7 +478,52 @@ export function createSupervisor(config, deps = {}) {
       }, null, 2),
     })
     const buffer = buildZip(entries, { now: new Date(now()) })
-    return { ok: true, entries: entries.length, bytes: buffer.length, buffer, filename: `qq-diagnose-${new Date(now()).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip` }
+    lastExportSummary = { at: now(), entries: entries.length, bytes: buffer.length, filename: `qq-diagnose-${new Date(now()).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip` }
+    return { ok: true, entries: entries.length, bytes: buffer.length, buffer, filename: lastExportSummary.filename }
+  }
+
+  // ------------------------------------------------------------ 验收台 ----
+
+  /** 体检包里会收集的产物（验收台据它判断"可导出"）。 */
+  function exportSources() {
+    return [
+      { name: '事件流', file: config.logs?.trace },
+      { name: '写操作审计', file: config.logs?.audit },
+      { name: '桥调试日志', file: config.logs?.bridge },
+      { name: '宿主 stdout', file: config.logs?.hostOut },
+      { name: '运行快照', file: config.logs?.runtime },
+      { name: '入站录制', file: config.logs?.inbox },
+    ].map((entry) => ({ name: entry.name, present: Boolean(entry.file) && existsSync(entry.file) }))
+  }
+
+  /** 回放沙箱数量（`qq-replay/run-*`，不含回收站）。 */
+  function sandboxCount() {
+    if (!config.cwd) return 0
+    try {
+      return readdirSync(join(config.cwd, 'qq-replay'), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name !== '_trash').length
+    } catch {
+      return 0
+    }
+  }
+
+  /**
+   * v0.4「一切皆可调试」6 条硬约束的实时验收：每条都用**现有产物**算证据，
+   * 不达标时直接说明该点哪里。
+   */
+  async function acceptance() {
+    const report = buildAcceptance({
+      events: traceEvents({ limit: 500 }),
+      runtime: runtime(),
+      inbox: inboxList({ limit: 1 }),
+      lastReplay: lastReplaySummary,
+      lastExport: lastExportSummary,
+      diagnosis: await diagnose(),
+      exportSources: exportSources(),
+      sandboxCount: sandboxCount(),
+      now: now(),
+    })
+    return { ok: report.ok, report, text: formatAcceptance(report), verdict: report.verdict, totals: report.totals }
   }
 
   // -------------------------------------------------- 录制 / 回放 / 注入 ----
@@ -513,6 +567,16 @@ export function createSupervisor(config, deps = {}) {
       report = await replayer.run({ entries: list, replyText, overrides, hints, budgetMs, maxEntries: 20 })
     } catch (error) {
       return { ok: false, reason: `回放执行失败：${error.message}` }
+    }
+    lastReplaySummary = {
+      at: now(),
+      ok: report.ok,
+      reason: report.reason ?? '',
+      durationMs: report.durationMs,
+      totals: report.totals,
+      safety: report.safety,
+      sandbox: report.sandbox,
+      entries: (report.results ?? []).length,
     }
     return { ok: report.ok, reason: report.ok ? '' : (report.reason ?? '回放中有条目出错'), report, text: report.text, totals: report.totals, warnings: report.warnings, sandbox: report.sandbox }
   }
@@ -585,7 +649,7 @@ export function createSupervisor(config, deps = {}) {
 
   return {
     status, startHost, stopHost, freePort, startNapcat, stopNapcat, startTts, stopTts, stopAll,
-    traceEvents, traceChain, runtime, diagnose, exportBundle,
+    traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance,
     inboxList, replay, inject, clearQueue,
     tailer: () => traceTailer ?? (traceTailer = createTraceTailer(config.logs?.trace ?? '')),
     logFile: (name) => {

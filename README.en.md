@@ -248,6 +248,7 @@ Every inbound message gets a **trace id**, and every decision point — **includ
 
 | What you want to know | Where to look |
 |---|---|
+| **Are the 6 hard constraints met right now?** | Console → "**硬约束验收台**" at the top: 6 status lights, the evidence currently on the machine, and where to click next; recomputed every 30s |
 | The full decision chain of one message | Console → "实时事件流": click any row, the "决策链" card shows the timeline, where it stopped and why |
 | Why the bot did not reply | Filter the event stream to failures — the most common reasons are listed (e.g. `mention: 群聊未 @ 机器人`) |
 | Port ownership and liveness | Console → "端口 / 进程" (connections on 6700 = bot online) |
@@ -283,6 +284,23 @@ Operational notes:
 Config: `recordInbound` (on), `inboxFile`, `inboxRedact`, `injectEnabled` (off), `injectFile`, `injectDryRun` (on), `injectIntervalMs`.
 Endpoints: `/api/inbox`, `/api/replay`, `/api/inject`, `/api/queue/clear`.
 
+### Hard-constraint acceptance page (v0.4 phase 4)
+
+The two features above answer "what is happening" and "why did this message go that way". The acceptance page answers the third question: **did the design philosophy actually land?**
+
+`GET /api/acceptance` turns each of the 6 hard constraints into `✅ met / ⚠️ hint / ❌ not met / ❔ not enough evidence`, computed from artefacts that already exist on the machine, plus the evidence and the next step:
+
+| Constraint | Evidence used |
+|---|---|
+| ① No silent branch | every `ok:false` event (rejected/failed) in the last 500 events must carry a non-empty reason; missing ones are named by stage |
+| ② Correlatable (traceId) | traceId coverage of message-scoped events and how many messages actually reached `inbound→reply` |
+| ③ Replayable | recording count plus the last replay's stats and **safety** (dry-run on, 0 QQ connections, sandboxed cwd); dry-run being off fails the row |
+| ④ Diagnosable | diagnosis pass/fail/blocker counts and verdict, failing checks named |
+| ⑤ Exportable | how many of the bundle's source artefacts are present (or the last export's size and filename) |
+| ⑥ Injectable | channel switch, dry-run switch (off ⇒ not met, because it would send to QQ), lines consumed, and how many **asynchronous agent-turn replies have been intercepted** |
+
+Every row has a "去看 →" link that jumps to the matching card; the verdict is one of `all-green / partial / unknown / broken`. The evaluator is a pure function (`control/lib/acceptance.mjs`) with every branch asserted in tests, refreshed every 30s and immediately after a replay finishes.
+
 ## Standalone control console (`control/`, v0.4.0 local pre-release)
 
 The plugin ships an independent local operations console that does **not** depend on DSH Desktop: it keeps working when the host is down, and shows every port and process at a glance.
@@ -303,19 +321,20 @@ npm run control            # or: node control/bin/qq-control.mjs --open
 | QR login state | whether the NapCat QR image exists and is fresh, plus a link to the 6099 page |
 | Config | `qq-control.json` is the single source of truth for ports and paths (node, `dsh bin.js`, NapCat, TTS script auto-detected; paths editable in the UI); **6700 is pinned by the NapCat config, do not change it** |
 | Debugging | "录制 · 回放 · 注入": lists every recorded inbound event from `qq-inbox.jsonl`, replays any of them offline (sandbox + dry-run) or injects a synthetic event; the injection queue state (lines / consumed this run / dry-run) is shown inline |
+| Acceptance | "硬约束验收台" at the top: live evidence for all 6 hard constraints (no silent branch / trace id / replay / diagnosis / export / injection), with "where to click" for anything not met; `GET /api/acceptance` |
 | Security | binds `127.0.0.1` only, every API needs the token, and any request carrying a cross-site `Origin` is rejected |
 
 > A future tray/desktop build can simply wrap this HTTP API in Electron/Tauri — no logic rewrite needed.
 
 ## Tests
 
-Three kinds, 1449 assertions in `test/*-unit.mjs` plus 3 live scripts:
+Three kinds, 1517 assertions in `test/*-unit.mjs` plus 3 live scripts:
 
 ```sh
 # 1) unit tests: no network, no host, pure logic in temp dirs (run after every change)
 node test/control-unit.mjs        # or one at a time: node test/<name>-unit.mjs
-#    35 files: bridge branches/commands/guards, console HTTP + diagnosis, recording/replay/injection,
-#    injection safety boundaries…
+#    36 files: bridge branches/commands/guards, console HTTP + diagnosis, recording/replay/injection,
+#    injection safety boundaries, the hard-constraint acceptance page…
 #    run them all (PowerShell):
 #    Get-ChildItem test -Filter '*-unit.mjs' | ForEach-Object { node $_.FullName }
 
@@ -371,7 +390,7 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
-- **v0.4.0** — "everything debuggable" plus the standalone control console (`control/`): trace-id structured events where every silent drop carries a reason, a live SSE event stream and per-message decision chains, one-click diagnosis, a diagnostic-bundle export, runtime snapshot and effective config; **recording / offline replay / event injection** (every inbound event recorded to `qq-inbox.jsonl` → replayed through the real bridge code in a sandbox with dry-run, reporting "would reply / silent + why" → synthetic events injected into the real pipeline from the console, never touching QQ); the console is its own process on 8799 with port/process/log/QR overview, host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication (**local pre-release, not published yet**)
+- **v0.4.0** — "everything debuggable" plus the standalone control console (`control/`): trace-id structured events where every silent drop carries a reason, a live SSE event stream and per-message decision chains, one-click diagnosis, a diagnostic-bundle export, runtime snapshot and effective config; **recording / offline replay / event injection** (every inbound event recorded to `qq-inbox.jsonl` → replayed through the real bridge code in a sandbox with dry-run, reporting "would reply / silent + why" → synthetic events injected into the real pipeline from the console, with the asynchronous agent-turn reply intercepted too, never touching QQ); a **hard-constraint acceptance page** (live evidence and a next step for each of the 6 constraints); the console is its own process on 8799 with port/process/log/QR overview, host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication (**local pre-release, not published yet**)
 - **v0.3.9** — group insight: message statistics (`/统计` `/周榜`), read-only `/荣誉` `/公告` `/群精华`, a daily group report (off by default), recurring reminders (daily/weekly/weekdays) and `/mc` Minecraft status
 - **v0.3.8** — anti-recall, sensitive-word and flood protection, group/friend join verification (admin `/同意 <id>`), a wider group-admin API (`/公告` `/精华` `/名片` `/头衔` `/全员禁言`) and all admin writes moved behind the shared gate
 - **v0.3.7** — zero-cost interaction pack: keyword wordbook (off by default), local fortune/lot/tarot, dice and random picks, points economy (off by default), idiom chain (373 idioms) and guess-the-number (off by default); fixes the `stop()` disposer and the idiom-chain rule

@@ -109,6 +109,15 @@
   </section>
 
   <section class="card" style="grid-column:1/-1">
+    <h2>硬约束验收台 <span class="meta" id="acceptMeta">（v0.4「一切皆可调试」6 条硬约束的实时证据）</span></h2>
+    <div class="row">
+      <button onclick="loadAcceptance()">重新验收</button>
+      <span class="meta">每条都用机器上现有的产物算证据；❌/⚠️ 会直接说明该点哪里</span>
+    </div>
+    <div id="acceptance" class="meta">（加载中…）</div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
     <h2>实时事件流 <span class="meta" id="streamMeta">（桥的每个决策都在这里，含静默丢弃）</span></h2>
     <div class="row">
       <select id="fLevel" onchange="renderStream()">
@@ -451,6 +460,44 @@ async function loadHistory() {
   updateErrPill();
 }
 
+// ------------------------------------------------ 硬约束验收台（阶段 4） ----
+const ACCEPT_TARGETS = { silent: 'streamBox', trace: 'chain', replay: 'replayOut', diagnose: 'diag', export: 'log', inject: 'injState' };
+const ACCEPT_ICONS = { pass: '✅', warn: '⚠️', fail: '❌', unknown: '❔' };
+const ACCEPT_VERDICTS = { 'all-green': '6 条全部达标', partial: '全部达标（有提示项）', unknown: '证据不足（有未验证项）', broken: '有不达标项' };
+let acceptReport = null;
+async function loadAcceptance() {
+  const el = document.getElementById('acceptance');
+  try {
+    const result = await api('/api/acceptance');
+    if (!result.report) { el.textContent = '⚠️ ' + (result.reason || '验收接口没有返回报告'); return; }
+    acceptReport = result.report;
+    renderAcceptance();
+  } catch (error) {
+    el.textContent = `读取验收结果失败：${error.message}`;
+  }
+}
+function renderAcceptance() {
+  if (!acceptReport) return;
+  const t = acceptReport.totals || {};
+  document.getElementById('acceptMeta').textContent =
+    `（${t.pass ?? 0}/6 达标 · ${ACCEPT_VERDICTS[acceptReport.verdict] ?? acceptReport.verdict} · ${new Date(acceptReport.generatedAt).toLocaleTimeString('zh-CN', { hour12: false })}）`;
+  document.getElementById('acceptance').innerHTML = acceptReport.items.map((item) => {
+    const target = ACCEPT_TARGETS[item.key];
+    return `<div class="check"><span>${ACCEPT_ICONS[item.status] ?? '·'}</span><div><b>${item.title}</b> — ${escapeHtml(item.evidence)}` +
+      (item.hint ? `<div class="hint">↳ ${escapeHtml(item.hint)}</div>` : '') +
+      (target ? ` <a href="javascript:void 0" onclick="focusCard('${target}')" class="meta">去看 →</a>` : '') +
+      '</div></div>';
+  }).join('');
+}
+function focusCard(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const card = el.closest('section') || el;
+  card.style.outline = '2px solid #6cf';
+  setTimeout(() => { card.style.outline = 'none'; }, 1600);
+}
+
 // ---------------------------------------------------- 录制 / 回放 / 注入 ----
 let inboxLoadedAt = 0;
 let lastInbox = null;
@@ -509,6 +556,7 @@ async function replayEntries(payload) {
     out.textContent = result.text || '(空报告)';
     const t = result.totals || {};
     state.textContent = `${t.entries || 0} 条：${t.replied || 0} 会回复 / ${t.silent || 0} 静默 / ${t.error || 0} 出错`;
+    loadAcceptance();   // 回放成功后 ③ 那条约束的证据就变了，顺手刷新验收台
   } catch (error) {
     out.textContent = '回放请求失败：' + error.message;
     state.textContent = '';
@@ -548,10 +596,12 @@ loadHistory().then(() => startStream());
 loadLog(true);
 loadInbox(true);
 runDiagnose();
+loadAcceptance();
 if (streamMode !== 'off') {
   setInterval(refresh, 4000);
   setInterval(() => loadLog(false), 3000);
   setInterval(runDiagnose, 30000);
+  setInterval(loadAcceptance, 30000);
   setInterval(() => { if (!document.hidden) loadInbox(false); }, 15000);
 }
 </script>

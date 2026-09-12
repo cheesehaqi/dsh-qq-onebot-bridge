@@ -141,6 +141,15 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
         json(response, 200, { ok: true, ...result })
         return
       }
+      if (request.method === 'GET' && path === '/api/acceptance') {
+        if (typeof api.acceptance !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持验收台' })
+          return
+        }
+        const result = await api.acceptance()
+        json(response, 200, { ok: result.ok, report: result.report, text: result.text, verdict: result.verdict, totals: result.totals })
+        return
+      }
       if (request.method === 'GET' && path === '/api/export') {
         const bundle = await api.exportBundle()
         response.writeHead(200, {
