@@ -1,9 +1,16 @@
 {
   "name": "dsh-qq-onebot-bridge",
-  "version": "0.3.9",
-  "description": "QQ ↔ DeepSeek Harness agent bridge over OneBot v11 (reverse WebSocket): per-group/per-user session grouping, @-quote voice speech-to-text (GLM-ASR / OpenAI-compatible), quote & image resolution, face/sticker tools, /new /status commands. Independent bundle; remove anytime: dsh plugin --profile web remove dsh-qq-onebot-bridge",
+  "version": "0.4.0",
+  "description": "QQ ↔ DeepSeek Harness agent bridge over OneBot v11 (reverse WebSocket): per-group/per-user session grouping, @-quote voice speech-to-text (GLM-ASR / OpenAI-compatible), quote & image resolution, face/sticker tools, agent media tools, session resume, moderation and group-insight packs — plus a standalone local control console (control/) that starts/stops the host and watches every port. Independent bundle; remove anytime: dsh plugin --profile web remove dsh-qq-onebot-bridge",
   "type": "module",
   "main": "lib/index.js",
+  "bin": {
+    "qq-control": "./control/bin/qq-control.mjs"
+  },
+  "scripts": {
+    "control": "node control/bin/qq-control.mjs",
+    "test": "node test/control-unit.mjs"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./cordis.patch.yml": "./cordis.patch.yml",

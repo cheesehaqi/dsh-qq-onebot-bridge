@@ -229,6 +229,29 @@ Notes:
 - Host error log: redirect stderr when starting `dsh web` (e.g. `D:\qq-work\qq-host-err.log`) to diagnose startup crashes
 - Key log markers: `voice fetched via get_record`, `quoted voice transcribed`, `followup sent (voice)`, `group msg without @bot ignored`
 
+## Standalone control console (`control/`, v0.4.0 local pre-release)
+
+The plugin ships an independent local operations console that does **not** depend on DSH Desktop: it keeps working when the host is down, and shows every port and process at a glance.
+
+```sh
+# starts on http://127.0.0.1:8799 and prints the tokenised URL
+npm run control            # or: node control/bin/qq-control.mjs --open
+# on Windows you can also double-click control/启动控制台.bat
+```
+
+| Capability | Detail |
+|---|---|
+| Port overview | listening state, owning PID and process name for console 8799 / host 3080 / OneBot 6700 / NapCat 6099 / GPT-SoVITS 9880; the connection count on 6700 *is* the "bot online" signal |
+| Start / stop | start, stop and restart the host (always with `--no-open`, logs appended to `qq-host-out.log` / `qq-host-err.log`), start/stop NapCat and QQ, start/stop GPT-SoVITS, stop everything at once |
+| Start pre-flight | checks 3080/6700 first and refuses to start with "port ← process#PID" instead of failing silently |
+| Free a port | one-click `taskkill /T /F` for the process owning a watched port (guard rail: only watched-port owners and known bot processes, never an unrelated PID) |
+| Logs | host stdout / stderr / bridge debug log with live follow and line count |
+| QR login state | whether the NapCat QR image exists and is fresh, plus a link to the 6099 page |
+| Config | `qq-control.json` is the single source of truth for ports and paths (node, `dsh bin.js`, NapCat, TTS script auto-detected; paths editable in the UI); **6700 is pinned by the NapCat config, do not change it** |
+| Security | binds `127.0.0.1` only, every API needs the token, and any request carrying a cross-site `Origin` is rejected |
+
+> A future tray/desktop build can simply wrap this HTTP API in Electron/Tauri — no logic rewrite needed.
+
 ## Tests
 
 `test/` contains WebSocket protocol simulation scripts (they impersonate the OneBot side and assert send/receive):
@@ -278,10 +301,10 @@ This plugin is provided for technical learning and personal research. Users must
 
 The five most recent versions (always kept rolling):
 
+- **v0.4.0** — standalone control console (`control/`): its own process on port 8799 with port/process/log/QR overview, one-click host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication (**local pre-release, not published yet**)
 - **v0.3.9** — group insight: message statistics (`/统计` `/周榜`), read-only `/荣誉` `/公告` `/群精华`, a daily group report (off by default), recurring reminders (daily/weekly/weekdays) and `/mc` Minecraft status
 - **v0.3.8** — anti-recall, sensitive-word and flood protection, group/friend join verification (admin `/同意 <id>`), a wider group-admin API (`/公告` `/精华` `/名片` `/头衔` `/全员禁言`) and all admin writes moved behind the shared gate
 - **v0.3.7** — zero-cost interaction pack: keyword wordbook (off by default), local fortune/lot/tarot, dice and random picks, points economy (off by default), idiom chain (373 idioms) and guess-the-number (off by default); fixes the `stop()` disposer and the idiom-chain rule
 - **v0.3.6** — agent-initiated actions and session resume: `qq_send_image/qq_send_file/qq_send_voice/qq_recall` tools, resuming the full session after a host restart, merged-forward cards for long replies, a shared write-action gate (rate limits + audit log), and `/撤回`
-- **v0.3.5** — image generation (off by default): `/画 <prompt>` generates an image; `imageGenProvider` supports any OpenAI-compatible service or a local SD WebUI — two extensible backends
 
 Full history in [CHANGELOG.md](CHANGELOG.md).

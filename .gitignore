@@ -5,4 +5,5 @@ qq-memory/
 qq-replies/
 qq-bridge-debug.log
 qq-reminders.json
+qq-control.json
 *.zip

@@ -1,5 +1,20 @@
 # 更新日志 / Changelog
 
+## v0.4.0（2026-09-11，**本地预发布：未推送 GitHub、未打发布包**）
+
+**独立控制台（control/）：脱离 DSH 生命周期的机器人运维端**
+
+> 按 2026-09-11 的端口/进程管理决策（Mnemon 文档 f9a7d288）实现"运行层与控制层分离"里的控制层。用户要求：做完暂时先不发布。
+
+- **独立进程、独立端口**：`control/bin/qq-control.mjs` 自带 HTTP 服务，只绑 `127.0.0.1:8799`（可 `--port` 改），不依赖 DSH 桌面端或 web 宿主——宿主挂了控制台照常可用
+- **端口单一真源** `control/lib/config.mjs`：`qq-control.json` 统一管理控制台 8799 / 宿主 3080 / OneBot 6700 / NapCat 6099 / GPT-SoVITS 9880；node 可执行文件、`dsh bin.js`（自动扫 npx 缓存取最新）、NapCat 启动脚本与二维码路径、TTS 脚本、日志路径全部**自动探测 + 可覆盖**
+- **监管能力** `control/lib/supervisor.mjs`：解析 `netstat -ano` + `tasklist` 得到每个端口的监听状态/占用 PID/进程名，以及 6700 上的连接数（=机器人在线）；支持启动/停止/重启宿主（`--no-open`、日志重定向）、启动/停止 NapCat 与 QQ、启动/停止 GPT-SoVITS、一键全停、释放被占端口
+- **启动预检**：启动宿主前先探 3080/6700，被占则拒绝启动并报出「端口←进程#PID」，消灭"端口被占 → 表现为长时间重新连接"的静默失败
+- **杀进程护栏** `assertKillAllowed`：只允许结束"占用受管端口"或"已知机器人进程"（node/QQ/NapCat/python），拒绝杀控制台自身与无关 PID
+- **安全模型** `control/lib/server.mjs`：所有 `/api/*` 需 token（query 或 `X-Control-Token`）；带 `Origin` 的请求必须来自控制台自身的源（阻断任何跨站页面驱动本机进程操作）；日志名白名单防路径穿越；配置写入只接受白名单字段与合法端口
+- **单页控制台** `control/ui.html`（无外部依赖、离线可用）：五端口状态灯、机器人/宿主在线徽标、QQ/NapCat/Python 进程与二维码新鲜度、按用途分组的操作按钮、三份日志（宿主 stdout/stderr、桥调试日志）自动跟随、路径配置表单；启动器 `control/启动控制台.bat`，也可 `npm run control`
+- 新增测试 `test/control-unit.mjs`（76 项）：netstat/tasklist 解析（含 IPv6、表头、ESTABLISHED）、端口摘要与中文标签、日志尾部与 3080 token 提取、二维码新鲜度、配置探测/覆盖/保存/提醒、杀进程护栏正反例、启动命令构造与端口占用拒绝、**真实 HTTP 往返**（UI、404、401 无/错 token、403 跨站 Origin、状态/日志/各 mutation、路径穿越拦截、非法 JSON、非法端口过滤）、`killTree`/`inspect`/`readUi` 容错
+
 ## v0.3.9（2026-09-11）
 
 **群洞察与定时播报：活跃统计、群荣誉/公告/精华、每日群日报、重复提醒、MC 服务器状态**
