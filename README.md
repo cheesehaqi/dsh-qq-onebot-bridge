@@ -23,6 +23,8 @@ QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱�
 - **群管套件**：`/mute` `/unmute` `/kick` `/clear`，以及 `/公告` `/精华` `/名片` `/头衔` `/全员禁言`（全部走统一写操作闸门）
 - **零成本互动包**：关键词问答库（`/kw add`，命中即回、零 token）、今日人品/运势/抽签/塔罗（按 QQ 号+日期确定性生成）、骰子与随机抽人、积分经济（发言/签到得积分、`/转账`）、群内小游戏（成语接龙 373 词库、猜数字）——全部本地计算，不消耗模型
 - **实用小工具**：`/health` 运行诊断、私聊文件自动转存到本机、`/export` 聊天记录导出 markdown
+- **看得见（v0.5）**：别人**合并转发**的聊天记录不再被静默丢弃——`get_forward_msg` 展开成正文交给模型；同时接通了早已封装却没人调用的能力：`/成员`（名单/详情）、`/群信息`、`/好友`（默认关）、agent 工具 `qq_recent_history` / `qq_member_info` / `qq_react`（表情回应）、`/退群`（默认关）
+- **找得回（v0.5）**：`/文件`、`/文件 文件夹名`、`/取 文件名`（下载后只发私聊）、`/相册`、`/ocr`（图片转文字）；消息按天归档到 `cwd/qq-history/`，`/找 关键词` 与 agent 工具 `qq_search_history` 在最近 N 天里检索（控制台也有「群资产 · 历史检索」卡片）
 - **语音转文字（STT）**：群聊中 @机器人并引用（回复）一条语音 → 转写文字并回复；私聊语音直接转写。支持智谱 GLM-ASR-2512 或任意 OpenAI 兼容 `/audio/transcriptions` 端点（如 SiliconFlow）
 - **私聊识图**：私聊中用户发送的图片/动画表情自动下载到 `cwd/qq-images/` 并注入会话，agent 用 `describe_image` 主动查看并回应（`privateImageView` 开关）
 - **引用解析**：@机器人并引用文本/图片/语音时自动展开（图片落盘到 `cwd/qq-replies/` 供 `describe_image` 查看，语音自动转写）
@@ -262,7 +264,7 @@ ws://127.0.0.1:6700/
 
 ## 测试
 
-三类脚本，共 1517 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
+44 个单测脚本，共 2249 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
 
 ```sh
 # 1) 单元测试：不联网、不起宿主，纯逻辑 + 临时目录（推荐每次改完都跑）
@@ -379,6 +381,48 @@ node test/replay-live-host.mjs --token <控制台 token>   # 录制 → 离线�
 每一项都能点「去看 →」跳到对应卡片（事件流/决策链/回放结果/体检/日志/注入）；结论为 `all-green / partial / unknown / broken` 四种。
 纯函数实现（`control/lib/acceptance.mjs`），所以每条分支都有断言覆盖；面板每 30 秒自动刷新，回放结束后立刻重算。
 
+## 看得见 · 找得回（v0.5）
+
+v0.5 做两件事：把**已经封装好、却从没接上线**的能力接通，再补上"群里的东西能找回来"。
+
+### 合并转发展开（先修一个违反硬约束的洞）
+
+以前别人把「聊天记录」合并转发给机器人时，`parseMessage` 里根本没有 `forward` 分支，这条消息在传输层就被静默丢掉——**连 trace 都没有**，直接违反 v0.4 的第一条硬约束。现在：
+
+- `forwards` 会被识别，经 `get_forward_msg` 展开成 `[转发聊天记录] 昵称: 内容` 交给模型（默认最多 50 条 / 4000 字，只展开一层，不递归）
+- 群里仍然要 @ 机器人才处理（空文本不再绕过 @ 门与 `acceptPrivate` 门——这两个门都补上了）
+- `forwardExpandEnabled: false` 可关闭；回放/注入模式（dry-run）不访问 QQ，注入时可用 `forwardText` 直接喂一份正文
+
+### 接通的既有能力
+
+| 能力 | 用法 |
+|---|---|
+| 群成员 | `/成员` 看名单（按身份/等级排序，标注头衔与禁言中）· `/成员 @某人` / `/成员 昵称` / `/成员 QQ号` 看详情（身份/等级/头衔/入群时间/最后发言/禁言状态）；agent 工具 `qq_member_info` |
+| 群资料 | `/群信息`（群名/群号/人数与上限/群主/建群时间） |
+| 好友列表 | `/好友`（**隐私项，默认关闭** `friendListEnabled`，且仅私聊里的管理员可用） |
+| 群历史 | agent 工具 `qq_recent_history`（拉本会话最近 N 条，群聊/私聊都支持） |
+| 表情回应 | agent 工具 `qq_react`（给消息贴 👍 之类，而不是发一条消息；写操作，过闸门） |
+| 退群 | `/退群 确认`（**默认关闭** `leaveGroupEnabled`，必须显式二次确认，走闸门） |
+
+### 群资产（只读为主）
+
+| 命令 | 说明 |
+|---|---|
+| `/文件` | 列群文件与文件夹（文件名/大小/上传者/时间） |
+| `/文件 <文件夹名>` | 进文件夹列文件 |
+| `/取 <文件名>` | 下载群文件到 `cwd/qq-files/` 并**只发到发起人私聊**（不往群里丢文件）；精确/前缀/模糊匹配，文件名消毒（去路径、去 Windows 非法字符、保留名加前缀） |
+| `/相册` | 列群相册（NapCat `get_qun_album_list`） |
+| `/ocr` | 引用一张图片发 `/ocr`，用 NapCat 的 `ocr_image` 读出图里的文字（不消耗模型） |
+
+### 历史检索与归档
+
+- 每条白名单会话的真实消息按天归档到 `cwd/qq-history/YYYY-MM-DD.jsonl`；**注入/回放的假事件不入档**，`/` 开头的命令也不入档（否则每次 `/找 X` 都会命中自己刚敲的查询词）
+- `/找 关键词`（空格分隔 = 同时包含，大小写不敏感）检索本会话最近 N 天；agent 工具 `qq_search_history` 同源同口径
+- 保留期默认 90 天，过期分片在宿主启动时**移入** `qq-trash/<日期>/` 而不是删除
+- 控制台新增「群资产 · 历史检索」卡片：看归档体积与时间范围、直接检索（与群内 `/找` 复用同一套解析）
+
+新增配置（括号内为默认值）：`forwardExpandEnabled`(true) `forwardMaxNodes`(50) `forwardMaxChars`(4000) `memberQueryEnabled`(true) `memberListLimit`(20) `friendListEnabled`(false) `historyQueryEnabled`(true) `historyQueryLimit`(20) `reactToolEnabled`(true) `leaveGroupEnabled`(false) `ocrEnabled`(true) `ocrMaxImages`(3) `groupFileEnabled`(true) `groupFileDownloadEnabled`(true) `groupFileListLimit`(20) `groupFileMaxBytes`(50 MiB) `albumEnabled`(true) `historyArchiveEnabled`(true) `historyArchiveDir`("") `historyArchiveKeepDays`(90) `historySearchEnabled`(true) `historySearchDays`(7) `historySearchLimit`(20)。
+
 ## 独立控制台（control/，v0.4.0）
 
 插件自带一个**独立的本地运维端**，不依赖 DSH 桌面端：宿主挂掉时它照常可用，端口与进程一目了然。
@@ -422,10 +466,10 @@ npm run control            # 或 node control/bin/qq-control.mjs --open
 
 最近五个版本（始终滚动展示）：
 
+- **v0.5.0** — 「看得见 · 找得回 / See it, find it」：**合并转发不再被静默丢弃**（`parseMessage` 增加 `forwards`、`get_forward_msg` 展开成正文交给模型，空文本路径补上 @ 门与 `acceptPrivate` 门——原先是违反「无静默分支」硬约束的洞）；接通既有能力 `/成员` `/群信息` `/好友`（默认关）`/退群`（默认关）与 agent 工具 `qq_recent_history` / `qq_member_info` / `qq_react`；新增群资产 `/文件` `/取`（下载只发私聊）`/相册` `/ocr`（图片转文字）；消息按天归档 `qq-history/`，`/找` 与 `qq_search_history` 检索最近 N 天（注入/回放与命令不入档，过期分片移入 `qq-trash/<日期>/` 而非删除）；控制台新增「群资产 · 历史检索」卡片；实测抓出并修掉 5 个自引入缺陷（格式化返回值当字符串发、`/找` 无参数无用法、归档把命令自己搜出来、回收目录日期套两层）+ 1 个门控逃逸
 - **v0.4.1** — 依赖解析与安装修复（社区反馈 [issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)）：`schemastery` 改用作用域名 `@deepseek-ai/schemastery`（裸名是**另一个包**，只在"别的插件恰好把它 hoist 到共享 node_modules"时才能解析，干净环境加载即 `ERR_MODULE_NOT_FOUND`）；`@deepseek-ai/dsh-*` peer 区间补上 `^0.1.5-rc.1`（预发布区间不跨补丁线，0.1.5-rc.1/rc.2 之前不被接受）；README 更正"裸名由 DSH 别名注入"的错误说法并补上本地目录安装需先 `npm install --omit=dev`（`ws`）；`test/static-unit.mjs` 新增静态防线：lib/ 里任何第三方 import 必须已在 `package.json` 声明、官方依赖禁止裸名
 - **v0.4.0** — 「一切皆可调试 / Everything Debuggable」：全链路可调试——traceId 结构化事件（每个静默分支都有 reason）、SSE 实时事件流与决策链、一键体检、诊断包导出、运行快照与生效配置；**录制 / 离线回放 / 事件注入**（`qq-inbox.jsonl` 录制每条入站事件 → 沙箱内用真实桥代码 dry-run 重跑并给出"会回复/静默 + 原因"→ 控制台注入合成事件走真实管线，一次注入 = 一个独立回合、整回合拦截模型回复与工具出站，全链路不碰 QQ）；**硬约束验收台**（6 条约束逐条给实时证据与"该点哪里"）；**诊断包默认脱敏导出**、`.gitignore` 覆盖全部运行产物、`test/privacy-unit.mjs` 隐私回归防线；自带独立控制台（`control/`，进程 8799），端口/进程/日志/扫码总览与启停、启动预检与杀进程护栏、token + Origin 鉴权
 - **v0.3.9** — 群洞察与定时播报：发言统计（`/统计` `/周榜`）、`/荣誉` `/公告` `/群精华` 只读查询、每日群日报（默认关闭）、重复提醒（每天/每周/工作日）、`/mc` 查 MC 服务器状态
 - **v0.3.8** — 防撤回、敏感词/刷屏防护、入群与加好友验证（管理员 `/同意 <序号>` 审批），群管 API 补齐（`/公告` `/精华` `/名片` `/头衔` `/全员禁言`），既有群管命令纳入写操作闸门
-- **v0.3.7** — 零成本互动包：关键词问答库（默认关闭）、今日人品/运势/抽签/塔罗、骰子与随机抽人、积分经济（默认关闭）、成语接龙（373 词库）与猜数字（默认关闭）；修复 `stop()` disposer 与接龙判定规则
 
 完整历史见 [CHANGELOG.md](CHANGELOG.md)。

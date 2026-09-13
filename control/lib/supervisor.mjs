@@ -19,6 +19,7 @@ import { buildAcceptance, formatAcceptance } from './acceptance.mjs'
 import { redactByKind, redactionNote } from './redact.mjs'
 import { appendCappedLine, moveToTrash } from '../../lib/store.js'
 import { countLines, describeFrame, parseInjectionLine, readInbox } from '../../lib/inbox.js'
+import { HistoryArchive } from '../../lib/archive.js'
 
 /** Plugin repo root, derived from this file's location (control/lib/… → repo). */
 export function defaultPluginRoot() {
@@ -655,10 +656,48 @@ export function createSupervisor(config, deps = {}) {
       : { ok: false, reason: `无法移动 ${file}（可能被占用，已保持原样）` }
   }
 
+  /** 历史归档目录：默认 <cwd>/qq-history，可用配置键 historyDir 覆盖。 */
+  function archiveDir() {
+    const configured = typeof config.historyDir === 'string' && config.historyDir.trim() !== '' ? config.historyDir : ''
+    return configured || join(config.cwd || process.cwd(), 'qq-history')
+  }
+
+  /** 「群资产」页：归档概览（文件数/体积/最早最新/回收目录）。只读本机文件，不碰宿主进程。 */
+  function archiveStats() {
+    const dir = archiveDir()
+    try {
+      const archive = new HistoryArchive({ dir })
+      const stats = archive.stats()
+      let trashDirs = []
+      try {
+        const trashRoot = join(config.cwd || process.cwd(), 'qq-trash')
+        trashDirs = existsSync(trashRoot) ? readdirSync(trashRoot).sort().slice(-7) : []
+      } catch { /* 回收目录不可读就当没有 */ }
+      return { ok: true, ...stats, dir, trashDirs }
+    } catch (error) {
+      return { ok: false, reason: `读取归档失败：${error.message}`, dir }
+    }
+  }
+
+  /**
+   * 归档检索：刻意复用插件同一套 HistoryArchive，控制台里搜出来的口径与群里 `/找` 完全一致。
+   */
+  function archiveSearch(query, { days = 7, limit = 20, chatKey = '' } = {}) {
+    const keyword = String(query ?? '').trim()
+    if (keyword === '') return { ok: false, reason: '请给出关键词' }
+    try {
+      const archive = new HistoryArchive({ dir: archiveDir() })
+      const result = archive.search(keyword, { days, limit, chatKey })
+      return { ok: true, query: keyword, days, limit, chatKey, ...result }
+    } catch (error) {
+      return { ok: false, reason: `检索失败：${error.message}` }
+    }
+  }
+
   return {
     status, startHost, stopHost, freePort, startNapcat, stopNapcat, startTts, stopTts, stopAll,
     traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance,
-    inboxList, replay, inject, clearQueue,
+    inboxList, replay, inject, clearQueue, archiveStats, archiveSearch,
     // 每个调用方（每个 SSE 连接）拿一份独立 tailer：共用模块级单例会让两个面板互相"偷"事件，
     // 也会让同一进程里的第二个 supervisor 读到别人的事件文件。
     tailer: () => createTraceTailer(config.logs?.trace ?? ''),

@@ -139,6 +139,18 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
         json(response, 200, { ok: true, ...api.inboxList({ limit }) })
         return
       }
+      if (request.method === 'GET' && path === '/api/archive') {
+        const query = (url.searchParams.get('q') ?? '').trim()
+        const days = Math.min(3650, Math.max(1, Number(url.searchParams.get('days')) || 7))
+        if (query === '') {
+          json(response, 200, { ok: true, ...(await api.archiveStats()) })
+          return
+        }
+        const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 20))
+        const chatKey = (url.searchParams.get('chatKey') ?? '').trim()
+        json(response, 200, { ok: true, days, ...(await api.archiveSearch(query, { days, limit, chatKey })) })
+        return
+      }
       if (request.method === 'GET' && path === '/api/runtime') {
         json(response, 200, { ok: true, runtime: api.runtime() })
         return

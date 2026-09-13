@@ -1,5 +1,54 @@
 # 更新日志 / Changelog
 
+## v0.5.0（2026-09-13 发布）— 看得见 · 找得回 / See it, find it
+
+> 本版主题：**看得见 · 找得回**。一半是把"已经封装好、却从没接上线"的能力接通（合并转发、群成员、群资料、群历史、表情回应），一半是补上"群里的东西能找回来"（群文件、相册、OCR、历史检索 + 按天归档）。同时修掉一个**违反 v0.4 第一条硬约束**的洞：合并转发卡片此前在传输层被静默丢弃。
+
+### 合并转发展开（先修洞，再加功能）
+
+- **问题**：`parseMessage` 只认 text/at/reply/record/image/file，没有 `forward` 分支；于是"只发一张聊天记录卡片"的消息在 `#onFrame` 就因"text/records/images/files 全空"被 `return` 掉——**不产生 message 事件、trace 里连一条记录都没有**。而 `get_forward_msg` 的封装注释一直写着"used to expand recalled cards"，这条路径从没接上
+- 现在：`parseMessage` 识别 `[CQ:forward]` 与数组形式的 `forward` 段；`#onFrame` 不再因此早退；桥内新增 `#expandForwards`，用 `get_forward_msg` 取节点并交给新的纯模块 `lib/forward.js` 规范化 + 排版成 `[转发聊天记录] 昵称: 内容`（默认最多 50 条 / 4000 字，只展开一层不递归，`forwardExpandEnabled` 可关）
+- **同时修掉一个自引入的门控逃逸**：空文本分支原本让 `else if` 链整体跳过，于是"群里没 @ 机器人的转发卡片"会绕过 @ 门（也绕过私聊的 `acceptPrivate` 门）——白调一次 OneBot、白跑一个模型回合。现在空文本路径自己过这两道门并写 reason（由桥层测试 `seeing-unit` 抓出）
+- 回放/注入（dry-run）不访问 QQ：注入可直接带 `forwardText` 喂一份正文；录制白名单新增 `forwards` / `forwardText`，注入规格新增 `forwards` / `forwardText`
+
+### 接通既有能力（封装早就在，只是没人调用）
+
+- `/成员` 列群成员（身份/等级/头衔/禁言中排序）、`/成员 @某人|昵称|QQ号` 看详情（入群时间/最后发言/禁言状态）；agent 工具 `qq_member_info`（群聊专用）
+- `/群信息`（群名/群号/人数上限/群主/建群时间）
+- `/好友`（**默认关闭**，隐私项，仅私聊里的管理员可用）
+- agent 工具 `qq_recent_history`：拉本会话最近 N 条消息（`get_group_msg_history` / NapCat `get_friend_msg_history`），纯逻辑交给新模块 `lib/history.js`
+- agent 工具 `qq_react`：给消息贴表情回应（`set_msg_emoji_like`）而不是发一条消息，写操作过闸门；默认作用于本回合收到的消息
+- `/退群 确认`（**默认关闭**，必须显式二次确认，走闸门；`DEFAULT_ACTION_LIMITS` 新增 `set_group_leave` 限额）
+
+### 群资产
+
+- `/文件`、`/文件 <文件夹名>`：列群文件与文件夹（`get_group_root_files` / `get_group_files_by_folder`）
+- `/取 <文件名>`：`get_group_file_url` 取链后下载到 `cwd/qq-files/`，**只发到发起人私聊**（群里只留一句提示，不往群里丢文件）；精确/前缀/模糊匹配，文件名经 `sanitizeDownloadName` 消毒（去路径、去 Windows 非法字符、保留名加前缀、120 字上限保留扩展名）
+- `/相册`：列群相册（NapCat `get_qun_album_list`）
+- `/ocr`：对本条或引用的图片调用 NapCat `ocr_image` 读出文字（不消耗模型）
+- 排版与匹配逻辑集中在新的纯模块 `lib/assets.js`
+
+### 历史归档与检索
+
+- 每条白名单会话的真实消息按天归档到 `cwd/qq-history/YYYY-MM-DD.jsonl`（新模块 `lib/archive.js`，用记录自身的 `ts` 算本地日期，避免东八区凌晨落错分片）；**注入/回放的假事件不入档**，`/` 开头的命令也不入档
+- `/找 关键词`：大小写不敏感、空格分隔多词为 AND、只搜当前会话、可配天数与条数；agent 工具 `qq_search_history` 同源同口径
+- 保留期默认 90 天，过期分片在宿主启动时**移入** `qq-trash/<日期>/`（`prune` 只移不删，与图片清理同一套"never destroy"约定）
+- 控制台新增「群资产 · 历史检索」卡片与 `GET /api/archive`（无 `q` 返回概览、带 `q` 走检索，复用插件同一套解析），`control-unit` 增加真实 HTTP 往返断言
+
+### 修复（本版自测抓出的 6 个真缺陷）
+
+1. **门控逃逸**：空文本 + 转发卡片绕过 @ 门与 `acceptPrivate` 门（`seeing-unit` 抓出）
+2. `/文件`、`/文件 <文件夹>`、`/相册` 把格式化函数的**返回对象**直接插进模板串，群里看到的是 `[object Object]`（`find-unit` 抓出）
+3. `/找` 无参数：正则要求命令后至少一个字符，导致"用法"提示是死代码、命令落到模型路径（`find-unit` 抓出）
+4. 归档把 `/` 命令也写进去：每次 `/找 X` 都会命中自己刚敲的查询词，"没找到"永远不可达（`find-unit` 抓出）
+5. 启动 prune 的回收目录日期套了两层（外层还是 UTC 日期，与内层本地日期错位）（`find-unit` 抓出）
+6. **前缀撞车**：`/取` 把既有的 `/取消精华` 吃掉（`commands-unit` 抓出，与历史 `/vote-end` 同一类坑）；`/文件` 同样收紧为"必须空白分隔"
+
+### 验证
+
+- 单测 44 套 / 2247 断言全绿（新增 `forward-unit` 111、`members-unit` 104、`history-unit` 81、`archive-unit` 86、`assets-unit` 132、桥层 `seeing-unit` 71、桥层 `find-unit` 59，`control-unit` 95→99）
+- 真机（宿主 3080 / 控制台 8799）：注入带 `forwardText` 的转发帧 → trace 出现 `forward` 阶段成功事件、模型回合收到完整两条记录；`/成员`、`/群信息`、`/找`、`/文件`、`/相册`、`/ocr` 六条新命令在真机分发正确；`/api/archive` 概览与检索均返回真实数据；UI 新卡片渲染正常
+
 ## v0.4.1（2026-09-13 发布）— 依赖解析与安装修复 / Dependency resolution & install fixes
 
 > 本版修社区反馈的安装问题（[issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)）：干净环境下插件加载即 `ERR_MODULE_NOT_FOUND: Cannot find package 'schemastery'`，连带把成因相同的安装/声明问题一起收口。

@@ -26,3 +26,5 @@ qq-host-out.log
 qq-host-err.log
 qq-replay/
 qq-trash/
+qq-history/
+qq-files/

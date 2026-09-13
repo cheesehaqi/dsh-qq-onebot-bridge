@@ -193,6 +193,19 @@
   </section>
 
   <section class="card" style="grid-column:1/-1">
+    <h2>群资产 · 历史检索 <span class="meta" id="archiveMeta">（本机归档 <code>qq-history/</code>，群里 <code>/找</code> 用的就是它；控制台直接读文件，不打扰宿主）</span></h2>
+    <div class="row">
+      <button onclick="loadArchive()">刷新概览</button>
+      <input type="text" id="archQ" placeholder="关键词（空格分隔 = 同时包含）" style="max-width:260px" />
+      <label class="meta">天数 <input type="number" id="archDays" value="7" min="1" max="365" style="width:70px" /></label>
+      <input type="text" id="archChat" placeholder="会话键，如 g:123（可留空）" style="max-width:190px" />
+      <button onclick="searchArchive()">检索</button>
+      <span class="meta" id="archState"></span>
+    </div>
+    <pre id="archOut">（点「刷新概览」看归档体积与时间范围）</pre>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
     <h2>日志文件</h2>
     <div class="row">
       <button onclick="setLog('hostOut')">宿主 stdout</button>
@@ -593,12 +606,59 @@ async function clearQueue() {
   document.getElementById('injState').textContent = (result.ok ? '✅ ' : '⚠️ ') + (result.reason || '');
   loadInbox(true);
 }
+async function loadArchive() {
+  const out = document.getElementById('archOut');
+  const state = document.getElementById('archState');
+  state.textContent = '读取中…';
+  try {
+    const r = await api('/api/archive');
+    if (!r.ok) { state.textContent = ''; out.textContent = '⚠️ ' + (r.reason || '读取失败'); return; }
+    const kb = Math.round((r.bytes || 0) / 1024);
+    out.textContent = [
+      '归档目录：' + r.dir,
+      '分片文件：' + (r.files || 0) + ' 个 · 合计 ' + kb + ' KB',
+      '时间范围：' + (r.oldest || '—') + '  →  ' + (r.newest || '—'),
+      '本机回收目录：' + ((r.trashDirs || []).join(', ') || '（空）'),
+    ].join('\n');
+    state.textContent = '';
+  } catch (error) {
+    state.textContent = '';
+    out.textContent = '⚠️ ' + error.message;
+  }
+}
+
+async function searchArchive() {
+  const q = document.getElementById('archQ').value.trim();
+  const days = Number(document.getElementById('archDays').value) || 7;
+  const chat = document.getElementById('archChat').value.trim();
+  const out = document.getElementById('archOut');
+  const state = document.getElementById('archState');
+  if (!q) { state.textContent = '⚠️ 请先填关键词'; return; }
+  state.textContent = '检索中…';
+  try {
+    const r = await api('/api/archive?q=' + encodeURIComponent(q) + '&days=' + days + '&chatKey=' + encodeURIComponent(chat));
+    if (!r.ok) { state.textContent = ''; out.textContent = '⚠️ ' + (r.reason || '检索失败'); return; }
+    const hits = r.hits || [];
+    if (hits.length === 0) {
+      out.textContent = '最近 ' + r.days + ' 天没找到「' + r.query + '」（已扫 ' + (r.scanned || 0) + ' 条）';
+    } else {
+      out.textContent = '命中 ' + hits.length + ' 条' + (r.truncated ? '（已按上限截断）' : '') + '，共扫 ' + (r.scanned || 0) + ' 条：\n'
+        + hits.map((h) => new Date(h.ts).toLocaleString('zh-CN', { hour12: false }) + '  ' + (h.name || h.userId) + '  [' + h.chatKey + ']  ' + h.text).join('\n');
+    }
+    state.textContent = '';
+  } catch (error) {
+    state.textContent = '';
+    out.textContent = '⚠️ ' + error.message;
+  }
+}
+
 // 静态模式（stream=0）只做一次性加载，不建立长连接也不再轮询：
 // 弱网/远程查看更省流量，也让自动化截图能拿到完整渲染结果。
 refresh();
 loadHistory().then(() => startStream());
 loadLog(true);
 loadInbox(true);
+loadArchive();
 runDiagnose();
 loadAcceptance();
 if (streamMode !== 'off') {

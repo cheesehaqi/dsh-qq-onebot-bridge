@@ -28,6 +28,8 @@ A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ m
 - **Quote resolution**: quoting text/images/voice while @-mentioning the bot expands them automatically (images saved under `cwd/qq-replies/` for `describe_image`; voices transcribed)
 - **Face system**: yellow-face table + `[face:name]` markers in replies + image sticker collection (`autoCollectStickers`) + per-session `qq_face_list` / `qq_face_send` tools (master switch `faceEnabled`)
 - **Session commands**: `/new` resets the current session, `/status` shows session state
+- **See it (v0.5)**: merged-forward ("chat record") cards are no longer dropped silently — `get_forward_msg` expands them into a transcript for the model, and the empty-text path now also honours the @ gate and `acceptPrivate`; capabilities that were already implemented but never wired up are live: `/成员` (roster & details), `/群信息`, `/好友` (off by default), `/退群` (off by default) and the `qq_recent_history` / `qq_member_info` / `qq_react` agent tools
+- **Find it (v0.5)**: `/文件`, `/文件 <folder>`, `/取 <name>` (downloads go to the requester's private chat only), `/相册`, `/ocr` (image → text); every message is archived per day under `cwd/qq-history/`, `/找 <keywords>` and the `qq_search_history` tool search the last N days, and the console gained an "assets · history search" card
 - **Safety controls**: `allowUsers` / `allowGroups` allowlists, `accessToken` auth, `replyOnlyWhenMentioned` for groups
 - **Persona decoupled**: the plugin contains **no persona or memory content** — personas and group rules are injected into sessions via dsh-mnemon's `USER.md`/`MEMORY.md` (see below)
 
@@ -308,6 +310,48 @@ The two features above answer "what is happening" and "why did this message go t
 
 Every row has a "去看 →" link that jumps to the matching card; the verdict is one of `all-green / partial / unknown / broken`. The evaluator is a pure function (`control/lib/acceptance.mjs`) with every branch asserted in tests, refreshed every 30s and immediately after a replay finishes.
 
+## See it, find it (v0.5)
+
+v0.5 does two things: it wires up capabilities that were **already implemented but never called**, and it makes "what the group already said" findable again.
+
+### Merged-forward expansion (fixing a hard-constraint violation first)
+
+Until v0.5 a merged-forward ("chat record") card was dropped **inside the transport layer**: `parseMessage` had no `forward` branch, so a message containing only a card was silently discarded — with no `message` event and not even a trace line, violating v0.4's first hard constraint. Now:
+
+- `forwards` is recognised and expanded via `get_forward_msg` into `[转发聊天记录] nickname: content` for the model (default max 50 nodes / 4000 chars, one level only, never recursive)
+- Groups still require an @-mention, and the empty-text path now goes through both the @ gate and the `acceptPrivate` gate (it used to bypass them)
+- `forwardExpandEnabled: false` turns it off; replay/injection (dry-run) never touches QQ, and an injection may carry `forwardText` to feed a transcript directly
+
+### Capabilities that are now actually wired up
+
+| Capability | How to use it |
+|---|---|
+| Group members | `/成员` lists the roster (owner → admins → members, level desc, titles and mutes marked) · `/成员 @someone` / `/成员 nickname` / `/成员 <qq>` shows one member's card, level, title, join date, last message and mute state; agent tool `qq_member_info` |
+| Group info | `/群信息` (name, id, member count and cap, owner, creation time) |
+| Friend list | `/好友` (**off by default** via `friendListEnabled`; private chats from an admin only) |
+| Chat history | agent tool `qq_recent_history` (last N messages of this chat, groups and private chats) |
+| Emoji reaction | agent tool `qq_react` (reacts to a message instead of sending one; a write action, gated) |
+| Leaving a group | `/退群 确认` (**off by default** via `leaveGroupEnabled`, explicit second confirmation, gated) |
+
+### Group assets (read-only by default)
+
+| Command | What it does |
+|---|---|
+| `/文件` | Lists group files and folders (name / size / uploader / time) |
+| `/文件 <folder>` | Lists the files inside one folder |
+| `/取 <name>` | Downloads a group file into `cwd/qq-files/` and delivers it **to the requester's private chat only** (never posted into the group); exact → prefix → fuzzy matching, with the file name sanitised (path stripped, Windows-illegal characters removed, reserved names prefixed) |
+| `/相册` | Lists the group albums (NapCat `get_qun_album_list`) |
+| `/ocr` | Quote an image and send `/ocr` to read its text with NapCat's `ocr_image` (no model call) |
+
+### History archive & search
+
+- Every real allowlisted message is archived per day into `cwd/qq-history/YYYY-MM-DD.jsonl`; **injected/replayed frames are never archived**, and `/`-commands are skipped too (otherwise every `/找 X` would hit the query line it just wrote)
+- `/找 <keywords>` (space-separated = all must match, case-insensitive) searches this chat's last N days; the `qq_search_history` agent tool shares the same index and semantics
+- Retention defaults to 90 days; expired day files are **moved** into `qq-trash/<date>/` on host start, never deleted
+- The console gained an "assets · history search" card (archive size and date range, plus keyword search reusing the plugin's own parser)
+
+New config keys (defaults in brackets): `forwardExpandEnabled`(true) `forwardMaxNodes`(50) `forwardMaxChars`(4000) `memberQueryEnabled`(true) `memberListLimit`(20) `friendListEnabled`(false) `historyQueryEnabled`(true) `historyQueryLimit`(20) `reactToolEnabled`(true) `leaveGroupEnabled`(false) `ocrEnabled`(true) `ocrMaxImages`(3) `groupFileEnabled`(true) `groupFileDownloadEnabled`(true) `groupFileListLimit`(20) `groupFileMaxBytes`(50 MiB) `albumEnabled`(true) `historyArchiveEnabled`(true) `historyArchiveDir`("") `historyArchiveKeepDays`(90) `historySearchEnabled`(true) `historySearchDays`(7) `historySearchLimit`(20).
+
 ## Standalone control console (`control/`, v0.4.0)
 
 The plugin ships an independent local operations console that does **not** depend on DSH Desktop: it keeps working when the host is down, and shows every port and process at a glance.
@@ -335,7 +379,7 @@ npm run control            # or: node control/bin/qq-control.mjs --open
 
 ## Tests
 
-Three kinds, 1517 assertions in `test/*-unit.mjs` plus 3 live scripts:
+44 unit suites, 2249 assertions in `test/*-unit.mjs`, plus 3 live scripts:
 
 ```sh
 # 1) unit tests: no network, no host, pure logic in temp dirs (run after every change)
@@ -411,10 +455,10 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 
 The five most recent versions (always kept rolling):
 
+- **v0.5.0** — "See it, find it": merged-forward cards are no longer dropped silently (`forwards` parsing plus `get_forward_msg` expansion, with the @ and `acceptPrivate` gates now applied on the empty-text path); the already-implemented-but-unused capabilities are wired up (`/成员`, `/群信息`, `/好友` off by default, `/退群` off by default, and the `qq_recent_history` / `qq_member_info` / `qq_react` tools); new group assets (`/文件`, `/取` with private-only delivery, `/相册`, `/ocr`); messages are archived per day under `qq-history/` and searched with `/找` / `qq_search_history` (injections, replays and commands are excluded; expired files move to `qq-trash/<date>/`); console gained an assets/history-search card; six self-inflicted defects found and fixed during testing (formatter objects sent as text, `/找` with no argument, commands polluting the archive, a doubled trash date bucket, the `/取` vs `/取消精华` prefix collision, and a gate bypass)
 - **v0.4.1** — dependency-resolution and install fixes (reported as [issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)): `schemastery` now uses its scoped name `@deepseek-ai/schemastery` (the bare name is a **different package** that only resolved when another plugin happened to hoist it into the shared node_modules, so a clean install died with `ERR_MODULE_NOT_FOUND`); the `@deepseek-ai/dsh-*` peer ranges accept `^0.1.5-rc.1` (a prerelease range does not carry over to a later patch line, so 0.1.5-rc.1/rc.2 were rejected); the README no longer claims DSH injects a bare-name alias and now documents the `npm install --omit=dev` step a local-directory install needs for `ws`; `test/static-unit.mjs` gained static guards — every third-party import in `lib/` must be declared in `package.json`, and official dependencies must not use bare names
 - **v0.4.0** — "Everything Debuggable": end-to-end debuggability — trace-id structured events where every silent drop carries a reason, a live SSE event stream and per-message decision chains, one-click diagnosis, a diagnostic-bundle export, runtime snapshot and effective config; **recording / offline replay / event injection** (every inbound event recorded to `qq-inbox.jsonl` → replayed through the real bridge code in a sandbox with dry-run, reporting "would reply / silent + why" → synthetic events injected into the real pipeline from the console, one injection = one dedicated turn with that whole turn's replies and tool calls intercepted, never touching QQ); a **hard-constraint acceptance page** (live evidence and a next step for each of the 6 constraints); **redacted diagnostic exports by default**, `.gitignore` covering every runtime artefact and `test/privacy-unit.mjs` as a privacy regression guard; ships its own standalone control console (`control/`, port 8799) with port/process/log/QR overview, host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication
 - **v0.3.9** — group insight: message statistics (`/统计` `/周榜`), read-only `/荣誉` `/公告` `/群精华`, a daily group report (off by default), recurring reminders (daily/weekly/weekdays) and `/mc` Minecraft status
 - **v0.3.8** — anti-recall, sensitive-word and flood protection, group/friend join verification (admin `/同意 <id>`), a wider group-admin API (`/公告` `/精华` `/名片` `/头衔` `/全员禁言`) and all admin writes moved behind the shared gate
-- **v0.3.7** — zero-cost interaction pack: keyword wordbook (off by default), local fortune/lot/tarot, dice and random picks, points economy (off by default), idiom chain (373 idioms) and guess-the-number (off by default); fixes the `stop()` disposer and the idiom-chain rule
 
 Full history in [CHANGELOG.md](CHANGELOG.md).

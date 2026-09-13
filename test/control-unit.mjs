@@ -203,6 +203,11 @@ const stubApi = {
   startTts: async () => ({ ok: true, reason: 'tts 启动' }),
   stopTts: async () => ({ ok: true, reason: 'tts 停止' }),
   stopAll: async () => ({ ok: true, reason: '全部停止' }),
+  archiveStats: async () => ({ ok: true, dir: 'X:\\qq-history', files: 2, bytes: 2048, oldest: '2026-09-01', newest: '2026-09-02', trashDirs: ['2026-09-03'] }),
+  archiveSearch: async (query, options) => ({
+    ok: true, query, days: options.days, limit: options.limit, chatKey: options.chatKey,
+    hits: [{ ts: 1700000000000, chatKey: 'g:1', userId: 1001, name: '小明', text: 'x' }], scanned: 3, files: ['2026-09-02.jsonl'], truncated: false,
+  }),
 }
 let savedPatch = null
 const server = createControlServer({
@@ -227,6 +232,13 @@ check('跨站 Origin 返回 403', crossSite.status === 403, String(crossSite.sta
 const goodStatus = await fetch(base + '/api/status?token=' + token)
 const statusBody = await goodStatus.json()
 check('带 token 返回状态', goodStatus.status === 200 && statusBody.ok === true && Array.isArray(statusBody.ports))
+const archiveStats = await (await fetch(base + '/api/archive?token=' + token)).json()
+check('GET /api/archive 返回归档概览', archiveStats.ok === true && archiveStats.files === 2 && archiveStats.bytes === 2048, JSON.stringify(archiveStats))
+const archiveSearchRes = await (await fetch(base + '/api/archive?q=hi&days=3&limit=5&chatKey=g%3A1&token=' + token)).json()
+check('GET /api/archive?q= 走检索并透传参数', archiveSearchRes.ok === true && archiveSearchRes.query === 'hi' && archiveSearchRes.days === 3 && archiveSearchRes.limit === 5 && archiveSearchRes.chatKey === 'g:1', JSON.stringify(archiveSearchRes))
+check('检索结果带命中与扫描数', Array.isArray(archiveSearchRes.hits) && archiveSearchRes.hits.length === 1 && archiveSearchRes.scanned === 3)
+const archiveClamp = await (await fetch(base + '/api/archive?q=hi&days=99999&limit=0&token=' + token)).json()
+check('days/limit 被夹到合法区间', archiveClamp.days === 3650 && archiveClamp.limit === 20, JSON.stringify({ days: archiveClamp.days, limit: archiveClamp.limit }))
 const headerToken = await fetch(base + '/api/status', { headers: { 'X-Control-Token': token } })
 check('也可用请求头携带 token', headerToken.status === 200)
 const logsResponse = await fetch(base + '/api/logs?name=hostOut&lines=5&token=' + token)
