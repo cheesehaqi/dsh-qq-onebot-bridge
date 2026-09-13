@@ -1,7 +1,7 @@
 {
   "name": "dsh-qq-onebot-bridge",
-  "version": "0.5.0",
-  "description": "QQ ↔ DeepSeek Harness agent bridge over OneBot v11 (reverse WebSocket). v0.5.0 \"See it, find it\": merged-forward chat records are expanded for the model instead of being dropped, group member/roster and group-info queries, recent-history and emoji-reaction agent tools, group file listing and download, group albums, image OCR, and a keyword-searchable per-day message archive (/找) — plus the whole v0.4 debugging stack (trace id on every message, a Chinese reason on every silent drop, structured JSONL events, live SSE event stream with per-message decision chains, one-click diagnosis, diagnostic-bundle export, offline sandboxed dry-run replay and event injection, a 6-hard-constraint acceptance page) and a standalone control console (control/). Independent bundle; remove anytime: dsh plugin --profile web remove dsh-qq-onebot-bridge",
+  "version": "0.5.1",
+  "description": "QQ ↔ DeepSeek Harness agent bridge over OneBot v11 (reverse WebSocket). v0.5.x \"See it, find it\": merged-forward chat records are expanded for the model instead of being dropped, group member/roster and group-info queries, recent-history and emoji-reaction agent tools, group file listing and download, group albums, image OCR, and a keyword-searchable per-day message archive (/找) — plus the whole v0.4 debugging stack (trace id on every message, a Chinese reason on every silent drop, structured JSONL events, live SSE event stream with per-message decision chains, one-click diagnosis, diagnostic-bundle export, offline sandboxed dry-run replay and event injection, a 6-hard-constraint acceptance page) and a standalone control console (control/). Independent bundle; remove anytime: dsh plugin --profile web remove dsh-qq-onebot-bridge",
   "type": "module",
   "main": "lib/index.js",
   "bin": {

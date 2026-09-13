@@ -8,6 +8,9 @@ qq-*/
 qq-*.json
 qq-*.jsonl
 qq-*.log
+# 其它扩展名的产物（敏感词表是 .txt；留出 csv 以免将来新增产物再次漏网）
+qq-*.txt
+qq-*.csv
 
 # 明确列出（可读性 + 防止有人用 ! 规则重新包含）
 qq-control.json

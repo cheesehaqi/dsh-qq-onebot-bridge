@@ -701,6 +701,91 @@ const ROOT_FILES = {
   t.stop()
 }
 
+// ===========================================================================
+// G. 回归：/读图 是 OCR 的别名，绝不能被语音朗读吃掉
+//    （lib/bridge.js#onQqMessageInner 的 voiceReadingEnabled 分发里那个 ocrAlias 判断）
+// ===========================================================================
+
+// 29. voiceReadingEnabled 打开时 /读图 + 图片 → 真的走 ocr_image，且一条语音都不发
+//     TTS 故意指向 127.0.0.1:1（本文件既有约定：这个地址必然失败、绝不联网）：
+//     万一回归成"朗读吃掉 /读图"，这里会立刻变成一条「朗读失败」而不是挂 60s 等 Azure。
+{
+  const t = makeBridge({ voiceReadingEnabled: true, ocrEnabled: true, ttsProvider: 'local', ttsLocalUrl: 'http://127.0.0.1:1' })
+  const imgPath = join(t.cwd, 'read-image-ocr.png')
+  writeFileSync(imgPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+  t.server.ocrResult = { texts: [{ text: '读图识别出来的字' }] }
+  const reply = await t.send(t.privateMessage('/读图', { images: [{ kind: 'image', url: '', file: imgPath }] }), 250)
+  check('G29 /读图 调用 ocr_image', t.server.count('ocr_image') >= 1, `calls=${t.server.count('ocr_image')} reply=${brief(reply)}`)
+  check('G29 /读图 的回复是 OCR 结果', reply.includes('图片文字识别') && reply.includes('读图识别出来的字'), brief(reply))
+  const records = t.server.sent.flatMap((item) => item.segments.filter((segment) => segment.type === 'record'))
+  check('G29 /读图 一条语音都没发（没被朗读吃掉）', records.length === 0 && !reply.includes('朗读'), `records=${records.length} reply=${brief(reply)}`)
+  t.stop()
+}
+
+// 30. 对照：同一套开关下 /读 你好 走朗读（TTS 不可用 → 朗读失败），一次 ocr_image 都不发
+{
+  const t = makeBridge({ voiceReadingEnabled: true, ocrEnabled: true, ttsProvider: 'local', ttsLocalUrl: 'http://127.0.0.1:1' })
+  const reply = await t.send(t.privateMessage('/读 你好'), 250)
+  check('G30 TTS 不可用时 /读 不调用 ocr_image', t.server.count('ocr_image') === 0, `calls=${t.server.count('ocr_image')} reply=${brief(reply)}`)
+  check('G30 /读 的回复不是 OCR 结果', !reply.includes('图片文字识别'), brief(reply))
+  t.stop()
+}
+
+// ===========================================================================
+// H. 回归：注入/回放回合里的 /好友 不访问 QQ
+//    （lib/bridge.js#handleFriendList 开头的离线判断）
+// ===========================================================================
+
+// 31. 注入的私聊管理员 /好友 → 一次 get_friend_list 都不发，回复标明回放/注入
+{
+  const t = makeBridge({ friendListEnabled: true, adminUsers: [1001] })
+  t.server.friendList = [{ user_id: 20002, nickname: '小红' }]
+  const reply = await t.send(t.privateMessage('/好友', { __injected: true }))
+  check('H31 注入回合不调用 get_friend_list', t.server.count('get_friend_list') === 0, `calls=${t.server.count('get_friend_list')}`)
+  check('H31 回复标明回放/注入', reply.includes('回放/注入'), brief(reply))
+  check('H31 回复说明取不到好友列表（不是好友名单）', reply.includes('取不到好友列表') && !reply.includes('小红'), brief(reply))
+  t.stop()
+}
+
+// ===========================================================================
+// I. 回归：归档写入失败必须留痕
+//    （lib/bridge.js#onQqMessageInner 里 written === false 时那条 stage:'archive' 的 trace）
+// ===========================================================================
+
+// 32. historyArchiveDir 指向不存在的盘符（Z:\）→ archive.append 返回 false → trace 必须有 archive ok=false
+{
+  const t = makeBridge({ historyArchiveDir: 'Z:\\nope\\qq-history' })
+  await t.send(t.groupMessage('归档写入失败留痕的普通消息'))
+  const failed = t.bridge.trace.recent({ limit: 5000, stage: 'archive', ok: false })
+  check('I32 归档写入失败留下 archive ok=false 事件', failed.length > 0, brief(failed.map((e) => `${e.ok}:${e.reason ?? ''}`)))
+  check('I32 trace 原因提到归档', failed.some((event) => String(event.reason ?? '').includes('归档')), brief(failed.map((e) => e.reason)))
+  check('I32 归档失败不阻塞主流程（消息仍进 agent 回合）', t.turns.length === 1, `turns=${t.turns.length}`)
+  t.stop()
+}
+
+// 32b. 对照：可写目录（默认 cwd/qq-history）下不应该出现 archive ok=false —— 免得上面那条是靠
+//      "trace 里本来就有个 archive 失败事件" 蒙对的。
+{
+  const t = makeBridge()
+  await t.send(t.groupMessage('归档正常写入的普通消息'))
+  const failed = t.bridge.trace.recent({ limit: 5000, stage: 'archive', ok: false })
+  check('I32b 对照：可写目录下没有 archive 失败事件', failed.length === 0 && t.shardText().includes('归档正常写入的普通消息'), brief(failed.map((e) => e.reason)))
+  t.stop()
+}
+
+// 32c. 同一断言的**可移植**写法：拿一个普通文件当父目录（mkdir 必然 ENOTDIR），
+//      这样"Z: 盘恰好存在"的机器上这条回归也不会失效。
+{
+  const cwd = freshCwd()
+  const blocker = join(cwd, 'not-a-dir')
+  writeFileSync(blocker, 'x', 'utf8')
+  const t = makeBridge({ cwd, historyArchiveDir: join(blocker, 'qq-history') })
+  await t.send(t.groupMessage('归档目录父级是文件时的普通消息'))
+  const failed = t.bridge.trace.recent({ limit: 5000, stage: 'archive', ok: false })
+  check('I32c 归档目录不可创建时同样留下 archive ok=false + 归档原因', failed.length > 0 && String(failed.at(-1)?.reason ?? '').includes('归档'), brief(failed.map((e) => `${e.ok}:${e.reason ?? ''}`)))
+  t.stop()
+}
+
 for (const dir of dirs) {
   try { rmSync(dir, { recursive: true, force: true }) } catch { /* 临时目录清不掉不影响结论 */ }
 }

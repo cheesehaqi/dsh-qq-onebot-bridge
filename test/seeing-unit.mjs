@@ -614,6 +614,89 @@ check('F24 DEFAULT_ACTION_LIMITS 含 set_group_leave', Boolean(DEFAULT_ACTION_LI
 check('F24 set_group_leave.perMinute >= 1', Number(DEFAULT_ACTION_LIMITS.set_group_leave?.perMinute) >= 1, brief(DEFAULT_ACTION_LIMITS.set_group_leave))
 check('F24 set_group_leave.perDay 有上限', Number(DEFAULT_ACTION_LIMITS.set_group_leave?.perDay) >= 1, brief(DEFAULT_ACTION_LIMITS.set_group_leave))
 
+// ===========================================================================
+// G. 回归：转发卡片展开后没有可读内容 → 绝不起模型回合
+//    （lib/bridge.js#onQqMessageInner 里 `let entry` 之前那条 `if (effectiveText === '')` drop）
+// ===========================================================================
+
+// 25. forwardExpandEnabled:false 的私聊转发卡片 → 不展开、不起回合，但两个阶段都必须留痕
+{
+  const t = makeBridge({ forwardExpandEnabled: false })
+  t.server.forwardResult = FORWARD_NODE
+  await t.send(t.privateMessage('', { forwards: [{ id: 'g25' }] }))
+  check('G25 关闭展开时不产生 agent 回合', t.turns.length === 0, `turns=${t.turns.length} last=${brief(t.lastTurn())}`)
+  const off = t.traceStage('forward', false)
+  check('G25 trace 有 forward 失败事件', off.length > 0, brief(off.map((e) => `${e.ok}:${e.reason ?? ''}`)))
+  const dropped = t.traceStage('drop', false)
+  check('G25 trace 的 drop 原因提到转发', dropped.some((event) => String(event.reason ?? '').includes('转发')), brief(dropped.map((e) => e.reason)))
+  t.stop()
+}
+
+// 26. getForwardMsg 回空载荷（{messages: []}）→ 展开结果为空，同样不起回合
+{
+  const t = makeBridge()
+  t.server.forwardResult = { messages: [] }
+  await t.send(t.privateMessage('', { forwards: [{ id: 'g26' }] }))
+  check('G26 空转发载荷不产生 agent 回合', t.turns.length === 0, `turns=${t.turns.length} last=${brief(t.lastTurn())}`)
+  check('G26 空转发载荷确实问过一次 getForwardMsg', t.server.count('get_forward_msg') === 1, `calls=${t.server.count('get_forward_msg')}`)
+  const dropped = t.traceStage('drop', false)
+  check('G26 trace 的 drop 原因提到转发', dropped.some((event) => String(event.reason ?? '').includes('转发')), brief(dropped.map((e) => e.reason)))
+  t.stop()
+}
+
+// 27. getForwardMsg 直接 reject → 同样不起回合，且 forward 阶段留失败痕
+{
+  const t = makeBridge()
+  t.server.forwardError = new Error('boom-forward-empty')
+  await t.send(t.privateMessage('', { forwards: [{ id: 'g27' }] }))
+  check('G27 拉取失败不产生 agent 回合', t.turns.length === 0, `turns=${t.turns.length} last=${brief(t.lastTurn())}`)
+  const broke = t.traceStage('forward', false)
+  check('G27 trace 的 forward ok=false', broke.length > 0, brief(broke.map((e) => `${e.ok}:${e.reason ?? ''}`)))
+  const dropped = t.traceStage('drop', false)
+  check('G27 trace 的 drop 原因提到转发', dropped.some((event) => String(event.reason ?? '').includes('转发')), brief(dropped.map((e) => e.reason)))
+  t.stop()
+}
+
+// 28. 正对照：真实节点 → 展开成功，而且真的起了一个回合（证明上面三条是"因为空"才被丢）
+{
+  const t = makeBridge()
+  t.server.forwardResult = FORWARD_NODE
+  await t.send(t.privateMessage('', { forwards: [{ id: 'g28' }] }))
+  check('G28 真实转发节点产生一个 agent 回合', t.turns.length === 1, `turns=${t.turns.length}`)
+  check('G28 回合正文含转发内容', t.lastTurn().includes('今晚开黑吗'), brief(t.lastTurn()))
+  t.stop()
+}
+
+// ===========================================================================
+// H. 回归：/成员 按昵称 —— 群名片为空时必须回落到昵称
+//    （lib/bridge.js#queryGroupMembers 里的 nameOf）
+// ===========================================================================
+
+// 29. card:'' 的成员（OneBot 给没设群名片的成员就是空串）必须用昵称查得到
+{
+  const t = makeBridge()
+  t.server.memberList = [{ user_id: 20002, nickname: '小红', card: '', role: 'member', level: '3' }]
+  t.server.memberInfo = { user_id: 20002, nickname: '小红', card: '', role: 'member', level: '3' }
+  const reply = await t.send(t.groupMessage('/成员 小红'))
+  check('H29 无群名片的成员按昵称能查到', reply.includes('小红') && !reply.includes('没有找到'), brief(reply))
+  check('H29 查到的是那位成员（user_id 20002）', t.server.paramsOf('get_group_member_info')[0]?.userId === 20002, brief(t.server.paramsOf('get_group_member_info')))
+  t.stop()
+}
+
+// 30. 对照：设了群名片的成员，用群名片查仍然命中本人（没有被昵称回落改坏）
+{
+  const t = makeBridge()
+  t.server.memberList = [
+    { user_id: 20002, nickname: '小红', card: '', role: 'member', level: '3' },
+    { user_id: 30003, nickname: '小刚', card: '小明', role: 'member', level: '1' },
+  ]
+  t.server.memberInfo = { user_id: 30003, nickname: '小刚', card: '小明', role: 'member', level: '1' }
+  const reply = await t.send(t.groupMessage('/成员 小明'))
+  check('H30 群名片优先：用群名片查得到', reply.includes('小明') && !reply.includes('没有找到'), brief(reply))
+  check('H30 名片命中不会串到昵称成员（user_id 30003）', t.server.paramsOf('get_group_member_info')[0]?.userId === 30003, brief(t.server.paramsOf('get_group_member_info')))
+  t.stop()
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

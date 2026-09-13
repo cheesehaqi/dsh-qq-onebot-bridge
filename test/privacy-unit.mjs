@@ -48,11 +48,12 @@ export function collectPrivateIds({ env = process.env, home = homedir(), readFil
   for (const file of candidates) {
     let text = ''
     try { text = readFile(file, 'utf8') } catch { continue }
-    for (const key of ['allowUsers', 'allowGroups', 'adminUsers', 'botQq']) {
-      const inline = new RegExp(`^\\s*${key}\\s*:\\s*\\[([^\\]]*)\\]`, 'm').exec(text)
-      if (inline) for (const raw of inline[1].split(',')) if (/^\s*\d{5,12}\s*$/.test(raw)) ids.add(raw.trim())
-      const scalar = new RegExp(`^\\s*${key}\\s*:\\s*(\\d{5,12})\\s*$`, 'm').exec(text)
-      if (scalar) ids.add(scalar[1])
+    // 三种 YAML 写法都要覆盖：内联数组 `key: [1, 2]`、标量 `key: 123`、
+    // 跨行列表 `key:\n  - 123`。旧实现只认前两种，写在跨行列表里的号不会被纳入比对集。
+    for (const key of ['allowUsers', 'allowGroups', 'adminUsers', 'botQq', 'rejectUsers', 'rejectGroups']) {
+      const block = new RegExp(`^\\s*${key}\\s*:[ \t]*([^\n]*)((?:\n[ \t]+-[^\n]*)*)`, 'm').exec(text)
+      if (!block) continue
+      for (const match of `${block[1]}\n${block[2]}`.matchAll(/\d{5,12}/g)) ids.add(match[0])
     }
   }
   return ids
@@ -68,7 +69,7 @@ const RUNTIME_ARTIFACTS = [
   'qq-replay/run-2026-01-01T00-00-00/qq-trace.jsonl', 'qq-trash/2026-01-01/x',
   'qq-stats/g_1.json', 'qq-checkin/u_1.json', 'qq-points/g_1.json', 'qq-todos/g_1.json',
   'qq-memory/g_1.json', 'qq-media/a.png', 'qq-images/a.png', 'qq-replies/a.png', 'qq-tts/a.mp3',
-  'qq-files/a.txt', 'qq-exports/a.md', 'qq-faces/list.json',
+  'qq-files/a.txt', 'qq-exports/a.md', 'qq-faces/list.json', 'qq-badwords.txt',
 ]
 
 // ------------------------------------------------------------------ 读文件 --
@@ -135,11 +136,19 @@ if (PRIVATE_IDS.size === 0) {
   for (const { name, text } of textFiles) {
     for (const match of text.matchAll(/\b\d{5,12}\b/g)) {
       const value = match[0]
-      if (PLACEHOLDER_IDS.has(value)) continue
+      // 先判真实号再考虑占位号：反过来会让"真实号恰好等于占位号"被静默放过。
       if (PRIVATE_IDS.has(value)) idHits.push(`${name}: 命中私有号（${hash(value).slice(0, 8)}）`)
     }
   }
   check(`没有真实 QQ 号（比对 ${PRIVATE_IDS.size} 个本机私有号）`, idHits.length === 0, [...new Set(idHits)].slice(0, 5).join(' | '))
+  // 文件名同样是泄露面：`qq-control-<真实号>.json` 这种内容干净、名字泄露的情况不能被漏掉。
+  const nameHits = []
+  for (const name of tracked) {
+    for (const match of name.matchAll(/\b\d{5,12}\b/g)) {
+      if (PRIVATE_IDS.has(match[0])) nameHits.push(name)
+    }
+  }
+  check('文件名里也没有真实 QQ 号', nameHits.length === 0, nameHits.slice(0, 3).join(','))
 }
 check('占位号在示例/测试里被有意使用', textFiles.some(({ text }) => [...PLACEHOLDER_IDS].some((id) => text.includes(id))))
 
@@ -177,13 +186,20 @@ check('示例配置里的密钥字段为空', !/(apiKey|ApiKey|token|Token)\s*:\
 // 有 git 时再交叉核对一遍，两种模式都必须判"已忽略"。
 function gitignoreMatcher(text) {
   const rules = String(text).split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#') && !line.startsWith('!'))
-  const toRegExp = (pattern) => {
-    const body = pattern.replace(/\/+$/, '')
-    const escaped = body.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*').replace(/\?/g, '[^/]')
-    return new RegExp(`^${escaped}(/.*)?$`)
-  }
-  const compiled = rules.map(toRegExp)
-  return (candidate) => compiled.some((re) => re.test(candidate) || re.test(candidate.split('/').pop()))
+  const globToRe = (body) => body
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*').replace(/\?/g, '[^/]')
+  // 按 git 的真实语义编译（旧实现把 `qq-*/` 去掉末尾斜杠后当成文件模式，
+  // 于是 `qq-badwords.txt` 被误判为"已忽略"——正是这个假阳性掩盖了真实缺口）：
+  //   · 以 / 结尾 → 只匹配目录，目录下所有内容都算忽略
+  //   · 不含 /    → 匹配任意层级（basename 语义）
+  //   · 含 /      → 从仓库根锚定
+  const compiled = rules.map((pattern) => {
+    if (pattern.endsWith('/')) return new RegExp(`(^|/)${globToRe(pattern.replace(/\/+$/, ''))}/`)
+    if (!pattern.includes('/')) return new RegExp(`(^|/)${globToRe(pattern)}(/.*)?$`)
+    return new RegExp(`^${globToRe(pattern)}(/.*)?$`)
+  })
+  return (candidate) => compiled.some((re) => re.test(candidate))
 }
 const ignoreText = (() => { try { return readFileSync(join(repo, '.gitignore'), 'utf8') } catch { return '' } })()
 const ignoredByText = gitignoreMatcher(ignoreText)

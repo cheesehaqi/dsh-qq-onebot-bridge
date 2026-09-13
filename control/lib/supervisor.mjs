@@ -428,6 +428,8 @@ export function createSupervisor(config, deps = {}) {
       replayHints: data.replay ?? null,
       inbox: data.inbox ?? null,
       injection: data.injection ?? null,
+      // 桥写出的**生效**归档目录（插件的 historyArchiveDir 住在 profile 里，控制台读不到）
+      archive: data.archive ?? null,
       gate: data.gate ?? {},
       trace: data.trace ?? {},
     }
@@ -656,10 +658,19 @@ export function createSupervisor(config, deps = {}) {
       : { ok: false, reason: `无法移动 ${file}（可能被占用，已保持原样）` }
   }
 
-  /** 历史归档目录：默认 <cwd>/qq-history，可用配置键 historyDir 覆盖。 */
+  /**
+   * 历史归档目录。优先级：运行快照里桥自己写出的生效目录 > 控制台配置的显式覆盖 > <cwd>/qq-history。
+   * 为什么先看快照：`historyArchiveDir` 是**插件**的配置键，住在 profile 的 cordis.patch.yml 里，
+   * 控制台进程读不到；只看控制台配置就会在用户自定义目录时显示 0 个文件还自称"群里 /找 用的就是它"。
+   */
   function archiveDir() {
-    const configured = typeof config.historyDir === 'string' && config.historyDir.trim() !== '' ? config.historyDir : ''
-    return configured || join(config.cwd || process.cwd(), 'qq-history')
+    const fromRuntime = runtime()?.archive
+    if (fromRuntime && typeof fromRuntime.dir === 'string' && fromRuntime.dir.trim() !== '') return fromRuntime.dir
+    const candidate = typeof config.historyArchiveDir === 'string' && config.historyArchiveDir.trim() !== ''
+      ? config.historyArchiveDir
+      // 兼容早期控制台里可能写过的旧键（插件 schema 里没有 historyDir，仅作回落）
+      : (typeof config.historyDir === 'string' && config.historyDir.trim() !== '' ? config.historyDir : '')
+    return candidate || join(config.cwd || process.cwd(), 'qq-history')
   }
 
   /** 「群资产」页：归档概览（文件数/体积/最早最新/回收目录）。只读本机文件，不碰宿主进程。 */
@@ -673,7 +684,7 @@ export function createSupervisor(config, deps = {}) {
         const trashRoot = join(config.cwd || process.cwd(), 'qq-trash')
         trashDirs = existsSync(trashRoot) ? readdirSync(trashRoot).sort().slice(-7) : []
       } catch { /* 回收目录不可读就当没有 */ }
-      return { ok: true, ...stats, dir, trashDirs }
+      return { ok: true, ...stats, dir, exists: existsSync(dir), trashDirs }
     } catch (error) {
       return { ok: false, reason: `读取归档失败：${error.message}`, dir }
     }

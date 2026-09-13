@@ -615,7 +615,7 @@ async function loadArchive() {
     if (!r.ok) { state.textContent = ''; out.textContent = '⚠️ ' + (r.reason || '读取失败'); return; }
     const kb = Math.round((r.bytes || 0) / 1024);
     out.textContent = [
-      '归档目录：' + r.dir,
+      '归档目录：' + r.dir + (r.exists === false ? '（还不存在：要么还没有消息落盘，要么 historyArchiveDir 指向别处）' : ''),
       '分片文件：' + (r.files || 0) + ' 个 · 合计 ' + kb + ' KB',
       '时间范围：' + (r.oldest || '—') + '  →  ' + (r.newest || '—'),
       '本机回收目录：' + ((r.trashDirs || []).join(', ') || '（空）'),
