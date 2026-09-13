@@ -422,10 +422,10 @@ npm run control            # 或 node control/bin/qq-control.mjs --open
 
 最近五个版本（始终滚动展示）：
 
+- **v0.4.1** — 依赖解析与安装修复（社区反馈 [issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)）：`schemastery` 改用作用域名 `@deepseek-ai/schemastery`（裸名是**另一个包**，只在"别的插件恰好把它 hoist 到共享 node_modules"时才能解析，干净环境加载即 `ERR_MODULE_NOT_FOUND`）；`@deepseek-ai/dsh-*` peer 区间补上 `^0.1.5-rc.1`（预发布区间不跨补丁线，0.1.5-rc.1/rc.2 之前不被接受）；README 更正"裸名由 DSH 别名注入"的错误说法并补上本地目录安装需先 `npm install --omit=dev`（`ws`）；`test/static-unit.mjs` 新增静态防线：lib/ 里任何第三方 import 必须已在 `package.json` 声明、官方依赖禁止裸名
 - **v0.4.0** — 「一切皆可调试 / Everything Debuggable」：全链路可调试——traceId 结构化事件（每个静默分支都有 reason）、SSE 实时事件流与决策链、一键体检、诊断包导出、运行快照与生效配置；**录制 / 离线回放 / 事件注入**（`qq-inbox.jsonl` 录制每条入站事件 → 沙箱内用真实桥代码 dry-run 重跑并给出"会回复/静默 + 原因"→ 控制台注入合成事件走真实管线，一次注入 = 一个独立回合、整回合拦截模型回复与工具出站，全链路不碰 QQ）；**硬约束验收台**（6 条约束逐条给实时证据与"该点哪里"）；**诊断包默认脱敏导出**、`.gitignore` 覆盖全部运行产物、`test/privacy-unit.mjs` 隐私回归防线；自带独立控制台（`control/`，进程 8799），端口/进程/日志/扫码总览与启停、启动预检与杀进程护栏、token + Origin 鉴权
 - **v0.3.9** — 群洞察与定时播报：发言统计（`/统计` `/周榜`）、`/荣誉` `/公告` `/群精华` 只读查询、每日群日报（默认关闭）、重复提醒（每天/每周/工作日）、`/mc` 查 MC 服务器状态
 - **v0.3.8** — 防撤回、敏感词/刷屏防护、入群与加好友验证（管理员 `/同意 <序号>` 审批），群管 API 补齐（`/公告` `/精华` `/名片` `/头衔` `/全员禁言`），既有群管命令纳入写操作闸门
 - **v0.3.7** — 零成本互动包：关键词问答库（默认关闭）、今日人品/运势/抽签/塔罗、骰子与随机抽人、积分经济（默认关闭）、成语接龙（373 词库）与猜数字（默认关闭）；修复 `stop()` disposer 与接龙判定规则
-- **v0.3.6** — agent 主动能力与会话续接：`qq_send_image/qq_send_file/qq_send_voice/qq_recall` 工具、宿主重启后 `resume` 完整会话、合并转发长回复、统一写操作闸门（限频+审计）、`/撤回`
 
 完整历史见 [CHANGELOG.md](CHANGELOG.md)。

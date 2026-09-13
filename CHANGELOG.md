@@ -1,5 +1,21 @@
 # 更新日志 / Changelog
 
+## v0.4.1（2026-09-13 发布）— 依赖解析与安装修复 / Dependency resolution & install fixes
+
+> 本版修社区反馈的安装问题（[issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)）：干净环境下插件加载即 `ERR_MODULE_NOT_FOUND: Cannot find package 'schemastery'`，连带把成因相同的安装/声明问题一起收口。
+
+### 修复
+
+- **`schemastery` 改用作用域名 `@deepseek-ai/schemastery`**：`lib/index.js`、`lib/bridge.js` 原本写的是裸名 `import z from 'schemastery'`，而 `package.json` 只声明了 `@deepseek-ai/schemastery`——**裸名是另一个包**（未带作用域的 `schemastery@3.18.0`，官方为 `@deepseek-ai/schemastery@3.18.1`），只有在"同 profile 里别的插件恰好把它 hoist 到共享 node_modules"时才解析得到（本机就是被 `dsh-mnemon` 的依赖 hoist 兜住的）。DSH 并没有"裸名别名注入"机制，官方包全部使用作用域名；干净环境必然加载失败
+- **peer 版本区间补上 `^0.1.5-rc.1`**：预发布区间不会跨补丁线，`^0.1.2-rc.1` 不匹配 `0.1.5-rc.1` / `0.1.5-rc.2`，在 DSH 0.1.5-rc.1 上会出现 peer 解析问题（`--omit=peer` 能绕过，但根因在声明）
+- **静态回归防线**（`test/static-unit.mjs` 新增三项）：lib/ 里每个第三方 import 必须在 `package.json` 的 dependencies/peerDependencies/optionalDependencies 中声明；官方依赖禁止退化成裸名（`@deepseek-ai/x` 的 basename 不得作为 import 规格名出现）；并校验规格名扫描确实抓到官方依赖，避免正则失效导致假通过。这类"在我机器上能跑"的依赖问题以后直接测挂
+- **文档纠错与补全**：README 中"裸名 `schemastery` 由 DSH 以别名注入"的说法**是错的**，已删除并改写为正确的部署事实；同时补充本地目录安装说明——`dsh plugin add <目录>` 走 pnpm 的 `link:`，不会安装被链接包自己的依赖，需先在插件目录执行 `npm install --omit=dev`（`ws`），从插件市场安装则会随依赖一起装好
+
+### 验证
+
+- 干净环境复现与回归：无 hoist 裸包的沙箱里，修复前 `ERR_MODULE_NOT_FOUND: Cannot find package 'schemastery' imported from lib/index.js`；修复后插件入口正常加载（152 个配置键）
+- 37 套单测 / 1596 断言全绿（新增 3 项静态防线）；本机 `node_modules` 里手工建的"裸名→作用域名"别名 junction 已移除，本地解析口径与干净环境一致，避免再次掩盖同类问题
+
 ## v0.4.0（2026-09-12 发布）— 一切皆可调试 / Everything Debuggable
 
 > 本版主题：**一切皆可调试**。出问题时不用猜——每条消息都有 traceId，每个"没回复"都有原因，任何一条历史消息都能离线重跑，假事件能喂进真实管线，而且这 6 条约束在控制台里随时可验收（阶段 1→4：可观测地基 → 控制台调试层 → 录制/回放/注入 → 硬约束验收台）。
