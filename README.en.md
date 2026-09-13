@@ -46,7 +46,10 @@ QQ client ←→ OneBot implementation (NapCat / LLOneBot / OpenShamrock / Lagra
 ## Install / uninstall
 
 ```sh
-# install (local directory)
+# install (local directory): install the runtime dependency inside the directory first,
+# then register the plugin — a local directory is linked with pnpm's `link:`, which does
+# not install the linked package's own dependencies (`ws`)
+cd <this-directory> && npm install --omit=dev
 dsh plugin --profile web add <this-directory>
 
 # uninstall anytime (independent bundle, does not affect other plugins)
@@ -54,6 +57,8 @@ dsh plugin --profile web remove dsh-qq-onebot-bridge
 ```
 
 Restart `dsh web` after install/uninstall.
+
+> Official dependencies (`@deepseek-ai/dsh-*`, `@deepseek-ai/schemastery`) are declared as `peerDependencies` and installed by DSH together with the profile; they do not need to be installed inside the plugin directory.
 
 ## Configuration
 
@@ -400,7 +405,7 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 | The repository | contains no keys, passwords or real QQ ids: secrets live only in your DSH profile config (outside the repo), and `test/privacy-unit.mjs` re-scans every tracked file on each test run (the private ids are read from your machine-local config or `DSH_QQ_PRIVATE_IDS`, never stored in the test) |
 | Console | binds `127.0.0.1` only, every endpoint needs the token (kept in the ignored `qq-control.json`), cross-site Origins are rejected |
 
-> Deployment fact: this plugin is a **DSH bundle** and runs inside a DSH profile; peer dependencies (`@deepseek-ai/dsh-*`, `@deepseek-ai/schemastery` — the bare `schemastery` alias is injected by DSH) are provided by the host. Copying `lib/` out and running it standalone will not work by design.
+> Deployment fact: this plugin is a **DSH bundle** and runs inside a DSH profile; official peer dependencies (`@deepseek-ai/dsh-*`, `@deepseek-ai/schemastery`) are installed together with the profile. **Official packages must be imported by their full scoped name**: the unscoped `schemastery` is a different package (3.18.0) that only resolved when another plugin happened to hoist it into the shared node_modules — which is how `lib/` was written up to v0.4.0, and it fails with `ERR_MODULE_NOT_FOUND` on a clean install ([issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)); it now uses the scoped name, enforced statically by `test/static-unit.mjs` (a bare or undeclared import fails the test). `ws` is an ordinary runtime dependency, so a local-directory install needs the `npm install` step above. Copying `lib/` out and running it standalone still will not work by design.
 
 ## Changelog
 

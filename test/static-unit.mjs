@@ -120,6 +120,35 @@ check('package.json 版本与 CHANGELOG 顶部一致', (() => {
 check('package.json main 指向 lib/index.js', pkg.main === 'lib/index.js')
 check('入口声明了 bundle patch', pkg.dsh?.bundle?.patch === './cordis.patch.yml')
 
+// ---- 裸 import 必须已声明（issue #1：lib 里 import 'schemastery'，却只声明了 @deepseek-ai/schemastery）----
+// 在别人机器上不会被"另一个插件恰好 hoist 了同名包"兜住，所以这里静态守住两条：
+//   ①每个第三方规格名都必须在 dependencies/peerDependencies/optionalDependencies 里
+//   ②官方依赖一律用 @deepseek-ai/* 作用域名，禁止退化成本地/裸名
+const declared = new Set([
+  ...Object.keys(pkg.dependencies ?? {}),
+  ...Object.keys(pkg.peerDependencies ?? {}),
+  ...Object.keys(pkg.optionalDependencies ?? {}),
+])
+const officialBases = [...declared].filter((name) => name.startsWith('@deepseek-ai/')).map((name) => name.slice('@deepseek-ai/'.length))
+const undeclaredImports = []
+const bareOfficialImports = []
+const specifiers = new Set()
+for (const name of files) {
+  const text = readFileSync(join(libDir, name), 'utf8')
+  const pattern = /(?:^|\s)(?:import|export)\b[^\n]*?\sfrom\s*'([^']+)'|(?:^|\s)import\s*\(\s*'([^']+)'/gm
+  for (const match of text.matchAll(pattern)) {
+    const spec = match[1] ?? match[2]
+    if (!spec || spec.startsWith('.') || spec.startsWith('node:')) continue
+    specifiers.add(spec)
+    const root = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]
+    if (!declared.has(root)) undeclaredImports.push(`${name}: ${spec}`)
+    if (officialBases.includes(root)) bareOfficialImports.push(`${name}: ${spec} (应写作 @deepseek-ai/${root})`)
+  }
+}
+check('lib/ 的第三方 import 全部已在 package.json 声明', undeclaredImports.length === 0, undeclaredImports.join('; '))
+check('官方依赖统一用 @deepseek-ai/* 作用域名（不依赖他人 hoist 的裸名）', bareOfficialImports.length === 0, bareOfficialImports.join('; '))
+check('规格名扫描确实抓到了官方依赖（防止正则失效假通过）', [...specifiers].some((spec) => spec.startsWith('@deepseek-ai/')), [...specifiers].join(','))
+
 // ---- README 惯例：更新日志只展示最近五版 ----
 const readme = readFileSync(join(libDir, '..', 'README.md'), 'utf8')
 const versionBullets = [...readme.matchAll(/^- \*\*v([0-9.]+)\*\* —/gm)].map((match) => match[1])

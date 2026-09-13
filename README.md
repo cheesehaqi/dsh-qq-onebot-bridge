@@ -57,7 +57,9 @@ QQ 客户端 ←→ OneBot 实现（NapCat / LLOneBot / OpenShamrock / Lagrange�
 ## 安装 / 卸载
 
 ```sh
-# 安装（本地目录）
+# 安装（本地目录）：先在被安装的目录里装运行时依赖，再注册插件
+# 本地目录走 pnpm 的 link:，不会自动安装被链接包自己的依赖（ws）
+cd <本目录> && npm install --omit=dev
 dsh plugin --profile web add <本目录>
 
 # 卸载（随时可移除，独立 bundle 不影响其它插件）
@@ -65,6 +67,8 @@ dsh plugin --profile web remove dsh-qq-onebot-bridge
 ```
 
 装/卸后重启 `dsh web` 生效。
+
+> 官方依赖（`@deepseek-ai/dsh-*`、`@deepseek-ai/schemastery`）声明为 `peerDependencies`，由 DSH 随 profile 一起装好，插件目录里不需要重复安装。
 
 ## 配置
 
@@ -412,7 +416,7 @@ npm run control            # 或 node control/bin/qq-control.mjs --open
 | 仓库本身 | 不含任何密钥/口令/真实 QQ 号：密钥只存在于你的 DSH profile 配置（仓库外）；`test/privacy-unit.mjs` 每次跑测试都会重新扫描全部被跟踪文件（真实号从你本机私有配置或 `DSH_QQ_PRIVATE_IDS` 现取，测试文件里不含真实号） |
 | 控制台 | 只绑 `127.0.0.1`，所有接口需 token（存在被忽略的 `qq-control.json`），拒绝跨站 Origin |
 
-> 部署事实：本插件是 **DSH bundle**，运行在 DSH profile 内，`@deepseek-ai/dsh-*`、`@deepseek-ai/schemastery`（裸名 `schemastery` 由 DSH 以别名注入）等 peer 依赖由宿主提供；把 `lib/` 单独拷出来裸跑是跑不起来的（设计如此，不是缺依赖）。
+> 部署事实：本插件是 **DSH bundle**，运行在 DSH profile 内，`@deepseek-ai/dsh-*`、`@deepseek-ai/schemastery` 等官方 peer 依赖随 profile 一起装好。**官方包必须写全作用域名**：不带作用域的 `schemastery` 是另一个包（3.18.0），只有在"别的插件恰好把它 hoist 到共享 node_modules"时才能解析——v0.4.0 之前 `lib/` 正是这么写的，换到干净环境立刻 `ERR_MODULE_NOT_FOUND`（[issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)）；现已统一用作用域名，并由 `test/static-unit.mjs` 静态守住（裸名/未声明的 import 直接测试失败）。`ws` 是普通运行时依赖，本地目录安装要按上面「安装」一节先 `npm install`。把 `lib/` 单独拷出来裸跑仍然跑不起来（设计如此，不是缺依赖）。
 
 ## 更新日志
 
