@@ -264,7 +264,7 @@ ws://127.0.0.1:6700/
 
 ## 测试
 
-51 个单测脚本，共 3062 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
+53 个单测脚本，共 3252 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
 
 ```sh
 # 1) 单元测试：不联网、不起宿主，纯逻辑 + 临时目录（推荐每次改完都跑）
@@ -494,6 +494,41 @@ QQ 客户端断开时，按配置的启动命令把它拉起来：
 
 新增配置键（括号内为默认值）：`engageEnabled`(false) `pokeBackEnabled`(false) `pokeBackText`("") `pokeCommandEnabled`(false) `pokePerHour`(5) `typingEnabled`(false) `emojiLikeEnabled`(false) `emojiLikeId`("128077") `emojiLikeMentionOnly`(true) `emojiLikePerHour`(20) `reactionStatsEnabled`(false) `reactionStatsFile`("") `sendLikeEnabled`(false) `sendLikeTimes`(10) `sendLikePerDay`(3) `markReadEnabled`(false) `markReadPerMinute`(10)。互动状态（表情统计 + 三个配额）落在 `qq-engage.json`，跨重启不丢。
 
+## 群运营工具箱（v0.5.4）
+
+总开关 `groupOpsEnabled`（默认 false）。**下面每个子开关都在总开关之下**：总开关关着时，任何群运营命令都只回一句中文说明，绝不静默什么都不做。
+
+### 同样先做真机探针（这次纠正了三个会做错的地方）
+
+读本机 NapCat 实现包（`bootmain/napcat.mjs`，QQ 9.9.32-50969）逐条核对，结论写在 `lib/ops.js` 头部、由 `test/ops-unit.mjs` 钉住：
+
+- **批量踢有原生 action**：`set_group_kick_members` 的 `user_id` 是**数组**，一次请求多人——不必循环 `set_group_kick`
+- **群待办是三个独立 action**：`set_group_todo` / `complete_group_todo` / `cancel_group_todo`
+- **相册上传存在，但叫 `upload_image_to_qun_album`**（不是 `upload_qun_album`）
+- **`set_group_member_permissions` 是局部更新**：没传的项保持不变——所以 `/群权限` 只提交你**写出来**的项
+
+| 命令 | 开关 | 真机 action | 说明 |
+|---|---|---|---|
+| `/群打卡` | `nativeSignEnabled` | `set_group_sign` | QQ 的**原生群签到**；和本地「签到」积分玩法不是一回事（提示语会点明） |
+| `/全体余量` | `opsReadEnabled` | `get_group_at_all_remain` | 本群与本人剩余 @全体次数；不可用时说明常见原因 |
+| `/禁言名单` | `opsReadEnabled` | `get_group_shut_list` | 昵称 + 剩余时间，并标出已到期人数 |
+| `/群详细` | `opsReadEnabled` | `get_group_info_ex` | 扩展群资料（人数上限/创建时间/描述/问题） |
+| `/入群通知` | `opsReadEnabled` | `get_group_ignored_notifies` | 被忽略的入群申请与邀请 |
+| `/批量踢 @a @b` → `/批量踢 确认` | `opsKickEnabled` | `set_group_kick_members` | 管理员；**两步确认**（60 秒有效）、分批不丢人、名单含自己直接拒绝 |
+| `/待办` `/完成待办` `/取消待办` | `opsTodoEnabled` | `set/complete/cancel_group_todo` | 引用一条消息即可 |
+| `/移动文件` `/重命名文件` `/删文件` `/新建文件夹` | `opsFileEnabled` | `move/rename/delete_group_file`、`create_group_file_folder` | 管理员，破坏性操作；缺参数时逐项说明缺什么 |
+| `/传图 <相册ID或名字>` | `opsAlbumUploadEnabled` | `upload_image_to_qun_album` | 引用一张图片；按名字自动查相册列表换 ID，`/传图 @album_1` 可直接指定 |
+| `/群名` `/群备注` | `opsProfileEnabled` | `set_group_name` / `set_group_remark` | 管理员；群名 >30 字、备注 >60 字直接拒绝 |
+| `/群权限 相册=关 临时会话=关 新群聊=开` | `opsPolicyEnabled` | `set_group_member_permissions` | 管理员；只提交写出来的项 |
+| `/历史可见 开\|关` | `opsPolicyEnabled` | `set_group_new_member_history_visibility` | 管理员 |
+| `/周报` | `opsReportEnabled` | 本地统计 | 最近 `opsReportDays`（默认 7）天的消息/入群/退群/踢出/禁言/打卡/待办/文件整理/相册上传，以及最忙的一天 |
+
+两个命令名的坑（都在代码里写了注释）：`/群资料` 已被既有的基础群信息查询占用 → 扩展版叫 `/群详细`；`/成员权限` 会被既有的 `/成员` 命令整条吃掉（那个命令刻意支持 `/成员张三` 这种紧贴写法）→ 改名 `/群权限`。
+
+运营计数落在 `qq-ops.json`（按天分桶、保留 30 天、跨重启累加），`/周报` 是**纯本地读**，注入/回放回合照常回答。
+
+新增配置键（默认值）：`groupOpsEnabled`(false) `nativeSignEnabled`(false) `opsReadEnabled`(true) `opsKickEnabled`(false) `opsKickBatchSize`(20) `opsTodoEnabled`(false) `opsFileEnabled`(false) `opsAlbumUploadEnabled`(false) `opsProfileEnabled`(false) `opsPolicyEnabled`(false) `opsReportEnabled`(false) `opsReportDays`(7) `opsCountersFile`("")。
+
 ## 独立控制台（control/，v0.4.0）
 
 插件自带一个**独立的本地运维端**，不依赖 DSH 桌面端：宿主挂掉时它照常可用，端口与进程一目了然。
@@ -537,10 +572,10 @@ npm run control            # 或 node control/bin/qq-control.mjs --open
 
 最近五个版本（始终滚动展示）：
 
+- **v0.5.4** — 「群运营工具箱 / Group ops toolbox」：把群运营的日常动作做成一等公民。**老规矩：先真机探针再写代码**——读本机 NapCat 实现包确认能力面，纠正了三个会做错的地方：批量踢有**原生** `set_group_kick_members`（`user_id` 是数组，不用循环）、群待办是**三个** action（set/complete/cancel_group_todo）、相册上传叫 `upload_image_to_qun_album`；另外 `set_group_member_permissions` 是**局部更新**（没传的项保持不变），所以 `/群权限` 只提交写出来的项。新增：`/群打卡`（QQ **原生**群签到，与本地积分「签到」区分）、`/全体余量`、`/禁言名单`、`/群详细`（扩展群资料）、`/入群通知`、`/批量踢`（管理员，两步确认 + 分批不截断）、`/待办` `/完成待办` `/取消待办`、`/移动文件` `/重命名文件` `/删文件` `/新建文件夹`、`/传图`（按名字换相册 ID）、`/群名` `/群备注`、`/群权限`、`/历史可见`、`/周报`（本地统计：消息/入群/退群/踢出/禁言/打卡/待办/文件整理/相册上传 + 最忙的一天）。红线：写操作全过 ActionGate，**每个新 API 都有"注入回合 0 出站"断言**，每个关闭分支点名是哪个开关，`/周报` 纯本地读。新增配置键 13 个（总数 204 → 217）；新增 2 套测试（ops 94 / 桥层 ops-bridge 96），全量 **53 套 / 3252 断言全绿**
 - **v0.5.3** — 「点一下就完事 / One tap」：**先做真机探针再写代码**——直接读本机 NapCat 实现包（`bootmain/napcat.mjs`，QQ 9.9.32-50969）确认能力面，其中最重要的是一条**否定结论**：该构建 `"keyboard"`/`"button"` 段名出现 **0 次**，**发不了内联按钮**，所以本版没做按钮面板，而是把轻互动真正落地。新增：**主动戳一戳** `/戳 @某人`（管理员，`group_poke`/`friend_poke`）、**被戳回戳**（真的戳回去，可配文案）、**私聊正在输入**（`set_input_status`，探针确认只支持 C2C，群聊如实记 reason）、**自动贴表情**（`set_msg_emoji_like`，`emojiLikeMentionOnly` 默认只对叫我/引用我生效）、**表情回应统计**（`/赞榜` 本地榜单 + `/谁赞了` 群里走 `get_emoji_likes` 拿实时名单、失败/注入回合回落本地并标注来源）、**点赞** `/点赞 [@某人]`（`send_like`，每天每目标限量）、**标记已读**（`mark_*_msg_as_read`，按会话）。红线：`set_msg_emoji_like` 只带 `message_id`、scoped dry-run 拦不住 → 桥里自己判注入并给真实 reason，**注入回合逐条断言 0 出站**；每个开关的关闭分支与配额拒绝都带真实 reason。**顺手修掉两个 v0.5.2 的静默缺陷**：桥对 `JsonStore` 调了不存在的 `load()/save()`（真实 API 是 `read()/write()`），异常被吞 → **播报去重/统计跨重启丢失且毫无提示**；`#loadEngageState()` 在配额对象构造前调用导致 **restore 打空、配额跨重启失效**。新增配置键 17 个（总数 187 → 204）；新增 2 套测试（engage 109 / 桥层 engage-bridge 90），全量 **51 套 / 3062 断言全绿**
 - **v0.5.2** — 「无人值守 / Unattended」：**入站 webhook**（`127.0.0.1:8798`，`POST /hook/<来源>`，github / uptime-kuma / generic 三种适配器；token 或 HMAC-SHA256 二选一鉴权，**两者都缺的来源直接不注册**；64 KiB 上限回 413、每来源限频回 429；密钥绝不进日志与运行快照）；**定时播报**（`rss` 自带 RSS/Atom/RDF 解析器并按 guid 去重、`weather` 走 Open-Meteo 免 key、`mc` 复用既有 ping；`at: HH:MM` + `weekdays` 或 `everyMinutes`，间隔递推不漂移；去重与统计落盘跨重启不重复；`/播报` 与 `/播报 测试 <id>` 管理）；**掉线自愈**（按配置命令拉起 QQ 客户端，**只启动不杀进程**，冷却 300s + 每小时 3 次上限，命中即写 trace 说明原因）。新增配置键 12 个（总数 175 → 187，静态双向校验通过）；新增 4 套测试（feed 144 / webhook 114 / broadcast 189 / 桥层 unattended 107），全量 **49 套 / 2860 断言全绿**
 - **v0.5.1** — 审查修复（无新功能）：修掉发布后对抗性审查抓出的 8 个缺陷——`/成员 <昵称>` 对**没设群名片**的成员永远查不到（`card:''` 时未回落到昵称）；转发卡片展开为空（关闭开关/空载荷/调用失败）仍会起一个**内容为空的模型回合**；`/ocr` 的离线闸门放在 `get_msg` 之后、`/好友` 漏判，两者在注入/回放回合仍会真的访问 QQ；`/读图` 被 `/读` 语音朗读整条吃掉（发朗读「图」字的语音 + 消耗 TTS）；归档写入失败完全静默（`/找` 会谎报「没找到」）；控制台「群资产」读的是不存在的 `historyDir`（应为 `historyArchiveDir`），自定义目录时永远显示 0 个文件；`/取` 私聊投递失败会把**本机绝对路径**发进群、`qq-files/` 永不清理、投递注定被限流时仍先下载；trace 补上「另有 N 张转发卡片未展开」。新增 `test/inject-assets-unit.mjs`（28 条，走真实注入通道 + 正对照）与 28 条桥层回归（含**反向验证**：换回修复前的 `lib/bridge.js`，新断言各挂 8 条）
 - **v0.5.0** — 「看得见 · 找得回 / See it, find it」：**合并转发不再被静默丢弃**（`parseMessage` 增加 `forwards`、`get_forward_msg` 展开成正文交给模型，空文本路径补上 @ 门与 `acceptPrivate` 门——原先是违反「无静默分支」硬约束的洞）；接通既有能力 `/成员` `/群信息` `/好友`（默认关）`/退群`（默认关）与 agent 工具 `qq_recent_history` / `qq_member_info` / `qq_react`；新增群资产 `/文件` `/取`（下载只发私聊）`/相册` `/ocr`（图片转文字）；消息按天归档 `qq-history/`，`/找` 与 `qq_search_history` 检索最近 N 天（注入/回放与命令不入档，过期分片移入 `qq-trash/<日期>/` 而非删除）；控制台新增「群资产 · 历史检索」卡片；实测抓出并修掉 5 个自引入缺陷（格式化返回值当字符串发、`/找` 无参数无用法、归档把命令自己搜出来、回收目录日期套两层）+ 1 个门控逃逸
-- **v0.4.1** — 依赖解析与安装修复（社区反馈 [issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)）：`schemastery` 改用作用域名 `@deepseek-ai/schemastery`（裸名是**另一个包**，只在"别的插件恰好把它 hoist 到共享 node_modules"时才能解析，干净环境加载即 `ERR_MODULE_NOT_FOUND`）；`@deepseek-ai/dsh-*` peer 区间补上 `^0.1.5-rc.1`（预发布区间不跨补丁线，0.1.5-rc.1/rc.2 之前不被接受）；README 更正"裸名由 DSH 别名注入"的错误说法并补上本地目录安装需先 `npm install --omit=dev`（`ws`）；`test/static-unit.mjs` 新增静态防线：lib/ 里任何第三方 import 必须已在 `package.json` 声明、官方依赖禁止裸名
 
 完整历史见 [CHANGELOG.md](CHANGELOG.md)。

@@ -1,5 +1,54 @@
 # 更新日志 / Changelog
 
+## v0.5.4（2026-09-14 发布）— 群运营工具箱 / Group ops toolbox
+
+> 本版主题：**把群运营的日常动作做成一等公民**——原生签到、群待办、@全体余量、禁言名单、批量踢、群资料、入群与发言策略、文件整理、相册上传，外加一份本地统计的运营周报。全部默认关闭（总开关 `groupOpsEnabled`），写操作一律过 ActionGate，注入/回放回合一律不写 QQ。
+
+### 真机探针先行（本版纠正了三个会做错的地方）
+
+读本机安装的 NapCat 实现包（`bootmain/napcat.mjs`，QQ 9.9.32-50969）逐一核对 action 名与参数 schema，结论写进 `lib/ops.js` 头部并由 `test/ops-unit.mjs` 钉住：
+
+- **批量踢有原生 action**：`set_group_kick_members` 的 `user_id` 是**数组**——不必循环 `set_group_kick`（循环既慢又更容易被风控）。超过 `opsKickBatchSize`（默认 20）时**分批而不是截断**。
+- **群待办是三个 action**：`set_group_todo` / `complete_group_todo` / `cancel_group_todo`，共用 `{ group_id, message_id? 或 message_seq? }`。
+- **相册上传确实存在，但名字是 `upload_image_to_qun_album`**（不是 `upload_qun_album`）；配套 `get_qun_album_list` / `get_group_album_media_list`。
+- **`set_group_member_permissions` 是局部更新**：探针文档明确写「未传入的项目保持不变」。所以 `/群权限` 只提交**显式写出**的项——把没提到的项塞成 `false` 会静默关掉用户没打算关的权限。
+
+### 新增命令
+
+| 命令 | 开关 | action | 说明 |
+|---|---|---|---|
+| `/群打卡` | `nativeSignEnabled` | `set_group_sign` | QQ 的**原生群签到**，与本地「签到」积分玩法是两件事（提示语里会点明） |
+| `/全体余量` | `opsReadEnabled` | `get_group_at_all_remain` | 本群与本人剩余 @全体次数，不可用时说明常见原因 |
+| `/禁言名单` | `opsReadEnabled` | `get_group_shut_list` | 带昵称与剩余时间，并标出已到期人数 |
+| `/群详细` | `opsReadEnabled` | `get_group_info_ex` | 扩展群资料（群名/人数/上限/创建时间/描述/问题），长字段截断 |
+| `/入群通知` | `opsReadEnabled` | `get_group_ignored_notifies` | 被忽略的入群申请与邀请 |
+| `/批量踢` | `opsKickEnabled` | `set_group_kick_members` | 管理员；**两步确认**（`/批量踢 @a @b` → `/批量踢 确认`），60 秒有效，分批不丢人，名单含自己直接拒绝 |
+| `/待办` `/完成待办` `/取消待办` | `opsTodoEnabled` | `set/complete/cancel_group_todo` | 引用一条消息即可 |
+| `/移动文件` `/重命名文件` `/删文件` `/新建文件夹` | `opsFileEnabled` | `move/rename/delete_group_file`、`create_group_file_folder` | 管理员；破坏性操作，缺参数时逐项说明缺什么 |
+| `/传图 <相册ID或名字>` | `opsAlbumUploadEnabled` | `upload_image_to_qun_album` | 引用一张图片；按名字自动查 `get_qun_album_list` 换 ID，`@album_id` 可直接指定 |
+| `/群名` `/群备注` | `opsProfileEnabled` | `set_group_name` / `set_group_remark` | 管理员；群名 >30 字、备注 >60 字直接拒绝 |
+| `/群权限 相册=关 临时会话=关 新群聊=开` | `opsPolicyEnabled` | `set_group_member_permissions` | 管理员；**只提交写出来的项**（局部更新语义） |
+| `/历史可见 开\|关` | `opsPolicyEnabled` | `set_group_new_member_history_visibility` | 管理员 |
+| `/周报` | `opsReportEnabled` | 本地统计 | 最近 N 天（`opsReportDays`，默认 7）的消息/入群/退群/踢出/禁言/打卡/待办/文件整理/相册上传计数 + 最忙的一天；**纯本地读，不访问 QQ** |
+
+### 命令命名踩到的两个坑（都在代码里留了注释）
+
+- `/群资料` 已被既有**基础群信息**查询占用（走 `get_group_info`）→ 扩展版改名 `/群详细`。
+- `/成员权限` 会被既有 `/成员` 命令**整条吃掉**（该命令为了好用，刻意支持 `/成员张三`、`/成员@12345` 这种紧贴写法，且有测试保护）→ 改名 `/群权限`。这两个坑都是实测才暴露的，不是设计出来的。
+
+### 周报计数（`qq-ops.json`）
+
+消息、入群、退群、禁言/解禁、打卡、待办、批量踢、文件整理、相册上传都会计数，按天分桶、保留 30 天、跨重启累加（`OpsCounters` 有 snapshot/restore，坏文件不影响启动）。
+
+### 新增配置键（默认值）
+
+`groupOpsEnabled`(false) `nativeSignEnabled`(false) `opsReadEnabled`(true) `opsKickEnabled`(false) `opsKickBatchSize`(20) `opsTodoEnabled`(false) `opsFileEnabled`(false) `opsAlbumUploadEnabled`(false) `opsProfileEnabled`(false) `opsPolicyEnabled`(false) `opsReportEnabled`(false) `opsReportDays`(7) `opsCountersFile`("") —— 配置键总数 204 → **217**，`test/static-unit.mjs` 的双向校验（含"没有死开关"）全部通过。所有子开关都在总开关之下：`groupOpsEnabled=false` 时任何群运营命令都只回一句中文说明。
+
+### 测试
+
+- 新增 2 套：`ops-unit`（94，纯模块：规划器参数形状、分批不丢人、渲染器、周报计数与快照、零依赖红线）、`ops-bridge-unit`（96，桥层：**每个新 API 一条"注入回合 0 出站"断言**、两步确认与超时、分批、相册按名解析、局部更新语义、计数跨重启）
+- 全量 **53 套 / 3252 断言全绿**（v0.5.3 为 51 套 / 3062）
+
 ## v0.5.3（2026-09-14 发布）— 点一下就完事 / One tap
 
 > 本版主题：**轻互动**。戳一戳、正在输入、表情回应、点赞、标记已读——用真实存在的能力把"群里的小动作"做成一等公民。全部默认关闭；所有写操作过 ActionGate + 出站配额；**注入/回放回合一律不写 QQ**（`injectDryRun: false` 的真发模式除外）。

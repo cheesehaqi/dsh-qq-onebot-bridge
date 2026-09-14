@@ -423,6 +423,41 @@ Deliberate design points:
 
 New config keys (defaults in brackets): `engageEnabled`(false) `pokeBackEnabled`(false) `pokeBackText`("") `pokeCommandEnabled`(false) `pokePerHour`(5) `typingEnabled`(false) `emojiLikeEnabled`(false) `emojiLikeId`("128077") `emojiLikeMentionOnly`(true) `emojiLikePerHour`(20) `reactionStatsEnabled`(false) `reactionStatsFile`("") `sendLikeEnabled`(false) `sendLikeTimes`(10) `sendLikePerDay`(3) `markReadEnabled`(false) `markReadPerMinute`(10). Interaction state (reaction statistics plus three quotas) is persisted to `qq-engage.json` and survives a restart.
 
+## Group ops toolbox (v0.5.4)
+
+Master switch `groupOpsEnabled` (off by default). Every sub-switch lives **under** that master: with it off, any ops command answers with one Chinese line explaining why instead of silently doing nothing.
+
+### Probe the real device first (this time it corrected three things)
+
+The installed NapCat bundle (`bootmain/napcat.mjs`, QQ 9.9.32-50969) was read again and every action checked one by one; the results are recorded in the header of `lib/ops.js` and pinned by `test/ops-unit.mjs`:
+
+- **the native batch kick exists**: `set_group_kick_members` takes a `user_id` **array**, so several members go in one call instead of a `set_group_kick` loop
+- **group todos are three separate actions**: `set_group_todo` / `complete_group_todo` / `cancel_group_todo`
+- **album upload exists but is named `upload_image_to_qun_album`** (not `upload_qun_album`)
+- **`set_group_member_permissions` is a partial update**: omitted fields stay unchanged, so `/群权限` only submits what you actually wrote
+
+| Command | Switch | Real action | Notes |
+|---|---|---|---|
+| `/群打卡` | `nativeSignEnabled` | `set_group_sign` | the **native** QQ group check-in, distinct from the local points game behind 签到 |
+| `/全体余量` | `opsReadEnabled` | `get_group_at_all_remain` | remaining @all quota for the group and for the account |
+| `/禁言名单` | `opsReadEnabled` | `get_group_shut_list` | nickname + remaining time, expired entries counted separately |
+| `/群详细` | `opsReadEnabled` | `get_group_info_ex` | extended group profile (member cap, creation time, description, question) |
+| `/入群通知` | `opsReadEnabled` | `get_group_ignored_notifies` | ignored join requests and invitations |
+| `/批量踢 @a @b` → `/批量踢 确认` | `opsKickEnabled` | `set_group_kick_members` | admin; two-step confirm (60 s), split into batches, refuses a list containing the caller |
+| `/待办` `/完成待办` `/取消待办` | `opsTodoEnabled` | `set/complete/cancel_group_todo` | quote a message and send the command |
+| `/移动文件` `/重命名文件` `/删文件` `/新建文件夹` | `opsFileEnabled` | `move/rename/delete_group_file`, `create_group_file_folder` | admin, destructive; missing arguments are named one by one |
+| `/传图 <album id or name>` | `opsAlbumUploadEnabled` | `upload_image_to_qun_album` | quote an image; the album id is resolved from the album list, or pass `/传图 @album_1` |
+| `/群名` `/群备注` | `opsProfileEnabled` | `set_group_name` / `set_group_remark` | admin; names over 30 chars and remarks over 60 are refused |
+| `/群权限 相册=关 临时会话=关 新群聊=开` | `opsPolicyEnabled` | `set_group_member_permissions` | admin; only the fields you wrote are sent |
+| `/历史可见 开\|关` | `opsPolicyEnabled` | `set_group_new_member_history_visibility` | admin |
+| `/周报` | `opsReportEnabled` | local statistics | messages / joins / leaves / kicks / mutes / check-ins / todos / file ops / album uploads over the last `opsReportDays` (7 by default), plus the busiest day |
+
+Two naming collisions worth knowing (both documented in the code): `/群资料` was already taken by the basic group-info query, so the extended one is `/群详细`; and `/成员权限` is swallowed whole by the existing `/成员` command (which deliberately accepts tight forms like `/成员张三`), so it became `/群权限`.
+
+Ops counters live in `qq-ops.json` (per-day buckets, 30-day retention, accumulated across restarts) and `/周报` is a **pure local read** that still answers during an injected turn.
+
+New config keys (defaults in brackets): `groupOpsEnabled`(false) `nativeSignEnabled`(false) `opsReadEnabled`(true) `opsKickEnabled`(false) `opsKickBatchSize`(20) `opsTodoEnabled`(false) `opsFileEnabled`(false) `opsAlbumUploadEnabled`(false) `opsProfileEnabled`(false) `opsPolicyEnabled`(false) `opsReportEnabled`(false) `opsReportDays`(7) `opsCountersFile`("").
+
 ## Standalone control console (`control/`, v0.4.0)
 
 The plugin ships an independent local operations console that does **not** depend on DSH Desktop: it keeps working when the host is down, and shows every port and process at a glance.
@@ -450,7 +485,7 @@ npm run control            # or: node control/bin/qq-control.mjs --open
 
 ## Tests
 
-51 unit suites, 3062 assertions in `test/*-unit.mjs`, plus 3 live scripts:
+53 unit suites, 3252 assertions in `test/*-unit.mjs`, plus 3 live scripts:
 
 ```sh
 # 1) unit tests: no network, no host, pure logic in temp dirs (run after every change)
@@ -526,12 +561,10 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 
 The five most recent versions (always kept rolling):
 
+- **v0.5.4** — "Group ops toolbox": the day-to-day group operations become first-class. **Probe the real device first, as always** — reading the installed NapCat bundle corrected three things that would otherwise have been wrong: the native batch kick is `set_group_kick_members` (a `user_id` **array**, no loop needed), group todos are **three** actions (set/complete/cancel_group_todo), and album upload is `upload_image_to_qun_album`; on top of that `set_group_member_permissions` is a **partial update** (omitted fields stay as they are), so `/群权限` only submits what you wrote. New: `/群打卡` (the **native** QQ group check-in, kept distinct from the local points game), `/全体余量`, `/禁言名单`, `/群详细` (extended profile), `/入群通知`, `/批量踢` (admin, two-step confirm, split into batches and never truncated), `/待办` `/完成待办` `/取消待办`, `/移动文件` `/重命名文件` `/删文件` `/新建文件夹`, `/传图` (album id resolved by name), `/群名` `/群备注`, `/群权限`, `/历史可见` and `/周报` (local counters: messages, joins, leaves, kicks, mutes, check-ins, todos, file ops, album uploads, plus the busiest day). Red lines: every write goes through ActionGate, **every new API has a zero-outbound assertion for injected turns**, every disabled switch names itself, and `/周报` is a pure local read. Adds 13 config keys (217 total) and 2 test suites (ops 94 / bridge-level ops-bridge 96): **53 suites / 3252 assertions green**
 - **v0.5.3** — "One tap": **probe the real device before writing the code** — the installed NapCat implementation bundle (`bootmain/napcat.mjs`, QQ 9.9.32-50969) was read directly to confirm the capability surface, and the most important finding is a **negative** one: `"keyboard"` / `"button"` segment names appear **0 times** in that build, so **inline keyboard buttons cannot be sent**; this release therefore ships no button panel and instead lands the interactions that really exist. New: **active poke** `/戳 @user` (admin, `group_poke` / `friend_poke`), **poke back** (a real poke, optionally with a line of text), **private-chat typing status** (`set_input_status`; the probe showed C2C only, so a group chat records the true reason instead of making a call that cannot work), **auto emoji reaction** (`set_msg_emoji_like`; `emojiLikeMentionOnly` restricts it to mentions/quotes by default), **emoji-reaction statistics** (`/赞榜` from local stats plus `/谁赞了`, which asks the real `get_emoji_likes` for the live list in groups and falls back to local stats — labelled with its source — when that call fails or during an injected turn), **profile likes** `/点赞 [@user]` (`send_like`, capped per target per day) and **mark-as-read** (`mark_*_msg_as_read`, per chat). Red lines: `set_msg_emoji_like` carries only a `message_id`, so the scoped dry-run cannot catch it — the bridge checks for injected/replayed turns itself and reports a true reason, and every new API has an assertion that an injected turn produces **zero outbound frames**; every disabled switch and every quota rejection carries a true reason. Also fixes **two silent defects from v0.5.2**: the bridge called a non-existent `load()` / `save()` on `JsonStore` (the real API is `read()` / `write()`), and the swallowed error meant **broadcast dedupe/statistics were never persisted across restarts with no warning**; and `#loadEngageState()` ran before the quota objects existed, so the restore silently did nothing and per-hour quotas did not survive a restart. Adds 17 config keys (204 total) and 2 test suites (engage 109 / bridge-level engage-bridge 90): **51 suites / 3062 assertions green**
 - **v0.5.2** — "Unattended": an **inbound webhook** endpoint (`127.0.0.1:8798`, `POST /hook/<source>`, with github / uptime-kuma / generic dialects; authentication is mandatory — token or HMAC-SHA256, and a source with neither is never registered; 64 KiB bodies get 413 and over-rate requests 429; secrets never reach logs or the runtime snapshot); **scheduled broadcasts** (`rss` with its own RSS/Atom/RDF parser deduped by guid, `weather` via key-free Open-Meteo, `mc` reusing the existing ping; `at: HH:MM` + `weekdays` or `everyMinutes`, interval bookkeeping that does not drift; dedupe state persisted across restarts; managed with `/播报` and `/播报 测试 <id>`); and **auto-heal** (relaunches the QQ client with the configured command — it only ever starts a process, never kills one — with a 300 s cooldown and 3 attempts/hour, each decision written to the trace). Adds 12 config keys (187 total, static two-way validation passes) and 4 test suites (feed 144 / webhook 114 / broadcast 189 / bridge-level unattended 110): **49 suites / 2860 assertions green**
 - **v0.5.1** — audit fixes (no new features): eight defects found by an adversarial review run after v0.5.0 shipped — `/成员 <nickname>` never found a member without a group card (`card:''` did not fall back to the nickname); an empty merged-forward expansion (disabled / empty payload / fetch error) still started a model turn with **empty content**; `/ocr`'s offline check sat *after* its `get_msg` and `/好友` had none at all, so both still reached QQ during an injected or replayed turn; `/读图` was swallowed by the `/读` voice-reading command (it spoke the character "图" and burned TTS instead of running OCR); archive writes failed silently (so `/找` claimed "nothing found"); the console's assets card read a non-existent `historyDir` key instead of `historyArchiveDir` (custom archive dirs always showed 0 files); `/取` posted the **local absolute path** into the group when private delivery failed, never cleaned `qq-files/`, and downloaded before checking whether delivery was rate limited. Also: the trace now records "N more forward cards were not expanded". Adds `test/inject-assets-unit.mjs` (28 assertions driving the real injection channel with positive controls) and 28 bridge-level regression assertions, verified in reverse against the pre-fix `lib/bridge.js`
 - **v0.5.0** — "See it, find it": merged-forward cards are no longer dropped silently (`forwards` parsing plus `get_forward_msg` expansion, with the @ and `acceptPrivate` gates now applied on the empty-text path); the already-implemented-but-unused capabilities are wired up (`/成员`, `/群信息`, `/好友` off by default, `/退群` off by default, and the `qq_recent_history` / `qq_member_info` / `qq_react` tools); new group assets (`/文件`, `/取` with private-only delivery, `/相册`, `/ocr`); messages are archived per day under `qq-history/` and searched with `/找` / `qq_search_history` (injections, replays and commands are excluded; expired files move to `qq-trash/<date>/`); console gained an assets/history-search card; six self-inflicted defects found and fixed during testing (formatter objects sent as text, `/找` with no argument, commands polluting the archive, a doubled trash date bucket, the `/取` vs `/取消精华` prefix collision, and a gate bypass)
-- **v0.4.1** — dependency-resolution and install fixes (reported as [issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)): `schemastery` now uses its scoped name `@deepseek-ai/schemastery` (the bare name is a **different package** that only resolved when another plugin happened to hoist it into the shared node_modules, so a clean install died with `ERR_MODULE_NOT_FOUND`); the `@deepseek-ai/dsh-*` peer ranges accept `^0.1.5-rc.1` (a prerelease range does not carry over to a later patch line, so 0.1.5-rc.1/rc.2 were rejected); the README no longer claims DSH injects a bare-name alias and now documents the `npm install --omit=dev` step a local-directory install needs for `ws`; `test/static-unit.mjs` gained static guards — every third-party import in `lib/` must be declared in `package.json`, and official dependencies must not use bare names
-
-
 
 Full history in [CHANGELOG.md](CHANGELOG.md).
