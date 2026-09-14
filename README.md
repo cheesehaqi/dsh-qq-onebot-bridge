@@ -264,7 +264,7 @@ ws://127.0.0.1:6700/
 
 ## 测试
 
-45 个单测脚本，共 2306 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
+49 个单测脚本，共 2860 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
 
 ```sh
 # 1) 单元测试：不联网、不起宿主，纯逻辑 + 临时目录（推荐每次改完都跑）
@@ -423,6 +423,48 @@ v0.5 做两件事：把**已经封装好、却从没接上线**的能力接通�
 
 新增配置（括号内为默认值）：`forwardExpandEnabled`(true) `forwardMaxNodes`(50) `forwardMaxChars`(4000) `memberQueryEnabled`(true) `memberListLimit`(20) `friendListEnabled`(false) `historyQueryEnabled`(true) `historyQueryLimit`(20) `reactToolEnabled`(true) `leaveGroupEnabled`(false) `ocrEnabled`(true) `ocrMaxImages`(3) `groupFileEnabled`(true) `groupFileDownloadEnabled`(true) `groupFileListLimit`(20) `groupFileMaxBytes`(50 MiB) `albumEnabled`(true) `historyArchiveEnabled`(true) `historyArchiveDir`("") `historyArchiveKeepDays`(90) `historySearchEnabled`(true) `historySearchDays`(7) `historySearchLimit`(20)。
 
+## 无人值守（v0.5.2）
+
+三件事：外部事件能主动进群、定时内容自己发、掉线了自己爬起来。**全部默认关闭**。
+
+### 入站 webhook（`webhookEnabled`）
+
+本机 HTTP 端点（默认 `127.0.0.1:8798`），外部系统 POST 到 `/hook/<来源名>`，桥把它渲染成一条群消息：
+
+| `format` | 适配的事件 |
+|---|---|
+| `github` | push / pull_request / issues / issue_comment / workflow_run（CI 成功失败）/ release |
+| `uptime-kuma` | 心跳：宕机 / 恢复 / 待定 / 维护 |
+| `generic` | 任意 JSON + `{a.b.c}` 占位符模板 |
+
+- **鉴权必须二选一**：`token`（`X-Webhook-Token` 头或 `?token=`）或 `secret`（GitHub 风格 `X-Hub-Signature-256`，对原始请求体做 HMAC-SHA256）；**两者都没配的来源会被直接拒绝**——不存在"未鉴权的开放端点"
+- 体积上限 `webhookMaxBodyBytes`（默认 64 KiB，超限 413）、每来源限频 `webhookRatePerMinute`（默认 30/分，超限 429）
+- 每次都落 trace：收到、渲染失败、发送被拦（限流或注入回合）都有中文 reason；`/播报` 可看每个来源的收/丢计数
+
+### 定时播报（`broadcastEnabled` + `broadcastJobs`）
+
+配置驱动的任务表，三种 `kind`：
+
+| `kind` | 内容 |
+|---|---|
+| `rss` | 抓 RSS 2.0 / Atom / RDF（自带解析器，**零第三方依赖**）；只播**新条目**（按 guid/link 去重，跨宿主重启不重复），支持 `keyword` 过滤与 `maxItems` |
+| `weather` | Open-Meteo（免费、无需 key）：当前温度与天气、当日最高/最低、降水概率；WMO 天气码翻成中文 + emoji |
+| `mc` | 复用既有 Server List Ping 查 MC 服务器状态 |
+
+排期两种写法：`at: "HH:MM"`（可配 `weekdays`，0=周日），或 `everyMinutes`（最小 5 分钟，优先于 `at`）。去重与统计落盘 `qq-broadcast.json`，重启不丢。
+
+管理命令（管理员）：`/播报` 列出任务与下次触发时间、webhook 状态与收/丢计数；`/播报 测试 <任务 id>` 立即发一次。
+
+### 掉线自愈（`autoHealEnabled` + `autoHealCommand`）
+
+QQ 客户端断开时，按配置的启动命令把它拉起来：
+
+- **只启动、绝不杀进程**（杀进程仍归控制台，那边有专门护栏）
+- 冷却 `autoHealCooldownSeconds`（默认 300s）+ 每小时上限 `autoHealMaxPerHour`（默认 3 次）；命中冷却是**写 trace 说明原因**，不静默
+- 与既有 `notifyEnabled` 出站告警互补：告警负责告诉你"掉了"，自愈负责"拉回来"
+
+新增配置键（括号内为默认值）：`webhookEnabled`(false) `webhookPort`(8798) `webhookSources`([]) `webhookRatePerMinute`(30) `webhookMaxBodyBytes`(65536) `broadcastEnabled`(false) `broadcastJobs`([]) `broadcastStateFile`("") `autoHealEnabled`(false) `autoHealCommand`("") `autoHealCooldownSeconds`(300) `autoHealMaxPerHour`(3)。
+
 ## 独立控制台（control/，v0.4.0）
 
 插件自带一个**独立的本地运维端**，不依赖 DSH 桌面端：宿主挂掉时它照常可用，端口与进程一目了然。
@@ -466,10 +508,10 @@ npm run control            # 或 node control/bin/qq-control.mjs --open
 
 最近五个版本（始终滚动展示）：
 
+- **v0.5.2** — 「无人值守 / Unattended」：**入站 webhook**（`127.0.0.1:8798`，`POST /hook/<来源>`，github / uptime-kuma / generic 三种适配器；token 或 HMAC-SHA256 二选一鉴权，**两者都缺的来源直接不注册**；64 KiB 上限回 413、每来源限频回 429；密钥绝不进日志与运行快照）；**定时播报**（`rss` 自带 RSS/Atom/RDF 解析器并按 guid 去重、`weather` 走 Open-Meteo 免 key、`mc` 复用既有 ping；`at: HH:MM` + `weekdays` 或 `everyMinutes`，间隔递推不漂移；去重与统计落盘跨重启不重复；`/播报` 与 `/播报 测试 <id>` 管理）；**掉线自愈**（按配置命令拉起 QQ 客户端，**只启动不杀进程**，冷却 300s + 每小时 3 次上限，命中即写 trace 说明原因）。新增配置键 12 个（总数 175 → 187，静态双向校验通过）；新增 4 套测试（feed 144 / webhook 114 / broadcast 189 / 桥层 unattended 107），全量 **49 套 / 2860 断言全绿**
 - **v0.5.1** — 审查修复（无新功能）：修掉发布后对抗性审查抓出的 8 个缺陷——`/成员 <昵称>` 对**没设群名片**的成员永远查不到（`card:''` 时未回落到昵称）；转发卡片展开为空（关闭开关/空载荷/调用失败）仍会起一个**内容为空的模型回合**；`/ocr` 的离线闸门放在 `get_msg` 之后、`/好友` 漏判，两者在注入/回放回合仍会真的访问 QQ；`/读图` 被 `/读` 语音朗读整条吃掉（发朗读「图」字的语音 + 消耗 TTS）；归档写入失败完全静默（`/找` 会谎报「没找到」）；控制台「群资产」读的是不存在的 `historyDir`（应为 `historyArchiveDir`），自定义目录时永远显示 0 个文件；`/取` 私聊投递失败会把**本机绝对路径**发进群、`qq-files/` 永不清理、投递注定被限流时仍先下载；trace 补上「另有 N 张转发卡片未展开」。新增 `test/inject-assets-unit.mjs`（28 条，走真实注入通道 + 正对照）与 28 条桥层回归（含**反向验证**：换回修复前的 `lib/bridge.js`，新断言各挂 8 条）
 - **v0.5.0** — 「看得见 · 找得回 / See it, find it」：**合并转发不再被静默丢弃**（`parseMessage` 增加 `forwards`、`get_forward_msg` 展开成正文交给模型，空文本路径补上 @ 门与 `acceptPrivate` 门——原先是违反「无静默分支」硬约束的洞）；接通既有能力 `/成员` `/群信息` `/好友`（默认关）`/退群`（默认关）与 agent 工具 `qq_recent_history` / `qq_member_info` / `qq_react`；新增群资产 `/文件` `/取`（下载只发私聊）`/相册` `/ocr`（图片转文字）；消息按天归档 `qq-history/`，`/找` 与 `qq_search_history` 检索最近 N 天（注入/回放与命令不入档，过期分片移入 `qq-trash/<日期>/` 而非删除）；控制台新增「群资产 · 历史检索」卡片；实测抓出并修掉 5 个自引入缺陷（格式化返回值当字符串发、`/找` 无参数无用法、归档把命令自己搜出来、回收目录日期套两层）+ 1 个门控逃逸
 - **v0.4.1** — 依赖解析与安装修复（社区反馈 [issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)）：`schemastery` 改用作用域名 `@deepseek-ai/schemastery`（裸名是**另一个包**，只在"别的插件恰好把它 hoist 到共享 node_modules"时才能解析，干净环境加载即 `ERR_MODULE_NOT_FOUND`）；`@deepseek-ai/dsh-*` peer 区间补上 `^0.1.5-rc.1`（预发布区间不跨补丁线，0.1.5-rc.1/rc.2 之前不被接受）；README 更正"裸名由 DSH 别名注入"的错误说法并补上本地目录安装需先 `npm install --omit=dev`（`ws`）；`test/static-unit.mjs` 新增静态防线：lib/ 里任何第三方 import 必须已在 `package.json` 声明、官方依赖禁止裸名
 - **v0.4.0** — 「一切皆可调试 / Everything Debuggable」：全链路可调试——traceId 结构化事件（每个静默分支都有 reason）、SSE 实时事件流与决策链、一键体检、诊断包导出、运行快照与生效配置；**录制 / 离线回放 / 事件注入**（`qq-inbox.jsonl` 录制每条入站事件 → 沙箱内用真实桥代码 dry-run 重跑并给出"会回复/静默 + 原因"→ 控制台注入合成事件走真实管线，一次注入 = 一个独立回合、整回合拦截模型回复与工具出站，全链路不碰 QQ）；**硬约束验收台**（6 条约束逐条给实时证据与"该点哪里"）；**诊断包默认脱敏导出**、`.gitignore` 覆盖全部运行产物、`test/privacy-unit.mjs` 隐私回归防线；自带独立控制台（`control/`，进程 8799），端口/进程/日志/扫码总览与启停、启动预检与杀进程护栏、token + Origin 鉴权
-- **v0.3.9** — 群洞察与定时播报：发言统计（`/统计` `/周榜`）、`/荣誉` `/公告` `/群精华` 只读查询、每日群日报（默认关闭）、重复提醒（每天/每周/工作日）、`/mc` 查 MC 服务器状态
 
 完整历史见 [CHANGELOG.md](CHANGELOG.md)。

@@ -1,5 +1,41 @@
 # 更新日志 / Changelog
 
+## v0.5.2（2026-09-14 发布）— 无人值守 / Unattended
+
+> 本版主题：**无人值守**。三件事——外部事件能主动进群、定时内容自己发、掉线了自己爬起来。全部默认关闭，写操作与出站一律走既有的闸门/限流/trace 体系。
+
+### 入站 webhook（`webhookEnabled`，默认关）
+
+- 独立 HTTP 端点（默认只绑 `127.0.0.1:8798`），`POST /hook/<来源名>` → 渲染成一条 QQ 消息发到配置的会话
+- 三种 `format` 适配器：`github`（push / pull_request / issues / issue_comment / workflow_run 含 CI 成功失败 / release）、`uptime-kuma`（心跳 0 宕机 / 1 恢复 / 2 待定 / 3 维护）、`generic`（任意 JSON + `{a.b.c}` 占位符模板，取不到值填 `（无）`）
+- **鉴权必须二选一**：`token`（`X-Webhook-Token` 头或 `?token=`）或 `secret`（GitHub 风格 `X-Hub-Signature-256` 对**原始请求体**做 HMAC-SHA256）；比较全部走 `crypto.timingSafeEqual`（长度不等先各自 SHA-256 到等长，不会抛错）。**既无 token 也无 secret 的来源在构造时直接剔除且不注册路由**——不存在未鉴权的开放端点
+- 体积上限 `webhookMaxBodyBytes`（默认 64 KiB）：超限回 **413**，并且是先回状态码再 `request.resume()` 排水、`socket.end()` 优雅关闭（初版用 `socket.destroy()` 是 abortive close，客户端只看到 `fetch failed` 拿不到 413 —— 这条是实测才暴露的）
+- 每来源滑动一分钟限频 `webhookRatePerMinute`（默认 30），超限 **429**；`status()` 暴露每个来源的 `received` / `dropped` / `lastAt`（只暴露名字与计数，**不含 token/secret**）
+- 每次事件都写 trace：收到、渲染失败、发送被拦（限流或注入回合）都有中文 reason
+
+### 定时播报（`broadcastEnabled` + `broadcastJobs`，默认关）
+
+- 三种任务：`rss`（自带 RSS 2.0 / Atom / RDF 解析器，**零第三方依赖**；按 guid/link 去重，跨宿主重启不重复；支持 `keyword` 过滤与 `maxItems`）、`weather`（Open-Meteo，免费无 key；WMO 天气码译成中文 + emoji）、`mc`（复用既有 Server List Ping）
+- 排期两种写法：`at: "HH:MM"`（可配 `weekdays`，0=周日，最多向后找 8 天）或 `everyMinutes`（下限 5，优先于 `at`）；定时器延迟夹取到 `[0, 2^31-1]`，间隔类按"上次计划时间 + 间隔"递推，**执行耗时不会让排期漂移**
+- 去重与统计（`seen` / `lastAt` / `lastReason` / `runs` / `failures`）落盘 `qq-broadcast.json`，`stop()` 时保存、启动时恢复
+- 失败必留中文 `lastReason` 且**不发送空消息**；`/播报` 列任务与下次时间、webhook 状态与收/丢计数，`/播报 测试 <任务 id>` 立即触发一次（管理员）
+
+### 掉线自愈（`autoHealEnabled` + `autoHealCommand`，默认关）
+
+- QQ 客户端断开时按配置命令把它拉起来：**只启动、绝不杀进程**（杀进程仍归控制台，那边有专门护栏），`detached + shell + stdio:'ignore' + unref`，不阻塞宿主也不连坐子进程
+- 冷却 `autoHealCooldownSeconds`（默认 300s）+ 每小时上限 `autoHealMaxPerHour`（默认 3）；**命中冷却或上限都会写 trace 说明原因**，不静默；`autoHealEnabled=true` 却没配命令也照样留 reason
+- 与既有 `notifyEnabled` 出站告警互补：告警负责"告诉你掉了"，自愈负责"拉回来"
+
+### 新增配置键（默认值）
+
+`webhookEnabled`(false) `webhookPort`(8798) `webhookSources`([]) `webhookRatePerMinute`(30) `webhookMaxBodyBytes`(65536) `broadcastEnabled`(false) `broadcastJobs`([]) `broadcastStateFile`("") `autoHealEnabled`(false) `autoHealCommand`("") `autoHealCooldownSeconds`(300) `autoHealMaxPerHour`(3) —— 配置键总数 175 → **187**，`test/static-unit.mjs` 的双向校验（schema ↔ 代码读取）全部通过。
+
+### 测试
+
+- 新增 4 套：`feed-unit`（144，RSS/Atom/RDF、CDATA、实体、时间解析、截断）、`webhook-unit`（114，含真实 HTTP 往返：鉴权/413/429/405/400/500 与 status 计数）、`broadcast-unit`（189，假 timers 推进到点触发、间隔不漂移、去重、快照往返）、`unattended-unit`（桥层：webhook 真发到群、`/播报` 管理、自愈冷却与上限、**注入回合 0 出站**）
+- 全量 **49 套 / 2860 断言全绿**（v0.5.1 为 45 套 / 2306）
+- 过程中由测试逼出的真 bug 随手修掉：`formatFeedItems` 的 `limit` 参数算了没用、feed 标题张冠李戴（channel 无 title 时取了第一条 item 的标题）、`stripHtml` 先解实体再删标签导致 `&lt;大新闻&gt;` 被吃掉、CDATA 整段被标签正则吞掉、413 因 abortive close 拿不到状态码、`renderWebhook` 遇 BigInt 序列化抛错
+
 ## v0.5.1（2026-09-13 发布）— 审查修复 / Audit fixes
 
 > 本版是 v0.5.0 的补丁：发布后做了一轮**对抗性审查 + 隐私审计**，抓出并修掉 8 个缺陷（3 个 P1、5 个 P2）。没有新功能。

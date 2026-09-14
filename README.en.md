@@ -352,6 +352,48 @@ Until v0.5 a merged-forward ("chat record") card was dropped **inside the transp
 
 New config keys (defaults in brackets): `forwardExpandEnabled`(true) `forwardMaxNodes`(50) `forwardMaxChars`(4000) `memberQueryEnabled`(true) `memberListLimit`(20) `friendListEnabled`(false) `historyQueryEnabled`(true) `historyQueryLimit`(20) `reactToolEnabled`(true) `leaveGroupEnabled`(false) `ocrEnabled`(true) `ocrMaxImages`(3) `groupFileEnabled`(true) `groupFileDownloadEnabled`(true) `groupFileListLimit`(20) `groupFileMaxBytes`(50 MiB) `albumEnabled`(true) `historyArchiveEnabled`(true) `historyArchiveDir`("") `historyArchiveKeepDays`(90) `historySearchEnabled`(true) `historySearchDays`(7) `historySearchLimit`(20).
 
+## Unattended (v0.5.2)
+
+Three things: external events can post into a chat on their own, scheduled content sends itself, and a dropped QQ client gets brought back. **All of it is off by default.**
+
+### Inbound webhook (`webhookEnabled`)
+
+A local HTTP endpoint (default `127.0.0.1:8798`); an external system POSTs to `/hook/<source name>` and the bridge renders it into one chat message:
+
+| `format` | Events it understands |
+|---|---|
+| `github` | push / pull_request / issues / issue_comment / workflow_run (CI success & failure) / release |
+| `uptime-kuma` | heartbeats: down / up / pending / maintenance |
+| `generic` | any JSON plus a `{a.b.c}` placeholder template |
+
+- **Authentication is mandatory — token or secret**: `token` (`X-Webhook-Token` header or `?token=`) or `secret` (GitHub-style `X-Hub-Signature-256`, HMAC-SHA256 over the raw body). A source with **neither is dropped at construction and never gets a route**, so there is no unauthenticated endpoint.
+- Body cap `webhookMaxBodyBytes` (64 KiB default, 413 above it) and per-source rate limit `webhookRatePerMinute` (30/min default, 429 above it).
+- Every delivery is traced: received, render failure, or blocked send (rate limit / injection turn) each carry a Chinese reason; `/播报` shows the per-source received/dropped counters.
+
+### Scheduled broadcasts (`broadcastEnabled` + `broadcastJobs`)
+
+A config-driven job table with three kinds:
+
+| `kind` | What it posts |
+|---|---|
+| `rss` | RSS 2.0 / Atom / RDF feeds (own parser, **zero third-party dependencies**); only **new** items are posted (dedup by guid/link, survives host restarts), with optional `keyword` filter and `maxItems` |
+| `weather` | Open-Meteo (free, no API key): current temperature and condition, daily high/low, precipitation probability; WMO codes are translated with emoji |
+| `mc` | Minecraft server status via the existing Server List Ping code |
+
+Scheduling is either `at: "HH:MM"` (with optional `weekdays`, 0=Sunday) or `everyMinutes` (minimum 5, takes precedence). Dedup state and statistics are persisted to `qq-broadcast.json`.
+
+Admin commands: `/播报` lists jobs with their next run plus webhook status and counters; `/播报 测试 <job id>` fires one immediately.
+
+### Auto-heal (`autoHealEnabled` + `autoHealCommand`)
+
+When the OneBot client disconnects, the configured launcher command is run again:
+
+- It only ever **starts** a process and **never kills one** (killing stays in the console, which has its own guard rails).
+- Cooldown `autoHealCooldownSeconds` (300 s) plus an hourly cap `autoHealMaxPerHour` (3); hitting either is written to the trace with a reason instead of silently doing nothing.
+- It complements the existing `notifyEnabled` push: the notification tells you the bot went down, auto-heal tries to bring it back.
+
+New config keys (defaults in brackets): `webhookEnabled`(false) `webhookPort`(8798) `webhookSources`([]) `webhookRatePerMinute`(30) `webhookMaxBodyBytes`(65536) `broadcastEnabled`(false) `broadcastJobs`([]) `broadcastStateFile`("") `autoHealEnabled`(false) `autoHealCommand`("") `autoHealCooldownSeconds`(300) `autoHealMaxPerHour`(3).
+
 ## Standalone control console (`control/`, v0.4.0)
 
 The plugin ships an independent local operations console that does **not** depend on DSH Desktop: it keeps working when the host is down, and shows every port and process at a glance.
@@ -379,7 +421,7 @@ npm run control            # or: node control/bin/qq-control.mjs --open
 
 ## Tests
 
-45 unit suites, 2306 assertions in `test/*-unit.mjs`, plus 3 live scripts:
+49 unit suites, 2860 assertions in `test/*-unit.mjs`, plus 3 live scripts:
 
 ```sh
 # 1) unit tests: no network, no host, pure logic in temp dirs (run after every change)
@@ -455,11 +497,12 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 
 The five most recent versions (always kept rolling):
 
+- **v0.5.2** — "Unattended": an **inbound webhook** endpoint (`127.0.0.1:8798`, `POST /hook/<source>`, with github / uptime-kuma / generic dialects; authentication is mandatory — token or HMAC-SHA256, and a source with neither is never registered; 64 KiB bodies get 413 and over-rate requests 429; secrets never reach logs or the runtime snapshot); **scheduled broadcasts** (`rss` with its own RSS/Atom/RDF parser deduped by guid, `weather` via key-free Open-Meteo, `mc` reusing the existing ping; `at: HH:MM` + `weekdays` or `everyMinutes`, interval bookkeeping that does not drift; dedupe state persisted across restarts; managed with `/播报` and `/播报 测试 <id>`); and **auto-heal** (relaunches the QQ client with the configured command — it only ever starts a process, never kills one — with a 300 s cooldown and 3 attempts/hour, each decision written to the trace). Adds 12 config keys (187 total, static two-way validation passes) and 4 test suites (feed 144 / webhook 114 / broadcast 189 / bridge-level unattended 107): **49 suites / 2860 assertions green**
 - **v0.5.1** — audit fixes (no new features): eight defects found by an adversarial review run after v0.5.0 shipped — `/成员 <nickname>` never found a member without a group card (`card:''` did not fall back to the nickname); an empty merged-forward expansion (disabled / empty payload / fetch error) still started a model turn with **empty content**; `/ocr`'s offline check sat *after* its `get_msg` and `/好友` had none at all, so both still reached QQ during an injected or replayed turn; `/读图` was swallowed by the `/读` voice-reading command (it spoke the character "图" and burned TTS instead of running OCR); archive writes failed silently (so `/找` claimed "nothing found"); the console's assets card read a non-existent `historyDir` key instead of `historyArchiveDir` (custom archive dirs always showed 0 files); `/取` posted the **local absolute path** into the group when private delivery failed, never cleaned `qq-files/`, and downloaded before checking whether delivery was rate limited. Also: the trace now records "N more forward cards were not expanded". Adds `test/inject-assets-unit.mjs` (28 assertions driving the real injection channel with positive controls) and 28 bridge-level regression assertions, verified in reverse against the pre-fix `lib/bridge.js`
 - **v0.5.0** — "See it, find it": merged-forward cards are no longer dropped silently (`forwards` parsing plus `get_forward_msg` expansion, with the @ and `acceptPrivate` gates now applied on the empty-text path); the already-implemented-but-unused capabilities are wired up (`/成员`, `/群信息`, `/好友` off by default, `/退群` off by default, and the `qq_recent_history` / `qq_member_info` / `qq_react` tools); new group assets (`/文件`, `/取` with private-only delivery, `/相册`, `/ocr`); messages are archived per day under `qq-history/` and searched with `/找` / `qq_search_history` (injections, replays and commands are excluded; expired files move to `qq-trash/<date>/`); console gained an assets/history-search card; six self-inflicted defects found and fixed during testing (formatter objects sent as text, `/找` with no argument, commands polluting the archive, a doubled trash date bucket, the `/取` vs `/取消精华` prefix collision, and a gate bypass)
 - **v0.4.1** — dependency-resolution and install fixes (reported as [issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)): `schemastery` now uses its scoped name `@deepseek-ai/schemastery` (the bare name is a **different package** that only resolved when another plugin happened to hoist it into the shared node_modules, so a clean install died with `ERR_MODULE_NOT_FOUND`); the `@deepseek-ai/dsh-*` peer ranges accept `^0.1.5-rc.1` (a prerelease range does not carry over to a later patch line, so 0.1.5-rc.1/rc.2 were rejected); the README no longer claims DSH injects a bare-name alias and now documents the `npm install --omit=dev` step a local-directory install needs for `ws`; `test/static-unit.mjs` gained static guards — every third-party import in `lib/` must be declared in `package.json`, and official dependencies must not use bare names
 - **v0.4.0** — "Everything Debuggable": end-to-end debuggability — trace-id structured events where every silent drop carries a reason, a live SSE event stream and per-message decision chains, one-click diagnosis, a diagnostic-bundle export, runtime snapshot and effective config; **recording / offline replay / event injection** (every inbound event recorded to `qq-inbox.jsonl` → replayed through the real bridge code in a sandbox with dry-run, reporting "would reply / silent + why" → synthetic events injected into the real pipeline from the console, one injection = one dedicated turn with that whole turn's replies and tool calls intercepted, never touching QQ); a **hard-constraint acceptance page** (live evidence and a next step for each of the 6 constraints); **redacted diagnostic exports by default**, `.gitignore` covering every runtime artefact and `test/privacy-unit.mjs` as a privacy regression guard; ships its own standalone control console (`control/`, port 8799) with port/process/log/QR overview, host and NapCat control, start pre-flight and a kill guard rail, token + Origin authentication
-- **v0.3.9** — group insight: message statistics (`/统计` `/周榜`), read-only `/荣誉` `/公告` `/群精华`, a daily group report (off by default), recurring reminders (daily/weekly/weekdays) and `/mc` Minecraft status
+
 
 
 Full history in [CHANGELOG.md](CHANGELOG.md).
