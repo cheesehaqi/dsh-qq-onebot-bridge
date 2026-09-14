@@ -149,25 +149,15 @@ check('lib/ 的第三方 import 全部已在 package.json 声明', undeclaredImp
 check('官方依赖统一用 @deepseek-ai/* 作用域名（不依赖他人 hoist 的裸名）', bareOfficialImports.length === 0, bareOfficialImports.join('; '))
 check('规格名扫描确实抓到了官方依赖（防止正则失效假通过）', [...specifiers].some((spec) => spec.startsWith('@deepseek-ai/')), [...specifiers].join(','))
 
-// ---- README 惯例：更新日志只展示最近**两个大版本**（每个大版本一条线）----
-// 口径：两条 `- **vX.Y 线…（vA → vB）** — …`；第一条必须是当前版本所在的大版本线，
-// 且该线区间以当前版本结尾——这样 README 不会停在旧版本上。
+// ---- README 惯例：更新日志只展示最近五版 ----
 const readme = readFileSync(join(libDir, '..', 'README.md'), 'utf8')
-// 形如：`- **v0.5 线（v0.5.0 → v0.5.6，当前）** — …` / `- **v0.5 line (v0.5.0 → v0.5.6, current)** — …`
-// 刻意不锚定「线 / line」这几个字（措辞将来可能改），只要求：大版本号 + 紧跟的区间括号。
-const majorPattern = /^- \*\*v([0-9]+\.[0-9]+)[^\n]{0,24}?[（(]v[0-9.]+ → v([0-9.]+)/gm
-const majorBullets = [...readme.matchAll(majorPattern)].map((match) => ({ major: match[1], last: match[2] }))
-check('README 更新日志只列两个大版本', majorBullets.length === 2, majorBullets.map((b) => b.major).join(','))
-const currentMajor = pkg.version.split('.').slice(0, 2).join('.')
-check('README 首个大版本 = 当前版本所在的线，且区间以当前版本结尾',
-  majorBullets[0]?.major === currentMajor && majorBullets[0]?.last === pkg.version,
-  `${majorBullets[0]?.major} / ${majorBullets[0]?.last} vs ${currentMajor} / ${pkg.version}`)
+const versionBullets = [...readme.matchAll(/^- \*\*v([0-9.]+)\*\* —/gm)].map((match) => match[1])
+check('README 更新日志恰好五版（滚动）', versionBullets.length === 5, versionBullets.join(','))
+check('README 首版为当前版本', versionBullets[0] === pkg.version, `${versionBullets[0]} vs ${pkg.version}`)
 const readmeEn = readFileSync(join(libDir, '..', 'README.en.md'), 'utf8')
-const majorBulletsEn = [...readmeEn.matchAll(majorPattern)].map((match) => ({ major: match[1], last: match[2] }))
-check('英文 README 同样只列两个大版本', majorBulletsEn.length === 2, majorBulletsEn.map((b) => b.major).join(','))
-check('英文 README 首条大版本同版本',
-  majorBulletsEn[0]?.major === currentMajor && majorBulletsEn[0]?.last === pkg.version,
-  `${majorBulletsEn[0]?.major} / ${majorBulletsEn[0]?.last}`)
+const versionBulletsEn = [...readmeEn.matchAll(/^- \*\*v([0-9.]+)\*\* —/gm)].map((match) => match[1])
+check('README.en 更新日志恰好五版', versionBulletsEn.length === 5, versionBulletsEn.join(','))
+check('英文 README 首版同版本', versionBulletsEn[0] === pkg.version, versionBulletsEn[0])
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)
