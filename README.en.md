@@ -343,112 +343,6 @@ Until v0.5 a merged-forward ("chat record") card was dropped **inside the transp
 
 New config keys (defaults in brackets): `forwardExpandEnabled`(true) `forwardMaxNodes`(50) `forwardMaxChars`(4000) `memberQueryEnabled`(true) `memberListLimit`(20) `friendListEnabled`(false) `historyQueryEnabled`(true) `historyQueryLimit`(20) `reactToolEnabled`(true) `leaveGroupEnabled`(false) `ocrEnabled`(true) `ocrMaxImages`(3) `groupFileEnabled`(true) `groupFileDownloadEnabled`(true) `groupFileListLimit`(20) `groupFileMaxBytes`(50 MiB) `albumEnabled`(true) `historyArchiveEnabled`(true) `historyArchiveDir`("") `historyArchiveKeepDays`(90) `historySearchEnabled`(true) `historySearchDays`(7) `historySearchLimit`(20).
 
-## Unattended (v0.5.2)
-
-Three things: external events can post into a chat on their own, scheduled content sends itself, and a dropped QQ client gets brought back. **All of it is off by default.**
-
-### Inbound webhook (`webhookEnabled`)
-
-A local HTTP endpoint (default `127.0.0.1:8798`); an external system POSTs to `/hook/<source name>` and the bridge renders it into one chat message:
-
-| `format` | Events it understands |
-|---|---|
-| `github` | push / pull_request / issues / issue_comment / workflow_run (CI success & failure) / release |
-| `uptime-kuma` | heartbeats: down / up / pending / maintenance |
-| `generic` | any JSON plus a `{a.b.c}` placeholder template |
-
-- **Authentication is mandatory — token or secret**: `token` (`X-Webhook-Token` header or `?token=`) or `secret` (GitHub-style `X-Hub-Signature-256`, HMAC-SHA256 over the raw body). A source with **neither is dropped at construction and never gets a route**, so there is no unauthenticated endpoint.
-- Body cap `webhookMaxBodyBytes` (64 KiB default, 413 above it) and per-source rate limit `webhookRatePerMinute` (30/min default, 429 above it).
-- Every delivery is traced: received, render failure, or blocked send (rate limit / injection turn) each carry a Chinese reason; `/播报` shows the per-source received/dropped counters.
-
-### Scheduled broadcasts (`broadcastEnabled` + `broadcastJobs`)
-
-A config-driven job table with three kinds:
-
-| `kind` | What it posts |
-|---|---|
-| `rss` | RSS 2.0 / Atom / RDF feeds (own parser, **zero third-party dependencies**); only **new** items are posted (dedup by guid/link, survives host restarts), with optional `keyword` filter and `maxItems` |
-| `weather` | Open-Meteo (free, no API key): current temperature and condition, daily high/low, precipitation probability; WMO codes are translated with emoji |
-| `mc` | Minecraft server status via the existing Server List Ping code |
-
-Scheduling is either `at: "HH:MM"` (with optional `weekdays`, 0=Sunday) or `everyMinutes` (minimum 5, takes precedence). Dedup state and statistics are persisted to `qq-broadcast.json`.
-
-Admin commands: `/播报` lists jobs with their next run plus webhook status and counters; `/播报 测试 <job id>` fires one immediately.
-
-### Auto-heal (`autoHealEnabled` + `autoHealCommand`)
-
-When the OneBot client disconnects, the configured launcher command is run again:
-
-- It only ever **starts** a process and **never kills one** (killing stays in the console, which has its own guard rails).
-- Cooldown `autoHealCooldownSeconds` (300 s) plus an hourly cap `autoHealMaxPerHour` (3); hitting either is written to the trace with a reason instead of silently doing nothing.
-- It complements the existing `notifyEnabled` push: the notification tells you the bot went down, auto-heal tries to bring it back.
-
-New config keys (defaults in brackets): `webhookEnabled`(false) `webhookPort`(8798) `webhookSources`([]) `webhookRatePerMinute`(30) `webhookMaxBodyBytes`(65536) `broadcastEnabled`(false) `broadcastJobs`([]) `broadcastStateFile`("") `autoHealEnabled`(false) `autoHealCommand`("") `autoHealCooldownSeconds`(300) `autoHealMaxPerHour`(3).
-
-## Interaction: one tap (v0.5.3)
-
-Master switch `engageEnabled` (off by default); every capability below has its own switch, also off by default. All write actions go through the ActionGate plus an outbound quota, and **an injected / replayed turn never writes to QQ** (except the deliberate `injectDryRun: false` "really send" mode).
-
-### The real device was probed before any code was written
-
-Button-like capabilities were **not guessed**. The NapCat implementation installed on this machine (`bootmain/napcat.mjs`, QQ 9.9.32-50969) was read directly to confirm every action name, parameter shape and inbound event. The results live in the header of `lib/engage.js` and are pinned by `test/engage-bridge-unit.mjs`.
-
-The most important result is a **negative** one: this build **cannot send inline buttons** — `"keyboard"` / `"button"` segment names appear **0 times** in the whole bundle (real segment names such as `"text"`, `"json"`, `"markdown"`, `"poke"` are all there), and the OB11 segment enum only offers `click_inline_keyboard_button` (clicking a button **someone else** sent). So "one tap" is built on interactions that genuinely exist rather than on a button panel that could never be delivered.
-
-| Capability | Switch | Action (probe-confirmed) | Notes |
-|---|---|---|---|
-| Active poke | `pokeCommandEnabled` | `group_poke` / `friend_poke` | `/戳 @user` or `/戳 <QQ id>` (admin). Allowlist + ActionGate + an hourly quota |
-| Poke back | `pokeBackEnabled` | same | Pokes back **for real**, optionally with `pokeBackText`; still bound by the existing `pokeEnabled` switch and cooldown |
-| Typing status | `typingEnabled` | `set_input_status` | Private chats only: sent while the model works, cleared when the reply lands. The probe showed C2C only, so a group chat records the real reason instead of firing a call that cannot work |
-| Auto reaction | `emojiLikeEnabled` + `emojiLikeId` | `set_msg_emoji_like` | Reacts with an emoji (default 👍 = code point 128077). `emojiLikeMentionOnly` limits it to mentions/quotes |
-| Reaction statistics | `reactionStatsEnabled` | inbound `notice.group_msg_emoji_like` | `/赞榜` lists the most-reacted messages; `/谁赞了 <message id>` (or quoting a message) shows **who** reacted |
-| Profile likes | `sendLikeEnabled` | `send_like` | `/点赞 [@user]`, `sendLikeTimes` (10 = the QQ client cap) per call, `sendLikePerDay` per target |
-| Mark as read | `markReadEnabled` | `mark_group_msg_as_read` / `mark_private_msg_as_read` | Marks the **chat** as read (NapCat marks a chat, not a message), rate limited per minute |
-
-Deliberate design points:
-
-- **`/谁赞了` has two data sources**: local statistics (always available, labelled `source: local stats`) and the real `get_emoji_likes` in groups (labelled `source: get_emoji_likes live`). During an injected turn it never calls QQ and explains why.
-- **`/赞榜` is a pure local read**: it makes no QQ call at all, so it still answers during an injected or replayed turn and the trace says "local JSON only, no QQ access".
-- **Emoji ids are shown as real emoji**: the id is a decimal code point, so `128077 → 👍` needs no lookup table.
-- **Rejections carry real numbers**: `戳一戳 已达每小时上限（5/5 次）`, never a bare "operation failed".
-
-New config keys (defaults in brackets): `engageEnabled`(false) `pokeBackEnabled`(false) `pokeBackText`("") `pokeCommandEnabled`(false) `pokePerHour`(5) `typingEnabled`(false) `emojiLikeEnabled`(false) `emojiLikeId`("128077") `emojiLikeMentionOnly`(true) `emojiLikePerHour`(20) `reactionStatsEnabled`(false) `reactionStatsFile`("") `sendLikeEnabled`(false) `sendLikeTimes`(10) `sendLikePerDay`(3) `markReadEnabled`(false) `markReadPerMinute`(10). Interaction state (reaction statistics plus three quotas) is persisted to `qq-engage.json` and survives a restart.
-
-## Group ops toolbox (v0.5.4)
-
-Master switch `groupOpsEnabled` (off by default). Every sub-switch lives **under** that master: with it off, any ops command answers with one Chinese line explaining why instead of silently doing nothing.
-
-### Probe the real device first (this time it corrected three things)
-
-The installed NapCat bundle (`bootmain/napcat.mjs`, QQ 9.9.32-50969) was read again and every action checked one by one; the results are recorded in the header of `lib/ops.js` and pinned by `test/ops-unit.mjs`:
-
-- **the native batch kick exists**: `set_group_kick_members` takes a `user_id` **array**, so several members go in one call instead of a `set_group_kick` loop
-- **group todos are three separate actions**: `set_group_todo` / `complete_group_todo` / `cancel_group_todo`
-- **album upload exists but is named `upload_image_to_qun_album`** (not `upload_qun_album`)
-- **`set_group_member_permissions` is a partial update**: omitted fields stay unchanged, so `/群权限` only submits what you actually wrote
-
-| Command | Switch | Real action | Notes |
-|---|---|---|---|
-| `/群打卡` | `nativeSignEnabled` | `set_group_sign` | the **native** QQ group check-in, distinct from the local points game behind 签到 |
-| `/全体余量` | `opsReadEnabled` | `get_group_at_all_remain` | remaining @all quota for the group and for the account |
-| `/禁言名单` | `opsReadEnabled` | `get_group_shut_list` | nickname + remaining time, expired entries counted separately |
-| `/群详细` | `opsReadEnabled` | `get_group_info_ex` | extended group profile (member cap, creation time, description, question) |
-| `/入群通知` | `opsReadEnabled` | `get_group_ignored_notifies` | ignored join requests and invitations |
-| `/批量踢 @a @b` → `/批量踢 确认` | `opsKickEnabled` | `set_group_kick_members` | admin; two-step confirm (60 s), split into batches, refuses a list containing the caller |
-| `/待办` `/完成待办` `/取消待办` | `opsTodoEnabled` | `set/complete/cancel_group_todo` | quote a message and send the command |
-| `/移动文件` `/重命名文件` `/删文件` `/新建文件夹` | `opsFileEnabled` | `move/rename/delete_group_file`, `create_group_file_folder` | admin, destructive; missing arguments are named one by one |
-| `/传图 <album id or name>` | `opsAlbumUploadEnabled` | `upload_image_to_qun_album` | quote an image; the album id is resolved from the album list, or pass `/传图 @album_1` |
-| `/群名` `/群备注` | `opsProfileEnabled` | `set_group_name` / `set_group_remark` | admin; names over 30 chars and remarks over 60 are refused |
-| `/群权限 相册=关 临时会话=关 新群聊=开` | `opsPolicyEnabled` | `set_group_member_permissions` | admin; only the fields you wrote are sent |
-| `/历史可见 开\|关` | `opsPolicyEnabled` | `set_group_new_member_history_visibility` | admin |
-| `/周报` | `opsReportEnabled` | local statistics | messages / joins / leaves / kicks / mutes / check-ins / todos / file ops / album uploads over the last `opsReportDays` (7 by default), plus the busiest day |
-
-Two naming collisions worth knowing (both documented in the code): `/群资料` was already taken by the basic group-info query, so the extended one is `/群详细`; and `/成员权限` is swallowed whole by the existing `/成员` command (which deliberately accepts tight forms like `/成员张三`), so it became `/群权限`.
-
-Ops counters live in `qq-ops.json` (per-day buckets, 30-day retention, accumulated across restarts) and `/周报` is a **pure local read** that still answers during an injected turn.
-
-New config keys (defaults in brackets): `groupOpsEnabled`(false) `nativeSignEnabled`(false) `opsReadEnabled`(true) `opsKickEnabled`(false) `opsKickBatchSize`(20) `opsTodoEnabled`(false) `opsFileEnabled`(false) `opsAlbumUploadEnabled`(false) `opsProfileEnabled`(false) `opsPolicyEnabled`(false) `opsReportEnabled`(false) `opsReportDays`(7) `opsCountersFile`("").
-
 ## Standalone control console (`control/`, v0.4.0)
 
 The plugin ships an independent local operations console that does **not** depend on DSH Desktop: it keeps working when the host is down, and shows every port and process at a glance.
@@ -550,7 +444,11 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 
 ## Changelog
 
-Grouped by release line; **the per-version record (every patch's changes, fixed defects and test counts) lives in [CHANGELOG.md](CHANGELOG.md)**.
+The five most recent versions (always kept rolling):
 
-- **v0.5 line (v0.5.0 → v0.5.7) "See it, find it → Unattended → One tap → Group ops → Console visibility"** — finished the job of making everything in the group usable *and* visible: merged-forward expansion, member / group-info / group-file / album / OCR queries and a day-sharded archive with `/找` search (v0.5.0); eight defects fixed after an adversarial post-release review (v0.5.1); the **unattended** trio — inbound webhook / scheduled broadcasts / auto-heal (v0.5.2); **one-tap interactions** — poke and poke-back / private typing status / emoji-reaction statistics / profile likes / mark-as-read (v0.5.3); the **group ops toolbox** — native check-in / @all quota / mute list / batch kick / group todos / file organisation / album upload / group profile / join and speak policy / weekly ops report (v0.5.4); **console visibility** — performance panel P50·P95 / scheduled-jobs panel / group config page / replay diff / injection scenario library (v0.5.5); real-machine usability fixes plus a full audit (v0.5.6); docs housekeeping (v0.5.7). Full suite: **55 suites / 3434 assertions green**.
-- **v0.4 line (v0.4.0 → v0.4.1) "Everything Debuggable"** — six hard constraints: no silent branch without a reason, one trace id per message, replayable dry-run, self-diagnosis, diagnostic-bundle export, injectable fake events. **v0.4.0** delivered trace-id structured events with a live SSE stream, one-click diagnosis, redacted diagnostic exports, recording / offline replay / event injection (one injection = one dedicated turn that never touches QQ) and the standalone control console (`control/`, port 8799); **v0.4.1** fixed dependency resolution (`@deepseek-ai/schemastery`, issue #1).
+- **v0.5.7** — docs housekeeping: the README "Feature overview" is grouped by major line, and the changelog is back to five rolling entries (**documentation only, no code change**)
+- **v0.5.6** — real-machine usability fixes plus a full audit: three "looks like it works, actually does nothing" traps found while debugging this machine. (1) The console's "start NapCat" ran `napcat.bat` (three lines, no arguments, no elevation - measured: exits 0 immediately); it now elevates and calls `launcher.bat`. (2) The "open scan page" link was dead whenever 6099 was not listening; it is now disabled with the reason shown. (3) The wall of "token 无效" came from opening the page without `?token=`; a Chinese banner now explains where the console token lives and that the host on 3080 has a different token that changes on every restart. Added a **login QR panel** (`GET /api/qr` returns the image plus how many seconds ago it was generated, with a stale warning) and a **restart login flow** button. Then an **independent adversarial review** (read-only, no file writes, no git mutations, no process control) reported one severe and seven general findings, all fixed: **[severe] the restart killed `QQ.exe` by image name, which would have killed the user's own QQ client** (a non-elevated personal QQ was running on the real machine) and the guard passed whenever anything listened on 6099 - it now kills only the loader PIDs (`taskkill /PID <pid> /T /F`), never names QQ, and refuses outright without a PID; `/api/port/free` gained the managed-port allowlist (it could previously be used to kill any port owner); `stopNapcat` no longer treats "6099 is listening" as proof of NapCat (nginx on 6099 was reproducible); launch commands now use `call "<path>"` (cmd strips quotes for parenthesised paths and the failure was silently swallowed) with single quotes escaped; `jobsView`/`groupsView` no longer 500 on element-level malformed snapshots; the console no longer passes webhook/auto-heal objects through wholesale; **the auto-heal command text no longer reaches the trace** (basename plus argument count only - that trace is served by the API and shipped in diagnostic bundles); the QR endpoint verifies the PNG magic; `qrStatus` distinguishes "cannot read" from "missing"; and the ops planners use `Object.hasOwn` so a `kind:'constructor'` can no longer resolve to a function. Full suite: **55 suites / 3434 assertions green**
+- **v0.5.5** — "Console visibility": the console stops being just "start/stop and logs" and becomes something you can read. New **performance panel** (`GET /api/perf`): end-to-end latency computed per trace chain, P50/P95 overall and **per chat**, stage timings from the `ms` the trace recorder already writes, the slowest messages and a failure profile in which debug-level "feature is off" entries are listed as information rather than incidents. **Scheduled-jobs panel** (`GET /api/jobs`): broadcast jobs with next-run text, last reason, run/failure counts and a "keeps failing" flag, plus webhook source counters, auto-heal state and the injection queue. **Group config page** (`GET /api/groups`): every group with its allowlist status, session, last turn, attached broadcast jobs, the 16 effective switches and live counters - with a note that the switch source of truth is the plugin config. **Injection scenario library** (17 built-in scenarios via `GET /api/scenarios` and the `scenario` field of `POST /api/inject`): group mention, plain group chat, recall, poke, join, emoji reaction, group and friend requests, private text and image, OCR, forward card, admin command, native check-in, batch kick, badword and long text - each declaring which parameters it needs and which path it exists to exercise, with missing parameters named rather than defaulted. **Replay diff** (`POST /api/replay-diff`): two replay runs of the same messages (baseline vs your config override) diffed mechanically into decision / reason / reply-text changes with a similarity score, so rewording is not mistaken for a behaviour change; rows present on one side only are marked unknown. To feed this, the bridge now writes a `jobs` block into the runtime snapshot (descriptive fields only - the auto-heal command text and every token stay out). Adds 2 test suites (perf 61 / scenario 49): **55 suites / 3384 assertions green**
+- **v0.5.4** — "Group ops toolbox": the day-to-day group operations become first-class. **Probe the real device first, as always** — reading the installed NapCat bundle corrected three things that would otherwise have been wrong: the native batch kick is `set_group_kick_members` (a `user_id` **array**, no loop needed), group todos are **three** actions (set/complete/cancel_group_todo), and album upload is `upload_image_to_qun_album`; on top of that `set_group_member_permissions` is a **partial update** (omitted fields stay as they are), so `/群权限` only submits what you wrote. New: `/群打卡` (the **native** QQ group check-in, kept distinct from the local points game), `/全体余量`, `/禁言名单`, `/群详细` (extended profile), `/入群通知`, `/批量踢` (admin, two-step confirm, split into batches and never truncated), `/待办` `/完成待办` `/取消待办`, `/移动文件` `/重命名文件` `/删文件` `/新建文件夹`, `/传图` (album id resolved by name), `/群名` `/群备注`, `/群权限`, `/历史可见` and `/周报` (local counters: messages, joins, leaves, kicks, mutes, check-ins, todos, file ops, album uploads, plus the busiest day). Red lines: every write goes through ActionGate, **every new API has a zero-outbound assertion for injected turns**, every disabled switch names itself, and `/周报` is a pure local read. Adds 13 config keys (217 total) and 2 test suites (ops 94 / bridge-level ops-bridge 96): **53 suites / 3252 assertions green**
+- **v0.5.3** — "One tap": **probe the real device before writing the code** — the installed NapCat implementation bundle (`bootmain/napcat.mjs`, QQ 9.9.32-50969) was read directly to confirm the capability surface, and the most important finding is a **negative** one: `"keyboard"` / `"button"` segment names appear **0 times** in that build, so **inline keyboard buttons cannot be sent**; this release therefore ships no button panel and instead lands the interactions that really exist. New: **active poke** `/戳 @user` (admin, `group_poke` / `friend_poke`), **poke back** (a real poke, optionally with a line of text), **private-chat typing status** (`set_input_status`; the probe showed C2C only, so a group chat records the true reason instead of making a call that cannot work), **auto emoji reaction** (`set_msg_emoji_like`; `emojiLikeMentionOnly` restricts it to mentions/quotes by default), **emoji-reaction statistics** (`/赞榜` from local stats plus `/谁赞了`, which asks the real `get_emoji_likes` for the live list in groups and falls back to local stats — labelled with its source — when that call fails or during an injected turn), **profile likes** `/点赞 [@user]` (`send_like`, capped per target per day) and **mark-as-read** (`mark_*_msg_as_read`, per chat). Red lines: `set_msg_emoji_like` carries only a `message_id`, so the scoped dry-run cannot catch it — the bridge checks for injected/replayed turns itself and reports a true reason, and every new API has an assertion that an injected turn produces **zero outbound frames**; every disabled switch and every quota rejection carries a true reason. Also fixes **two silent defects from v0.5.2**: the bridge called a non-existent `load()` / `save()` on `JsonStore` (the real API is `read()` / `write()`), and the swallowed error meant **broadcast dedupe/statistics were never persisted across restarts with no warning**; and `#loadEngageState()` ran before the quota objects existed, so the restore silently did nothing and per-hour quotas did not survive a restart. Adds 17 config keys (204 total) and 2 test suites (engage 109 / bridge-level engage-bridge 90): **51 suites / 3062 assertions green**
+**Older versions (the v0.4 line and earlier) are in [CHANGELOG.md](CHANGELOG.md)** — the full history, including every release's defect list and test counts.

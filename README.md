@@ -414,112 +414,6 @@ v0.5 做两件事：把**已经封装好、却从没接上线**的能力接通�
 
 新增配置（括号内为默认值）：`forwardExpandEnabled`(true) `forwardMaxNodes`(50) `forwardMaxChars`(4000) `memberQueryEnabled`(true) `memberListLimit`(20) `friendListEnabled`(false) `historyQueryEnabled`(true) `historyQueryLimit`(20) `reactToolEnabled`(true) `leaveGroupEnabled`(false) `ocrEnabled`(true) `ocrMaxImages`(3) `groupFileEnabled`(true) `groupFileDownloadEnabled`(true) `groupFileListLimit`(20) `groupFileMaxBytes`(50 MiB) `albumEnabled`(true) `historyArchiveEnabled`(true) `historyArchiveDir`("") `historyArchiveKeepDays`(90) `historySearchEnabled`(true) `historySearchDays`(7) `historySearchLimit`(20)。
 
-## 无人值守（v0.5.2）
-
-三件事：外部事件能主动进群、定时内容自己发、掉线了自己爬起来。**全部默认关闭**。
-
-### 入站 webhook（`webhookEnabled`）
-
-本机 HTTP 端点（默认 `127.0.0.1:8798`），外部系统 POST 到 `/hook/<来源名>`，桥把它渲染成一条群消息：
-
-| `format` | 适配的事件 |
-|---|---|
-| `github` | push / pull_request / issues / issue_comment / workflow_run（CI 成功失败）/ release |
-| `uptime-kuma` | 心跳：宕机 / 恢复 / 待定 / 维护 |
-| `generic` | 任意 JSON + `{a.b.c}` 占位符模板 |
-
-- **鉴权必须二选一**：`token`（`X-Webhook-Token` 头或 `?token=`）或 `secret`（GitHub 风格 `X-Hub-Signature-256`，对原始请求体做 HMAC-SHA256）；**两者都没配的来源会被直接拒绝**——不存在"未鉴权的开放端点"
-- 体积上限 `webhookMaxBodyBytes`（默认 64 KiB，超限 413）、每来源限频 `webhookRatePerMinute`（默认 30/分，超限 429）
-- 每次都落 trace：收到、渲染失败、发送被拦（限流或注入回合）都有中文 reason；`/播报` 可看每个来源的收/丢计数
-
-### 定时播报（`broadcastEnabled` + `broadcastJobs`）
-
-配置驱动的任务表，三种 `kind`：
-
-| `kind` | 内容 |
-|---|---|
-| `rss` | 抓 RSS 2.0 / Atom / RDF（自带解析器，**零第三方依赖**）；只播**新条目**（按 guid/link 去重，跨宿主重启不重复），支持 `keyword` 过滤与 `maxItems` |
-| `weather` | Open-Meteo（免费、无需 key）：当前温度与天气、当日最高/最低、降水概率；WMO 天气码翻成中文 + emoji |
-| `mc` | 复用既有 Server List Ping 查 MC 服务器状态 |
-
-排期两种写法：`at: "HH:MM"`（可配 `weekdays`，0=周日），或 `everyMinutes`（最小 5 分钟，优先于 `at`）。去重与统计落盘 `qq-broadcast.json`，重启不丢。
-
-管理命令（管理员）：`/播报` 列出任务与下次触发时间、webhook 状态与收/丢计数；`/播报 测试 <任务 id>` 立即发一次。
-
-### 掉线自愈（`autoHealEnabled` + `autoHealCommand`）
-
-QQ 客户端断开时，按配置的启动命令把它拉起来：
-
-- **只启动、绝不杀进程**（杀进程仍归控制台，那边有专门护栏）
-- 冷却 `autoHealCooldownSeconds`（默认 300s）+ 每小时上限 `autoHealMaxPerHour`（默认 3 次）；命中冷却是**写 trace 说明原因**，不静默
-- 与既有 `notifyEnabled` 出站告警互补：告警负责告诉你"掉了"，自愈负责"拉回来"
-
-新增配置键（括号内为默认值）：`webhookEnabled`(false) `webhookPort`(8798) `webhookSources`([]) `webhookRatePerMinute`(30) `webhookMaxBodyBytes`(65536) `broadcastEnabled`(false) `broadcastJobs`([]) `broadcastStateFile`("") `autoHealEnabled`(false) `autoHealCommand`("") `autoHealCooldownSeconds`(300) `autoHealMaxPerHour`(3)。
-
-## 互动：点一下就完事（v0.5.3）
-
-总开关 `engageEnabled`（默认 false），下面每个能力还有自己的子开关，全部默认关。所有写操作都过 ActionGate + 出站配额，且**注入/回放回合一律不写 QQ**（`injectDryRun: false` 的"真发模式"除外）。
-
-### 先做了真机探针，再写代码
-
-按钮这类能力**没有猜**：直接读本机装的那份 NapCat（`bootmain/napcat.mjs`，QQ 9.9.32-50969），逐个确认 action 名、参数形状与入站事件。结论写进了 `lib/engage.js` 的文件头，也被 `test/engage-bridge-unit.mjs` 逐条钉住。
-
-探针结论里最重要的一条是**否定**：这个构建**发不了内联按钮**——`"keyboard"` / `"button"` 段名在整个 bundle 里出现 **0 次**，OB11 段枚举只有 text/image/music/video/record/file/at/reply/json/face/mface/markdown/node/forward/xml/poke/dice/rps/miniapp/contact/location/onlinefile/flashtransfer；只有 `click_inline_keyboard_button`（点**别人**发的按钮）。所以「点一下就完事」用的是真实可用的轻互动，而不是做一个注定发不出去的按钮面板。
-
-| 能力 | 开关 | action（已探针确认） | 说明 |
-|---|---|---|---|
-| 主动戳一戳 | `pokeCommandEnabled` | `group_poke` / `friend_poke` | `/戳 @某人` 或 `/戳 <QQ号>`（管理员）。白名单 + ActionGate + 每小时配额三层 |
-| 被戳回戳 | `pokeBackEnabled` | 同上 | 被戳时**真的戳回去**，可配 `pokeBackText` 同时回一句话；仍受既有 `pokeEnabled` 总开关与冷却约束 |
-| 正在输入 | `typingEnabled` | `set_input_status` | 私聊里模型动脑前发「正在输入」、回复落地即撤销。真机探针：该 action **只支持 C2C 私聊**，群聊会如实记 reason 而不是白发一次注定失败的调用 |
-| 自动贴表情 | `emojiLikeEnabled` + `emojiLikeId` | `set_msg_emoji_like` | 收到消息贴一个表情（默认 👍＝码点 128077）。`emojiLikeMentionOnly` 默认只对"叫我/引用我"的消息生效，避免刷屏 |
-| 表情回应统计 | `reactionStatsEnabled` | 入站 `notice.group_msg_emoji_like` | `/赞榜` 看本会话被回应最多的消息；`/谁赞了 <消息ID>`（或引用一条消息）看**谁**点的 |
-| 点赞 | `sendLikeEnabled` | `send_like` | `/点赞 [@某人]`，一次 `sendLikeTimes`(10，QQ 上限) 个，每天每目标 `sendLikePerDay` 次 |
-| 标记已读 | `markReadEnabled` | `mark_group_msg_as_read` / `mark_private_msg_as_read` | 收到消息顺手把会话标已读，不再堆红点 |
-
-几个刻意的设计点：
-
-- **`/谁赞了` 有两份数据**：本地统计（永远可用，标注"来源：本地统计"）与真机 `get_emoji_likes`（群里可用，标注"来源：get_emoji_likes 实时"）。注入回合不调 QQ，用本地那份并说明原因。
-- **`/赞榜` 是纯本地读**：不做任何 QQ 调用，所以注入/回放回合里它照常回答，trace 里写明"只读本地 JSON，不访问 QQ"。
-- **表情 ID 直接显示成真表情**：`emoji_id` 是十进制码点，`128077 → 👍`，无需查表。
-- **配额拒绝也带真实信息**：`戳一戳 已达每小时上限（5/5 次）`，不是一句"操作失败"。
-
-新增配置键（括号内为默认值）：`engageEnabled`(false) `pokeBackEnabled`(false) `pokeBackText`("") `pokeCommandEnabled`(false) `pokePerHour`(5) `typingEnabled`(false) `emojiLikeEnabled`(false) `emojiLikeId`("128077") `emojiLikeMentionOnly`(true) `emojiLikePerHour`(20) `reactionStatsEnabled`(false) `reactionStatsFile`("") `sendLikeEnabled`(false) `sendLikeTimes`(10) `sendLikePerDay`(3) `markReadEnabled`(false) `markReadPerMinute`(10)。互动状态（表情统计 + 三个配额）落在 `qq-engage.json`，跨重启不丢。
-
-## 群运营工具箱（v0.5.4）
-
-总开关 `groupOpsEnabled`（默认 false）。**下面每个子开关都在总开关之下**：总开关关着时，任何群运营命令都只回一句中文说明，绝不静默什么都不做。
-
-### 同样先做真机探针（这次纠正了三个会做错的地方）
-
-读本机 NapCat 实现包（`bootmain/napcat.mjs`，QQ 9.9.32-50969）逐条核对，结论写在 `lib/ops.js` 头部、由 `test/ops-unit.mjs` 钉住：
-
-- **批量踢有原生 action**：`set_group_kick_members` 的 `user_id` 是**数组**，一次请求多人——不必循环 `set_group_kick`
-- **群待办是三个独立 action**：`set_group_todo` / `complete_group_todo` / `cancel_group_todo`
-- **相册上传存在，但叫 `upload_image_to_qun_album`**（不是 `upload_qun_album`）
-- **`set_group_member_permissions` 是局部更新**：没传的项保持不变——所以 `/群权限` 只提交你**写出来**的项
-
-| 命令 | 开关 | 真机 action | 说明 |
-|---|---|---|---|
-| `/群打卡` | `nativeSignEnabled` | `set_group_sign` | QQ 的**原生群签到**；和本地「签到」积分玩法不是一回事（提示语会点明） |
-| `/全体余量` | `opsReadEnabled` | `get_group_at_all_remain` | 本群与本人剩余 @全体次数；不可用时说明常见原因 |
-| `/禁言名单` | `opsReadEnabled` | `get_group_shut_list` | 昵称 + 剩余时间，并标出已到期人数 |
-| `/群详细` | `opsReadEnabled` | `get_group_info_ex` | 扩展群资料（人数上限/创建时间/描述/问题） |
-| `/入群通知` | `opsReadEnabled` | `get_group_ignored_notifies` | 被忽略的入群申请与邀请 |
-| `/批量踢 @a @b` → `/批量踢 确认` | `opsKickEnabled` | `set_group_kick_members` | 管理员；**两步确认**（60 秒有效）、分批不丢人、名单含自己直接拒绝 |
-| `/待办` `/完成待办` `/取消待办` | `opsTodoEnabled` | `set/complete/cancel_group_todo` | 引用一条消息即可 |
-| `/移动文件` `/重命名文件` `/删文件` `/新建文件夹` | `opsFileEnabled` | `move/rename/delete_group_file`、`create_group_file_folder` | 管理员，破坏性操作；缺参数时逐项说明缺什么 |
-| `/传图 <相册ID或名字>` | `opsAlbumUploadEnabled` | `upload_image_to_qun_album` | 引用一张图片；按名字自动查相册列表换 ID，`/传图 @album_1` 可直接指定 |
-| `/群名` `/群备注` | `opsProfileEnabled` | `set_group_name` / `set_group_remark` | 管理员；群名 >30 字、备注 >60 字直接拒绝 |
-| `/群权限 相册=关 临时会话=关 新群聊=开` | `opsPolicyEnabled` | `set_group_member_permissions` | 管理员；只提交写出来的项 |
-| `/历史可见 开\|关` | `opsPolicyEnabled` | `set_group_new_member_history_visibility` | 管理员 |
-| `/周报` | `opsReportEnabled` | 本地统计 | 最近 `opsReportDays`（默认 7）天的消息/入群/退群/踢出/禁言/打卡/待办/文件整理/相册上传，以及最忙的一天 |
-
-两个命令名的坑（都在代码里写了注释）：`/群资料` 已被既有的基础群信息查询占用 → 扩展版叫 `/群详细`；`/成员权限` 会被既有的 `/成员` 命令整条吃掉（那个命令刻意支持 `/成员张三` 这种紧贴写法）→ 改名 `/群权限`。
-
-运营计数落在 `qq-ops.json`（按天分桶、保留 30 天、跨重启累加），`/周报` 是**纯本地读**，注入/回放回合照常回答。
-
-新增配置键（默认值）：`groupOpsEnabled`(false) `nativeSignEnabled`(false) `opsReadEnabled`(true) `opsKickEnabled`(false) `opsKickBatchSize`(20) `opsTodoEnabled`(false) `opsFileEnabled`(false) `opsAlbumUploadEnabled`(false) `opsProfileEnabled`(false) `opsPolicyEnabled`(false) `opsReportEnabled`(false) `opsReportDays`(7) `opsCountersFile`("")。
-
 ## 独立控制台（control/，v0.4.0）
 
 插件自带一个**独立的本地运维端**，不依赖 DSH 桌面端：宿主挂掉时它照常可用，端口与进程一目了然。
@@ -561,7 +455,12 @@ npm run control            # 或 node control/bin/qq-control.mjs --open
 
 ## 更新日志
 
-按大版本线归纳；**逐版本记录（每个补丁的改动、修掉的缺陷与测试计数）见 [CHANGELOG.md](CHANGELOG.md)**。
+最近五个版本（始终滚动展示）：
 
-- **v0.5 线（v0.5.0 → v0.5.7）「看得见 · 找得回 → 无人值守 → 轻互动 → 群运营 → 控制台看得见」** — 把「群里的东西都能用、而且都看得见」做完：合并转发展开，群成员 / 群资料 / 群文件 / 群相册 / OCR 查询，按天归档加 `/找` 检索（v0.5.0）；发布后对抗性审查修掉 8 个缺陷（v0.5.1）；**无人值守**三件套——入站 webhook / 定时播报 / 掉线自愈（v0.5.2）；**轻互动**——戳一戳与回戳 / 私聊正在输入 / 表情回应统计 / 点赞 / 标记已读（v0.5.3）；**群运营工具箱**——原生群打卡 / @全体余量 / 禁言名单 / 批量踢 / 群待办 / 文件整理 / 相册上传 / 群资料 / 入群与发言策略 / 运营周报（v0.5.4）；**控制台看得见**——性能面板 P50·P95 / 定时任务面板 / 群配置页 / 回放 diff / 注入场景库（v0.5.5）；真机可用性修复与一轮完整审计（v0.5.6）；文档整理（v0.5.7）。全量 **55 套 / 3434 断言全绿**。
-- **v0.4 线（v0.4.0 → v0.4.1）「一切皆可调试 / Everything Debuggable」** — 6 条硬约束：①无静默分支必带 reason ②一条消息一个 traceId 贯穿 ③可回放（dry-run）④可体检 ⑤可导出诊断包 ⑥可注入假事件。**v0.4.0** 落地 traceId 结构化事件与 SSE 实时事件流、一键体检、脱敏诊断包导出、录制 / 离线回放 / 事件注入（一次注入 = 一个独立回合，整回合不碰 QQ），并自带独立控制台（`control/`，8799）；**v0.4.1** 修依赖解析（改用 `@deepseek-ai/schemastery`，社区 issue #1）。
+- **v0.5.7** — 文档整理：README 的「功能总览」按大版本归纳；更新日志恢复五条滚动显示（**纯文档改动，无代码变更**）
+- **v0.5.6** — 真机可用性修复 + 一轮完整审计：**修掉三个"看起来能用、其实用不了"的坑**（都是在你机器上排障时挖出来的）——① 控制台「启动 NapCat」原来跑的是 `napcat.bat`（三行、不带参数不提权，实测秒退 exit 0），改成**提权调 `launcher.bat`**（`-Verb RunAs`），并把目标从 `napcat.bat` 换成真正需要的脚本；② 「打开扫码页」在 6099 未监听时是**死链**，现在禁用并说明原因；③ **满屏「token 无效」**：页面不带 `?token=` 打开就等于空 token，现在直接弹中文横幅告诉你 token 存在 `qq-control.json`、且**宿主 3080 的 token 每次重启都会变**、两者不能混用。新增**登录二维码面板**（`GET /api/qr` 直接给出图片 + 「这张码是几秒前生成的」+ 过期提醒）与**「重启登录流程」**按钮。随后做了一轮**独立对抗性审查**（只读、禁止改文件/动 git/启停进程），把发现的问题全部修掉：**【严重】重启流程原来按镜像名 `taskkill /F /IM QQ.exe`，会把你自己的 QQ 客户端一起杀掉**（真机上就有一个非提权的个人 QQ 在跑），护栏还能被"6099 被别人占用"绕过 → 改为**按加载器 PID 清理**（`taskkill /PID <pid> /T /F`），命令里不再出现 `QQ.exe`/`/IM`，拿不到 PID 直接拒绝；`/api/port/free` 加上受管端口白名单（原来能借它杀任意占用者）；`stopNapcat` 不再把「6099 在听」当成「这就是 NapCat」（复现过 nginx 占 6099）；启动命令改用 `call "<path>"`（路径含括号时 cmd 会剥引号导致静默不执行）并转义单引号；`jobsView/groupsView` 对元素级畸形快照不再 500；控制台侧不再整对象透传 webhook/自愈字段；**自愈命令原文不再进 trace**（只留 basename + 参数个数，trace 会进控制台页面与诊断包）；二维码只认 PNG 魔数；`qrStatus` 区分「读不到」与「不存在」；ops 规划器改用 `Object.hasOwn`（`kind:'constructor'` 不再命中原型拿到函数）。全量 **55 套 / 3434 断言全绿**
+- **v0.5.5** — 「控制台看得见 / Console visibility」：把控制台从「能启停、能看日志」变成**看得懂**。新增 **性能面板**（`GET /api/perf`）：端到端延迟按「一条消息的 trace 链」算，给出整体与**分会话**的 P50/P95、阶段耗时画像（用 trace 里已有的 `ms`）、最慢几条与失败画像——debug 级「功能没开」不算事故，另列；**定时任务面板**（`GET /api/jobs`）：播报任务的下次时间/上次原因/成功失败次数与「一直在失败」标记、webhook 来源计数、自愈状态、注入队列；**群配置页**（`GET /api/groups`）：每个群的白名单状态、会话与最近回合、挂在该群的定时任务、16 项**生效开关**与实时计数（并说明开关真源在插件配置里）；**注入场景库**（17 个内置场景，`GET /api/scenarios` + `POST /api/inject` 的 `scenario` 字段）：群里 @我 / 普通聊天 / 撤回 / 戳一戳 / 入群 / 表情回应 / 入群与加好友申请 / 私聊文本与图片 / OCR / 转发卡片 / 管理员命令 / 原生打卡 / 批量踢 / 敏感词 / 超长消息，每个都声明需要什么参数、专门验哪条链路，缺参数**点名缺什么**；**回放 diff**（`POST /api/replay-diff`）：同一批消息跑两次回放（基线 vs 你写的配置覆盖），机械比出「决策变了 / 原因变了 / 回复文本变了」（带相似度，避免措辞微调被误判），只有一侧有结果时标 `unknown`。为此桥在运行快照里多写一个 `jobs` 块（只有描述性字段，**自愈命令原文与任何 token 都不进快照**）。新增 2 套测试（perf 61 / scenario 49），全量 **55 套 / 3384 断言全绿**
+- **v0.5.4** — 「群运营工具箱 / Group ops toolbox」：把群运营的日常动作做成一等公民。**老规矩：先真机探针再写代码**——读本机 NapCat 实现包确认能力面，纠正了三个会做错的地方：批量踢有**原生** `set_group_kick_members`（`user_id` 是数组，不用循环）、群待办是**三个** action（set/complete/cancel_group_todo）、相册上传叫 `upload_image_to_qun_album`；另外 `set_group_member_permissions` 是**局部更新**（没传的项保持不变），所以 `/群权限` 只提交写出来的项。新增：`/群打卡`（QQ **原生**群签到，与本地积分「签到」区分）、`/全体余量`、`/禁言名单`、`/群详细`（扩展群资料）、`/入群通知`、`/批量踢`（管理员，两步确认 + 分批不截断）、`/待办` `/完成待办` `/取消待办`、`/移动文件` `/重命名文件` `/删文件` `/新建文件夹`、`/传图`（按名字换相册 ID）、`/群名` `/群备注`、`/群权限`、`/历史可见`、`/周报`（本地统计：消息/入群/退群/踢出/禁言/打卡/待办/文件整理/相册上传 + 最忙的一天）。红线：写操作全过 ActionGate，**每个新 API 都有"注入回合 0 出站"断言**，每个关闭分支点名是哪个开关，`/周报` 纯本地读。新增配置键 13 个（总数 204 → 217）；新增 2 套测试（ops 94 / 桥层 ops-bridge 96），全量 **53 套 / 3252 断言全绿**
+- **v0.5.3** — 「点一下就完事 / One tap」：**先做真机探针再写代码**——直接读本机 NapCat 实现包（`bootmain/napcat.mjs`，QQ 9.9.32-50969）确认能力面，其中最重要的是一条**否定结论**：该构建 `"keyboard"`/`"button"` 段名出现 **0 次**，**发不了内联按钮**，所以本版没做按钮面板，而是把轻互动真正落地。新增：**主动戳一戳** `/戳 @某人`（管理员，`group_poke`/`friend_poke`）、**被戳回戳**（真的戳回去，可配文案）、**私聊正在输入**（`set_input_status`，探针确认只支持 C2C，群聊如实记 reason）、**自动贴表情**（`set_msg_emoji_like`，`emojiLikeMentionOnly` 默认只对叫我/引用我生效）、**表情回应统计**（`/赞榜` 本地榜单 + `/谁赞了` 群里走 `get_emoji_likes` 拿实时名单、失败/注入回合回落本地并标注来源）、**点赞** `/点赞 [@某人]`（`send_like`，每天每目标限量）、**标记已读**（`mark_*_msg_as_read`，按会话）。红线：`set_msg_emoji_like` 只带 `message_id`、scoped dry-run 拦不住 → 桥里自己判注入并给真实 reason，**注入回合逐条断言 0 出站**；每个开关的关闭分支与配额拒绝都带真实 reason。**顺手修掉两个 v0.5.2 的静默缺陷**：桥对 `JsonStore` 调了不存在的 `load()/save()`（真实 API 是 `read()/write()`），异常被吞 → **播报去重/统计跨重启丢失且毫无提示**；`#loadEngageState()` 在配额对象构造前调用导致 **restore 打空、配额跨重启失效**。新增配置键 17 个（总数 187 → 204）；新增 2 套测试（engage 109 / 桥层 engage-bridge 90），全量 **51 套 / 3062 断言全绿**
+
+**更早的版本（v0.4 线及之前）见 [CHANGELOG.md](CHANGELOG.md)** —— 完整历史、每个版本的缺陷清单与测试计数都在那里。
