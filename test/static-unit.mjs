@@ -149,15 +149,21 @@ check('lib/ 的第三方 import 全部已在 package.json 声明', undeclaredImp
 check('官方依赖统一用 @deepseek-ai/* 作用域名（不依赖他人 hoist 的裸名）', bareOfficialImports.length === 0, bareOfficialImports.join('; '))
 check('规格名扫描确实抓到了官方依赖（防止正则失效假通过）', [...specifiers].some((spec) => spec.startsWith('@deepseek-ai/')), [...specifiers].join(','))
 
-// ---- README 惯例：更新日志只展示最近五版 ----
+// ---- README 惯例：更新日志按**大版本线**归纳（当前线 + 上一条线）；逐版本记录留在 CHANGELOG.md ----
 const readme = readFileSync(join(libDir, '..', 'README.md'), 'utf8')
-const versionBullets = [...readme.matchAll(/^- \*\*v([0-9.]+)\*\* —/gm)].map((match) => match[1])
-check('README 更新日志恰好五版（滚动）', versionBullets.length === 5, versionBullets.join(','))
-check('README 首版为当前版本', versionBullets[0] === pkg.version, `${versionBullets[0]} vs ${pkg.version}`)
 const readmeEn = readFileSync(join(libDir, '..', 'README.en.md'), 'utf8')
-const versionBulletsEn = [...readmeEn.matchAll(/^- \*\*v([0-9.]+)\*\* —/gm)].map((match) => match[1])
-check('README.en 更新日志恰好五版', versionBulletsEn.length === 5, versionBulletsEn.join(','))
-check('英文 README 首版同版本', versionBulletsEn[0] === pkg.version, versionBulletsEn[0])
+const lineBullets = (text) => [...text.matchAll(/^- \*\*v([0-9]+\.[0-9]+) (?:线|line)[^*]*\*\* —/gm)].map((match) => match[1])
+const minorBullets = (text) => [...text.matchAll(/^- \*\*v[0-9]+\.[0-9]+\.[0-9]+\*\* —/gm)].length
+const currentLine = pkg.version.split('.').slice(0, 2).join('.')
+const previousLine = `0.${Math.max(0, Number(pkg.version.split('.')[1]) - 1)}`
+for (const [label, text] of [['README', readme], ['README.en', readmeEn]]) {
+  const lines = lineBullets(text)
+  check(`${label} 更新日志按大版本线归纳（当前线 ${currentLine} + 上一条线 ${previousLine}）`,
+    lines.length === 2 && lines[0] === currentLine && lines[1] === previousLine, lines.join(','))
+  check(`${label} 更新日志不再逐个小版本展示（逐版本记录在 CHANGELOG.md）`,
+    minorBullets(text) === 0, String(minorBullets(text)))
+  check(`${label} 更新日志带 CHANGELOG 跳转链接`, /CHANGELOG\.md/.test(text))
+}
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)
