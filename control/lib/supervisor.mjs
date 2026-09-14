@@ -16,6 +16,7 @@ import { formatDiagnose, runDiagnose } from './diagnose.mjs'
 import { buildZip, fileEntry } from './zip.mjs'
 import { createReplayer } from './replay.mjs'
 import { buildAcceptance, formatAcceptance } from './acceptance.mjs'
+import { groupsView as groupsReport, jobsView as jobsReport, perfReport } from './perf.mjs'
 import { redactByKind, redactionNote } from './redact.mjs'
 import { appendCappedLine, moveToTrash } from '../../lib/store.js'
 import { countLines, describeFrame, parseInjectionLine, readInbox } from '../../lib/inbox.js'
@@ -428,6 +429,8 @@ export function createSupervisor(config, deps = {}) {
       replayHints: data.replay ?? null,
       inbox: data.inbox ?? null,
       injection: data.injection ?? null,
+      // 桥写出的定时任务/自愈/webhook 描述性字段（v0.5.5「控制台看得见」用；绝无密钥）
+      jobs: data.jobs ?? null,
       // 桥写出的**生效**归档目录（插件的 historyArchiveDir 住在 profile 里，控制台读不到）
       archive: data.archive ?? null,
       gate: data.gate ?? {},
@@ -705,10 +708,33 @@ export function createSupervisor(config, deps = {}) {
     }
   }
 
+  /**
+   * 「性能」面板（v0.5.5）：把 trace 事件喂给纯计算模块 control/lib/perf.mjs，
+   * 得到 P50/P95 端到端延迟、阶段耗时画像与失败画像。控制台自己不做统计口径的二次发明。
+   */
+  function perf({ limit = 5000, chatKey = '', windowMinutes = 0 } = {}) {
+    const events = readTraceFile(config.logs?.trace ?? '', { readFile: deps.readFile })
+    const cutoff = windowMinutes > 0 ? now() - windowMinutes * 60_000 : 0
+    const scoped = cutoff > 0 ? events.filter((event) => Number(event?.ts) >= cutoff) : events
+    const capped = scoped.slice(-Math.max(100, Math.min(20000, Number(limit) || 5000)))
+    return { ok: true, ...perfReport(capped, { chatKey, now: now() }), windowMinutes }
+  }
+
+  /** 「定时任务」面板：播报任务 / webhook 来源 / 掉线自愈 / 注入队列。 */
+  function jobsView() {
+    return { ok: true, ...jobsReport(runtime(), { now: now() }) }
+  }
+
+  /** 「群配置」面板：每个群的生效开关 + 白名单 + 最近回合 + 挂在该群上的定时任务。 */
+  function groups() {
+    return { ok: true, ...groupsReport(runtime(), { now: now() }) }
+  }
+
   return {
     status, startHost, stopHost, freePort, startNapcat, stopNapcat, startTts, stopTts, stopAll,
     traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance,
     inboxList, replay, inject, clearQueue, archiveStats, archiveSearch,
+    perf, jobsView, groups,
     // 每个调用方（每个 SSE 连接）拿一份独立 tailer：共用模块级单例会让两个面板互相"偷"事件，
     // 也会让同一进程里的第二个 supervisor 读到别人的事件文件。
     tailer: () => createTraceTailer(config.logs?.trace ?? ''),

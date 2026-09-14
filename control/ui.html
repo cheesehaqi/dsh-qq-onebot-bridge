@@ -190,6 +190,21 @@
       <button class="danger" onclick="clearQueue()">清空注入队列（进回收站）</button>
       <span class="meta" id="injState"></span>
     </div>
+    <h2 style="margin-top:12px">注入场景库 <span class="meta">（内置场景各验一条链路；缺参数会直接说缺什么）</span></h2>
+    <div class="row">
+      <select id="scenPick" style="max-width:320px"></select>
+      <input type="text" id="scenGroup" placeholder="群号" style="max-width:130px" />
+      <input type="text" id="scenUser" placeholder="QQ 号" style="max-width:150px" />
+      <input type="text" id="scenTarget" placeholder="被操作 QQ（踢人场景用）" style="max-width:190px" />
+      <button onclick="runScenario()">一键注入场景</button>
+      <span class="meta" id="scenNote"></span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button onclick="replayDiff()">回放 diff（配置对比）</button>
+      <input type="text" id="diffVariant" placeholder='要对比的配置，如 {"keywordEnabled": true}' style="max-width:320px" />
+      <span class="meta" id="diffState"></span>
+    </div>
+    <pre id="diffOut">（点「回放 diff」：同一批录到的消息跑两次回放——基线 vs 你写的配置覆盖——机械地比出差异）</pre>
   </section>
 
   <section class="card" style="grid-column:1/-1">
@@ -203,6 +218,43 @@
       <span class="meta" id="archState"></span>
     </div>
     <pre id="archOut">（点「刷新概览」看归档体积与时间范围）</pre>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
+    <h2>性能面板 <span class="meta" id="perfMeta">（按「一条消息的 trace 链」算端到端延迟；P50/P95 直接来自真实事件）</span></h2>
+    <div class="row">
+      <button onclick="loadPerf()">刷新</button>
+      <input type="text" id="perfChat" placeholder="只看某个会话，如 g:123（可留空）" style="max-width:230px" />
+      <label class="meta">时间窗 <select id="perfWindow">
+        <option value="0">全部</option>
+        <option value="30">30 分钟</option>
+        <option value="120">2 小时</option>
+        <option value="1440">24 小时</option>
+      </select></label>
+      <span class="meta" id="perfState"></span>
+    </div>
+    <div id="perfSummary" class="meta"></div>
+    <table id="perfChats" style="display:none"></table>
+    <pre id="perfOut">（点「刷新」看延迟分位数、阶段耗时与失败画像）</pre>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
+    <h2>定时任务 · 无人值守 <span class="meta" id="jobsMeta">（播报任务 / 入站 webhook / 掉线自愈 / 注入队列，全部来自桥写的运行快照）</span></h2>
+    <div class="row">
+      <button onclick="loadJobs()">刷新</button>
+      <span class="meta" id="jobsState"></span>
+    </div>
+    <pre id="jobsOut">（点「刷新」看任务清单与下次触发时间）</pre>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
+    <h2>群配置 <span class="meta" id="groupsMeta">（每个群的生效开关 + 白名单 + 最近回合）</span></h2>
+    <div class="row">
+      <button onclick="loadGroups()">刷新</button>
+      <span class="meta" id="groupsState"></span>
+    </div>
+    <div id="groupsSwitches" class="meta"></div>
+    <pre id="groupsOut">（点「刷新」看每个群的生效状态）</pre>
   </section>
 
   <section class="card" style="grid-column:1/-1">
@@ -627,6 +679,167 @@ async function loadArchive() {
   }
 }
 
+async function loadPerf() {
+  const out = document.getElementById('perfOut');
+  const state = document.getElementById('perfState');
+  const summary = document.getElementById('perfSummary');
+  const chat = document.getElementById('perfChat').value.trim();
+  const windowMinutes = Number(document.getElementById('perfWindow').value) || 0;
+  state.textContent = '统计中…';
+  try {
+    const qs = 'limit=5000&window=' + windowMinutes + (chat ? '&chatKey=' + encodeURIComponent(chat) : '');
+    const r = await api('/api/perf?' + qs);
+    if (r.ok !== true) { state.textContent = ''; out.textContent = '⚠️ ' + (r.reason || '性能面板不可用'); summary.textContent = ''; return; }
+    summary.textContent = r.verdict + (r.chains.avg === null ? '' : '（平均 ' + r.chains.avg + 'ms，样本 ' + r.chains.count + ' 条）');
+    const lines = [];
+    if ((r.stages || []).length > 0) {
+      lines.push('阶段耗时（只统计记了时的阶段）：');
+      for (const s of r.stages.slice(0, 8)) lines.push('  ' + s.stage + '：P50 ' + (s.p50 ?? '—') + 'ms · P95 ' + (s.p95 ?? '—') + 'ms · 最慢 ' + (s.max ?? '—') + 'ms · ' + s.count + ' 次');
+    }
+    if ((r.slowest || []).length > 0) {
+      lines.push('');
+      lines.push('最慢的几条消息：');
+      for (const c of r.slowest) lines.push('  ' + c.ms + 'ms · ' + (c.chatKey || '未知会话') + ' · ' + (c.failed ? '有失败' : '正常') + ' · ' + c.id);
+    }
+    const errs = r.errors || { failed: 0, byStage: [] };
+    lines.push('');
+    lines.push('失败画像：共 ' + errs.failed + ' 条（debug 级的"未启用"不算事故）');
+    for (const s of (errs.byStage || []).slice(0, 5)) {
+      lines.push('  ' + s.stage + '：' + s.count + ' 条 → ' + (s.topReasons[0] ? s.topReasons[0].reason + '（' + s.topReasons[0].count + ' 次）' : ''));
+    }
+    out.textContent = lines.join('\n') || '（窗口内还没有事件）';
+    state.textContent = '';
+  } catch (error) {
+    state.textContent = '';
+    out.textContent = '⚠️ ' + error.message;
+  }
+}
+
+async function loadJobs() {
+  const out = document.getElementById('jobsOut');
+  const state = document.getElementById('jobsState');
+  state.textContent = '读取中…';
+  try {
+    const r = await api('/api/jobs');
+    if (r.ok !== true) { state.textContent = ''; out.textContent = '⚠️ ' + (r.reason || '定时任务面板不可用'); return; }
+    const lines = [];
+    lines.push('定时播报：' + (r.broadcast.enabled ? '启用中' : '未启用') + '（' + r.broadcast.enabledCount + '/' + r.broadcast.total + ' 个任务启用）');
+    for (const job of r.broadcast.rows) {
+      lines.push('  ' + (job.enabled ? '●' : '○') + ' ' + job.id + '（' + job.kind + '）→ ' + (job.chat || '未指定会话')
+        + ' · 下次 ' + job.nextText + (job.lastReason ? ' · 上次：' + job.lastReason : '')
+        + ' · 成功 ' + job.runs + ' 次 / 失败 ' + job.failures + ' 次' + (job.health === '一直在失败' ? ' ⚠️' : ''));
+    }
+    lines.push('');
+    lines.push('入站 webhook：' + (r.webhook.enabled ? '监听 127.0.0.1:' + r.webhook.port : '未启用'));
+    for (const s of (r.webhook.sources || [])) lines.push('  ' + s.name + '：收到 ' + s.received + ' · 丢弃 ' + s.dropped);
+    lines.push('');
+    lines.push('掉线自愈：' + (r.autoHeal.enabled ? '启用' : '未启用')
+      + '（命令' + (r.autoHeal.commandConfigured ? '已配置' : '未配置') + '，冷却 ' + r.autoHeal.cooldownSeconds + 's，上限 ' + r.autoHeal.maxPerHour + ' 次/小时，最近一小时 ' + (r.autoHeal.attemptsLastHour ?? 0) + ' 次）');
+    lines.push('注入队列：' + (r.injection.enabled ? (r.injection.queued + ' 行待消费 · 已消费 ' + r.injection.consumed + ' · dry-run ' + (r.injection.dryRun ? '开' : '关') + ' · 轮询 ' + r.injection.intervalMs + 'ms') : '未启用'));
+    out.textContent = lines.join('\n');
+    state.textContent = '';
+  } catch (error) {
+    state.textContent = '';
+    out.textContent = '⚠️ ' + error.message;
+  }
+}
+
+async function loadGroups() {
+  const out = document.getElementById('groupsOut');
+  const state = document.getElementById('groupsState');
+  const switches = document.getElementById('groupsSwitches');
+  state.textContent = '读取中…';
+  try {
+    const r = await api('/api/groups');
+    if (r.ok !== true) { state.textContent = ''; out.textContent = '⚠️ ' + (r.reason || '群配置页不可用'); return; }
+    switches.textContent = '生效开关（' + r.onCount + '/' + r.switches.length + ' 开）：'
+      + r.switches.map((s) => (s.on ? '✅' : '⬜') + s.label).join(' · ');
+    const lines = [];
+    if ((r.groups || []).length === 0) lines.push('还没有群会话（桥启动后收到过群消息才会出现）。');
+    for (const g of r.groups) {
+      const allowed = g.allowlisted === null ? '白名单未知' : (g.allowlisted ? '在白名单' : '⚠️ 不在白名单');
+      lines.push('群 ' + g.groupId + ' · ' + allowed + ' · 会话 ' + (g.sessionId || '—') + ' · 状态 ' + g.status + ' · 最近回合 ' + g.lastTurnText);
+      if ((g.jobs || []).length > 0) lines.push('    定时任务：' + g.jobs.map((j) => j.id + (j.enabled ? '' : '（停用）')).join('、'));
+    }
+    lines.push('');
+    lines.push('实时计数：表情统计 ' + r.counters.reactionMessages + ' 条消息 · 运营计数 ' + r.counters.opsEntries + ' 项 · 待确认批量踢 ' + r.counters.pendingKickBatches + ' · 正在输入会话 ' + r.counters.typingActive);
+    lines.push(r.note);
+    out.textContent = lines.join('\n');
+    state.textContent = '';
+  } catch (error) {
+    state.textContent = '';
+    out.textContent = '⚠️ ' + error.message;
+  }
+}
+
+async function loadScenarios() {
+  const pick = document.getElementById('scenPick');
+  try {
+    const r = await api('/api/scenarios');
+    if (r.ok !== true) { document.getElementById('scenNote').textContent = '⚠️ ' + (r.reason || '场景清单不可用'); return; }
+    pick.innerHTML = r.scenarios.map((s) => `<option value="${s.id}">${s.name}</option>`).join('');
+    const show = () => {
+      const hit = r.scenarios.find((s) => s.id === pick.value);
+      document.getElementById('scenNote').textContent = hit ? '验证：' + hit.note : '';
+      document.getElementById('scenGroup').style.display = (hit?.needs || []).includes('groupId') ? '' : 'none';
+      document.getElementById('scenUser').style.display = (hit?.needs || []).includes('userId') ? '' : 'none';
+    };
+    pick.onchange = show;
+    show();
+  } catch (error) {
+    document.getElementById('scenNote').textContent = '⚠️ ' + error.message;
+  }
+}
+
+async function runScenario() {
+  const state = document.getElementById('scenNote');
+  const payload = {
+    scenario: document.getElementById('scenPick').value,
+    params: {
+      groupId: Number(document.getElementById('scenGroup').value) || 0,
+      userId: Number(document.getElementById('scenUser').value) || 0,
+      target: Number(document.getElementById('scenTarget').value) || 0,
+    },
+  };
+  state.textContent = '注入中…';
+  try {
+    const r = await api('/api/inject', { method: 'POST', body: JSON.stringify(payload) });
+    state.textContent = r.ok ? '✅ 已入队：' + (r.preview || '') + '（' + (r.reason || '') + '）' : '⚠️ ' + (r.reason || '注入失败');
+    loadInbox(false);
+  } catch (error) {
+    state.textContent = '⚠️ ' + error.message;
+  }
+}
+
+async function replayDiff() {
+  const out = document.getElementById('diffOut');
+  const state = document.getElementById('diffState');
+  let variant = null;
+  try {
+    variant = JSON.parse(document.getElementById('diffVariant').value || '{}');
+  } catch (error) {
+    state.textContent = '⚠️ 配置覆盖不是合法 JSON：' + error.message;
+    return;
+  }
+  state.textContent = '跑两次回放…';
+  try {
+    const r = await api('/api/replay-diff', { method: 'POST', body: JSON.stringify({ limit: 5, variant }) });
+    if (r.ok !== true) { state.textContent = ''; out.textContent = '⚠️ ' + (r.reason || '对比失败'); return; }
+    const lines = [r.summary, ''];
+    for (const row of r.rows.filter((x) => x.changed || x.changeKind === 'unknown').slice(0, 10)) {
+      lines.push('#' + row.index + ' [' + row.changeKind + '] ' + (row.text || '(无文本)'));
+      lines.push('    基线：' + (row.baseline.replied ? '会回复' : '静默') + (row.baseline.reason ? '（' + row.baseline.reason + '）' : '') + (row.baseline.reply ? ' → ' + row.baseline.reply : ''));
+      lines.push('    覆盖：' + (row.variant.replied ? '会回复' : '静默') + (row.variant.reason ? '（' + row.variant.reason + '）' : '') + (row.variant.reply ? ' → ' + row.variant.reply : ''));
+    }
+    if (r.changed === 0) lines.push('（没有差异：这批消息在两种配置下行为一致）');
+    out.textContent = lines.join('\n');
+    state.textContent = '';
+  } catch (error) {
+    state.textContent = '';
+    out.textContent = '⚠️ ' + error.message;
+  }
+}
+
 async function searchArchive() {
   const q = document.getElementById('archQ').value.trim();
   const days = Number(document.getElementById('archDays').value) || 7;
@@ -658,7 +871,11 @@ refresh();
 loadHistory().then(() => startStream());
 loadLog(true);
 loadInbox(true);
+loadScenarios();
 loadArchive();
+loadPerf();
+loadJobs();
+loadGroups();
 runDiagnose();
 loadAcceptance();
 if (streamMode !== 'off') {
@@ -667,6 +884,9 @@ if (streamMode !== 'off') {
   setInterval(runDiagnose, 30000);
   setInterval(loadAcceptance, 30000);
   setInterval(() => { if (!document.hidden) loadInbox(false); }, 15000);
+  // 定时任务/群配置变化慢，自动刷新频率低一些（也不在页面不可见时空转）
+  setInterval(() => { if (!document.hidden) loadJobs(); }, 20000);
+  setInterval(() => { if (!document.hidden) loadGroups(); }, 30000);
 }
 </script>
 </body>

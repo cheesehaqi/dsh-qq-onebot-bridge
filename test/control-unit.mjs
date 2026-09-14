@@ -12,6 +12,7 @@ import {
   portOf, publicConfig, qrStatus, run, startDetached, summarizePorts, tailLines,
 } from '../control/lib/supervisor.mjs'
 import { createControlServer, createToken, originAllowed, readUi } from '../control/lib/server.mjs'
+import { groupsView, jobsView, perfReport } from '../control/lib/perf.mjs'
 import { BROWSER_CANDIDATES, buildOpenCommand, openPanel, pickBrowser } from '../control/lib/open.mjs'
 
 let passed = 0
@@ -208,6 +209,20 @@ const stubApi = {
     ok: true, query, days: options.days, limit: options.limit, chatKey: options.chatKey,
     hits: [{ ts: 1700000000000, chatKey: 'g:1', userId: 1001, name: '小明', text: 'x' }], scanned: 3, files: ['2026-09-02.jsonl'], truncated: false,
   }),
+  // v0.5.5「控制台看得见」：三个新面板。stub 记录收到的参数，好断言透传与夹取。
+  perf: async (options) => {
+    stubApi.lastPerf = options
+    return { ok: true, ...perfReport([{ ts: 1000, id: 'a', stage: 'inbound', ok: true, chatKey: 'g:1' }, { ts: 1400, id: 'a', stage: 'reply', ok: true, ms: 400, chatKey: 'g:1' }, { ts: 2000, id: 'b', stage: 'inbound', ok: true, chatKey: 'g:1' }, { ts: 3000, id: 'b', stage: 'reply', ok: true, ms: 1000, chatKey: 'g:1' }], options) }
+  },
+  jobsView: async () => ({ ok: true, ...jobsView({ jobs: { broadcast: [{ id: 'news', kind: 'rss', chat: 'g:2002', enabled: true, nextAt: Date.now() + 60_000, runs: 2, failures: 0 }], webhook: { enabled: true, port: 8798, sources: [{ name: 'ci', received: 1, dropped: 0, lastAt: 1 }] }, autoHeal: { enabled: false, commandConfigured: false } }, injection: { enabled: true, dryRun: true, queued: 0, consumed: 0 } }) }),
+  groups: async () => ({ ok: true, ...groupsView({ features: { engageEnabled: true, groupOpsEnabled: false }, replay: { allowGroups: [2002] }, sessions: [{ chatKey: 'g:2002', sessionId: 's', status: 'idle', lastTurnAt: 1 }], jobs: { broadcast: [] } }) }),
+  // v0.5.5 阶段 4：注入场景库与回放 diff
+  inject: async (spec) => { stubApi.lastInject = spec; return { ok: true, reason: '已入队', preview: '×' } },
+  replay: async (options) => {
+    stubApi.replayCalls = (stubApi.replayCalls ?? 0) + 1
+    const on = options.overrides && options.overrides.keywordEnabled === true
+    return { ok: true, results: [{ index: 0, entry: { chatKey: 'g:2002', text: 'hi' }, decision: on, reply: on ? '命中关键词' : '', reason: on ? '' : '没 @ 机器人' }] }
+  },
 }
 let savedPatch = null
 const server = createControlServer({
@@ -239,6 +254,53 @@ check('GET /api/archive?q= 走检索并透传参数', archiveSearchRes.ok === tr
 check('检索结果带命中与扫描数', Array.isArray(archiveSearchRes.hits) && archiveSearchRes.hits.length === 1 && archiveSearchRes.scanned === 3)
 const archiveClamp = await (await fetch(base + '/api/archive?q=hi&days=99999&limit=0&token=' + token)).json()
 check('days/limit 被夹到合法区间', archiveClamp.days === 3650 && archiveClamp.limit === 20, JSON.stringify({ days: archiveClamp.days, limit: archiveClamp.limit }))
+
+// ---- v0.5.5 三个新面板：性能 / 定时任务 / 群配置 ----
+const perfBody = await (await fetch(base + '/api/perf?token=' + token)).json()
+check('GET /api/perf 返回 P50/P95 与结论',
+  perfBody.ok === true && perfBody.chains.count === 2 && perfBody.chains.p50 === 400 && perfBody.chains.p95 === 1000,
+  JSON.stringify(perfBody.chains))
+check('GET /api/perf 带上人话结论', typeof perfBody.verdict === 'string' && perfBody.verdict.includes('P50'), perfBody.verdict)
+const perfScoped = await (await fetch(base + '/api/perf?chatKey=g%3A1&window=30&limit=100&token=' + token)).json()
+const perfArgs = stubApi.lastPerf
+check('GET /api/perf 透传 chatKey 与 window', perfArgs.chatKey === 'g:1' && perfArgs.windowMinutes === 30 && perfArgs.limit === 100, JSON.stringify(perfArgs))
+check('GET /api/perf 按会话过滤后仍有数据', perfScoped.ok === true && perfScoped.chains.count === 2)
+const perfClamp = await (await fetch(base + '/api/perf?limit=999999&window=99999&token=' + token)).json()
+check('GET /api/perf 的 limit/window 被夹到合法区间',
+  stubApi.lastPerf.limit === 20000 && stubApi.lastPerf.windowMinutes === 1440, JSON.stringify(stubApi.lastPerf))
+
+const jobsBody = await (await fetch(base + '/api/jobs?token=' + token)).json()
+check('GET /api/jobs 返回播报任务', jobsBody.ok === true && jobsBody.broadcast.rows.length === 1 && jobsBody.broadcast.rows[0].id === 'news', JSON.stringify(jobsBody.broadcast.rows))
+check('GET /api/jobs 带上下次时间的人话文案', jobsBody.broadcast.rows[0].nextText.includes('后'), jobsBody.broadcast.rows[0].nextText)
+check('GET /api/jobs 带 webhook 来源与自愈状态',
+  jobsBody.webhook.sources[0].name === 'ci' && jobsBody.autoHeal.enabled === false, JSON.stringify(jobsBody.webhook.sources))
+check('GET /api/jobs 不含自愈命令原文', jobsBody.autoHeal.command === undefined && !JSON.stringify(jobsBody).includes('autoHealCommand'))
+
+const groupsBody = await (await fetch(base + '/api/groups?token=' + token)).json()
+check('GET /api/groups 返回开关表与群列表', groupsBody.ok === true && groupsBody.switches.length >= 16 && groupsBody.groups.length === 1, JSON.stringify(groupsBody.groups))
+check('GET /api/groups 标出白名单状态（读 replay.allowGroups）', groupsBody.groups[0].allowlisted === true, JSON.stringify(groupsBody.groups[0]))
+check('GET /api/groups 说明开关真源在插件配置', groupsBody.note.includes('cordis.patch.yml'), groupsBody.note)
+check('GET /api/groups 统计打开的开关数', groupsBody.onCount === 1, String(groupsBody.onCount))
+
+// ---- v0.5.5 阶段 4：注入场景库 + 回放 diff ----
+const scen = await (await fetch(base + '/api/scenarios?token=' + token)).json()
+check('GET /api/scenarios 返回场景清单', scen.ok === true && scen.scenarios.length >= 15, `len=${scen.scenarios?.length}`)
+check('场景清单不泄露 build 函数', scen.scenarios.every((s) => s.build === undefined && s.name && s.needs))
+const postJson = (path, body) => fetch(base + path + '?token=' + token, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+const injOk = await (await postJson('/api/inject', { scenario: 'group-mention', params: { groupId: 2002, userId: 10001 } })).json()
+check('POST /api/inject 支持 scenario 生成 spec', injOk.ok === true && stubApi.lastInject.kind === 'message' && stubApi.lastInject.atMe === true, JSON.stringify(stubApi.lastInject))
+const injBad = await (await postJson('/api/inject', { scenario: 'group-mention', params: {} })).json()
+check('场景缺参数 → 明确拒绝并点名缺什么', injBad.ok === false && injBad.reason.includes('groupId'), injBad.reason)
+const injPlain = await (await postJson('/api/inject', { kind: 'message', groupId: 2002, userId: 10001, text: 'raw' })).json()
+check('不带 scenario 时仍按原来的裸 spec 注入', injPlain.ok === true && stubApi.lastInject.text === 'raw', JSON.stringify(stubApi.lastInject))
+stubApi.replayCalls = 0
+const diffRes = await (await postJson('/api/replay-diff', { indices: [0], variant: { keywordEnabled: true } })).json()
+check('POST /api/replay-diff 跑两次回放并给出差异',
+  diffRes.ok === true && stubApi.replayCalls === 2 && diffRes.changed === 1, JSON.stringify({ calls: stubApi.replayCalls, changed: diffRes.changed }))
+check('差异里带上人话总结与变化类型', diffRes.summary.includes('1/1') && diffRes.byKind.decision === 1, diffRes.summary)
+const diffNoVariant = await (await postJson('/api/replay-diff', { indices: [0] })).json()
+check('缺少 variant 覆盖 → 拒绝并给例子', diffNoVariant.ok === false && diffNoVariant.reason.includes('variant'), diffNoVariant.reason)
+check('拒绝时没有再跑回放', stubApi.replayCalls === 2, String(stubApi.replayCalls))
 const headerToken = await fetch(base + '/api/status', { headers: { 'X-Control-Token': token } })
 check('也可用请求头携带 token', headerToken.status === 200)
 const logsResponse = await fetch(base + '/api/logs?name=hostOut&lines=5&token=' + token)

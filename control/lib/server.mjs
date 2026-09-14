@@ -15,6 +15,8 @@ import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { tailLines } from './supervisor.mjs'
+import { buildScenario, listScenarios } from './scenarios.mjs'
+import { diffReplays } from './replaydiff.mjs'
 
 const MAX_BODY_BYTES = 64 * 1024
 const LOG_NAMES = ['hostOut', 'hostErr', 'bridge', 'trace', 'audit', 'runtime']
@@ -155,6 +157,39 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
         json(response, 200, { ok: true, runtime: api.runtime() })
         return
       }
+      // v0.5.5「控制台看得见」：性能面板（P50/P95）、定时任务面板、群配置页。
+      if (request.method === 'GET' && path === '/api/perf') {
+        if (typeof api.perf !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持性能面板' })
+          return
+        }
+        const limit = Math.min(20000, Math.max(100, Number(url.searchParams.get('limit')) || 5000))
+        const windowMinutes = Math.min(1440, Math.max(0, Number(url.searchParams.get('window')) || 0))
+        // 必须 await：supervisor 这三个方法都是 async，直接序列化 Promise 会得到空对象（实测踩过）。
+        json(response, 200, await api.perf({ limit, chatKey: (url.searchParams.get('chatKey') ?? '').trim(), windowMinutes }))
+        return
+      }
+      if (request.method === 'GET' && path === '/api/jobs') {
+        if (typeof api.jobsView !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持定时任务面板' })
+          return
+        }
+        json(response, 200, await api.jobsView())
+        return
+      }
+      if (request.method === 'GET' && path === '/api/groups') {
+        if (typeof api.groups !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持群配置页' })
+          return
+        }
+        json(response, 200, await api.groups())
+        return
+      }
+      // 注入场景库：只返回清单（生成 spec 走 POST /api/inject 的 scenario 字段，逻辑在纯模块里测）
+      if (request.method === 'GET' && path === '/api/scenarios') {
+        json(response, 200, { ok: true, scenarios: listScenarios() })
+        return
+      }
       if (request.method === 'GET' && path === '/api/diagnose') {
         const result = await api.diagnose()
         json(response, 200, { ok: true, ...result })
@@ -252,7 +287,29 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
           // 事件注入：写一行到注入队列，桥按间隔轮询后走真实管线（默认 dry-run）
           '/api/inject': () => {
             if (typeof api.inject !== 'function') return { ok: false, reason: '当前控制台不支持注入' }
+            // 场景库：传 scenario 时由纯模块生成 spec（参数校验也在那边，缺什么说什么）
+            if (typeof body.scenario === 'string' && body.scenario.trim() !== '') {
+              const built = buildScenario(body.scenario, body.params && typeof body.params === 'object' ? body.params : {})
+              if (built.ok !== true) return built
+              return api.inject(built.spec)
+            }
             return api.inject(body.spec && typeof body.spec === 'object' ? body.spec : body)
+          },
+          // 回放 diff：同一批消息跑两次（基线 + 覆盖配置），机械地比出差异
+          '/api/replay-diff': async () => {
+            if (typeof api.replay !== 'function') return { ok: false, reason: '当前控制台不支持回放' }
+            const indices = Array.isArray(body.indices) ? body.indices.slice(0, 20) : null
+            const entries = Array.isArray(body.entries) ? body.entries.slice(0, 20) : null
+            const limit = Number(body.limit) || 5
+            const baselineOverrides = body.baseline && typeof body.baseline === 'object' && !Array.isArray(body.baseline) ? body.baseline : {}
+            const variantOverrides = body.variant && typeof body.variant === 'object' && !Array.isArray(body.variant) ? body.variant : null
+            if (variantOverrides === null || Object.keys(variantOverrides).length === 0) {
+              return { ok: false, reason: '请给出要对比的配置覆盖（variant，例如 {"keywordEnabled": true}）' }
+            }
+            const baseline = await api.replay({ indices, entries, limit, replyText: '', overrides: baselineOverrides, budgetMs: 20000 })
+            const variant = await api.replay({ indices, entries, limit, replyText: '', overrides: variantOverrides, budgetMs: 20000 })
+            const diff = diffReplays(baseline, variant)
+            return { ok: true, variant: variantOverrides, ...diff }
           },
           '/api/queue/clear': () => {
             if (typeof api.clearQueue !== 'function') return { ok: false, reason: '当前控制台不支持清空队列' }
