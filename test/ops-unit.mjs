@@ -103,6 +103,15 @@ check('planTodo 缺消息标识 → reason 提示引用消息',
   planTodo({ groupId: 2002, kind: 'set' }).reason.includes('引用一条消息'), planTodo({ groupId: 2002, kind: 'set' }).reason)
 check('planTodo 未知 kind → reason 带原值',
   planTodo({ groupId: 2002, kind: 'x', messageId: '1' }).reason.includes('x'), planTodo({ groupId: 2002, kind: 'x', messageId: '1' }).reason)
+// 审查 O5：原型链键不能绕过（'constructor' 以前会命中原型拿到函数，action 变成函数）
+for (const kind of ['constructor', '__proto__', 'toString', 'valueOf']) {
+  const todo = planTodo({ groupId: '123456', kind, messageId: '1' })
+  check(`planTodo 拒绝原型键 kind=${kind}`, todo.ok === false && typeof todo.action === 'string', JSON.stringify(todo))
+  const fileOp = planFileOp({ groupId: '123456', kind, fileId: '/f' })
+  check(`planFileOp 拒绝原型键 kind=${kind}`, fileOp.ok === false && fileOp.action === '', JSON.stringify(fileOp))
+  const profile = planProfileChange({ groupId: '123456', kind, value: 'x' })
+  check(`planProfileChange 拒绝原型键 kind=${kind}`, profile.ok === false && profile.action === '', JSON.stringify(profile))
+}
 
 // —— 6. 文件整理 ——
 const mv = planFileOp({ groupId: 2002, kind: 'move', fileId: '/f1', currentParent: '/root', targetParent: '/dst' })

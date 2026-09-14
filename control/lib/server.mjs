@@ -15,6 +15,7 @@ import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { tailLines } from './supervisor.mjs'
+import { FREEABLE_PORTS } from './config.mjs'
 import { buildScenario, listScenarios } from './scenarios.mjs'
 import { diffReplays } from './replaydiff.mjs'
 
@@ -190,6 +191,15 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
         json(response, 200, { ok: true, scenarios: listScenarios() })
         return
       }
+      // 登录二维码：直接给前端 dataUrl + 新鲜度，省得再开一个端口去看图
+      if (request.method === 'GET' && path === '/api/qr') {
+        if (typeof api.qr !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持二维码查看' })
+          return
+        }
+        json(response, 200, await api.qr())
+        return
+      }
       if (request.method === 'GET' && path === '/api/diagnose') {
         const result = await api.diagnose()
         json(response, 200, { ok: true, ...result })
@@ -264,11 +274,24 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
             return { ok: started.ok, reason: `${stopped.ok || !stopped.ok ? stopped.reason : ''}；${started.reason}`.replace(/^；/, '') }
           },
           '/api/napcat/start': () => api.startNapcat(),
+          // 重启登录流程：会先结束 NapCat 加载器与它注入的 QQ（护栏在 supervisor 里）
+          '/api/napcat/restart': () => {
+            if (typeof api.restartNapcatLogin !== 'function') return { ok: false, reason: '当前控制台不支持重启登录流程' }
+            return api.restartNapcatLogin()
+          },
           '/api/napcat/stop': () => api.stopNapcat(),
           '/api/tts/start': () => api.startTts(),
           '/api/tts/stop': () => api.stopTts(),
           '/api/all/stop': () => api.stopAll(),
-          '/api/port/free': () => api.freePort(String(body.name ?? '')),
+          // 释放端口：只允许释放**受管端口**（FREEABLE_PORTS）。否则 token 持有者能借它
+          // 杀掉任意占用者的进程（审查复现过 {"name":"control"} → 杀掉别的 8799 占用者）。
+          '/api/port/free': () => {
+            const name = String(body.name ?? '').trim()
+            if (!FREEABLE_PORTS.includes(name)) {
+              return { ok: false, reason: `只能释放受管端口：${FREEABLE_PORTS.join(' / ')}（收到「${name}」）` }
+            }
+            return api.freePort(name)
+          },
           // 离线回放：在沙箱里跑真实管线，dry-run 拦截一切出站
           '/api/replay': () => {
             if (typeof api.replay !== 'function') return { ok: false, reason: '当前控制台不支持回放' }

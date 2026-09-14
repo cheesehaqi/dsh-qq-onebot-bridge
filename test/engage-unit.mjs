@@ -104,6 +104,12 @@ check('planSendLike 非数字 → 1', planSendLike({ userId: 1001, times: 'abc' 
 check('planSendLike 正常值不标 clamped', planSendLike({ userId: 1001, times: 5 }).clamped === false)
 check('planSendLike 缺目标 → reason 说清',
   planSendLike({ times: 5 }).ok === false && planSendLike({ times: 5 }).reason.includes('目标 QQ'), planSendLike({ times: 5 }).reason)
+// 审查 O6：Symbol 之类的怪输入不能抛错（Number(Symbol()) 会 TypeError）
+check('planSendLike 遇到 Symbol 输入不抛错（退化成 1 次）',
+  (() => { try { const r = planSendLike({ userId: 1001, times: Symbol('x') }); return r.ok === true && r.params.times === 1 } catch { return false } })(),
+  (() => { try { return JSON.stringify(planSendLike({ userId: 1001, times: Symbol('x') })) } catch (error) { return 'THREW: ' + error.message } })())
+check('planSendLike max 是 Symbol 也不抛错',
+  (() => { try { return planSendLike({ userId: 1001, times: 3, max: Symbol('m') }).params.times === 3 } catch { return false } })())
 
 // —— 7. planInputStatus：只走私聊 C2C ——
 const typing = planInputStatus({ userId: 1001 })

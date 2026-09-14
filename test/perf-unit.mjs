@@ -151,6 +151,19 @@ check('jobsView 带上自愈状态（不含命令原文）',
   JSON.stringify(jobs.autoHeal))
 check('jobsView 带上注入队列状态', jobs.injection.queued === 3 && jobs.injection.consumed === 7 && jobs.injection.dryRun === true)
 check('jobsView 缺 jobs 块时不炸', jobsView({}).broadcast.total === 0 && jobsView(null).webhook.enabled === false)
+// 审查 G6：元素级畸形不能让整个接口 500
+check('jobsView 元素级畸形不抛错（[null] / [1] / ["x"]）',
+  (() => { try { const r = jobsView({ jobs: { broadcast: [null, 1, 'x', { id: 'ok', enabled: true }] } }); return r.broadcast.rows.length === 1 && r.broadcast.rows[0].id === 'ok' } catch { return false } })())
+check('jobsView webhook.sources 元素级畸形也不抛错',
+  (() => { try { return jobsView({ jobs: { webhook: { enabled: true, sources: [null, { name: 'ci' }] } } }).webhook.sources.length === 1 } catch { return false } })())
+// 审查 G7：控制台侧必须自己挑字段，不能整对象透传
+const leaky = jobsView({ jobs: { webhook: { enabled: true, port: 8798, sources: [{ name: 'ci', token: 'SECRET-TOKEN', secret: 'S3CR3T' }] }, autoHeal: { enabled: true, command: 'D:\\secret\\start-qq.bat', commandConfigured: true } } })
+check('jobsView 不透传 token/secret',
+  !JSON.stringify(leaky).includes('SECRET-TOKEN') && !JSON.stringify(leaky).includes('S3CR3T'), JSON.stringify(leaky.webhook.sources))
+check('jobsView 不透传自愈命令原文',
+  !JSON.stringify(leaky).includes('start-qq.bat') && leaky.autoHeal.command === undefined, JSON.stringify(leaky.autoHeal))
+check('groupsView 元素级畸形不抛错（sessions:[null]、jobs:[null]）',
+  (() => { try { const r = groupsView({ sessions: [null, { chatKey: 'g:2002', sessionId: 's', status: 'idle', lastTurnAt: 1 }], jobs: { broadcast: [null] } }); return r.groups.length === 1 } catch { return false } })())
 check('jobsView 时间文案：即将触发 / 分钟 / 小时',
   jobsView({ jobs: { broadcast: [
     { id: 'a', enabled: true, nextAt: 9_000 },

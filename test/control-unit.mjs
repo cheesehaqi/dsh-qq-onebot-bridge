@@ -5,10 +5,12 @@
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { DEFAULT_PORTS, PORT_LABELS, configWarnings, detectDshBin, detectPaths, loadControlConfig, saveControlConfig } from '../control/lib/config.mjs'
 import {
-  assertKillAllowed, createSupervisor, extractHostUrl, inspect, killTree, parseNetstat, parseTasklist,
+  NAPCAT_LOADER_NAMES, QR_STALE_SECONDS, assertKillAllowed, createSupervisor, extractHostUrl, inspect,
+  killTree, napcatLaunchCommand, napcatRestartCommand, parseNetstat, parseTasklist,
   portOf, publicConfig, qrStatus, run, startDetached, summarizePorts, tailLines,
 } from '../control/lib/supervisor.mjs'
 import { createControlServer, createToken, originAllowed, readUi } from '../control/lib/server.mjs'
@@ -23,6 +25,7 @@ function check(name, ok, extra = '') {
 }
 
 const dir = mkdtempSync(join(tmpdir(), 'qq-control-test-'))
+const here0 = dirname(fileURLToPath(import.meta.url))
 
 // ---------------------------------------------------------------- parsing ----
 const NETSTAT = `
@@ -255,6 +258,23 @@ check('检索结果带命中与扫描数', Array.isArray(archiveSearchRes.hits) 
 const archiveClamp = await (await fetch(base + '/api/archive?q=hi&days=99999&limit=0&token=' + token)).json()
 check('days/limit 被夹到合法区间', archiveClamp.days === 3650 && archiveClamp.limit === 20, JSON.stringify({ days: archiveClamp.days, limit: archiveClamp.limit }))
 
+// ---- v0.5.6：扫码页 / 二维码 / 重启登录流程（这三个都是真机踩出来的坑） ----
+stubApi.qr = async () => ({
+  ok: true, exists: true, fresh: false, ageSeconds: 520, mtimeMs: 1,
+  path: 'C:\\x\\qrcode.png', staleSeconds: QR_STALE_SECONDS,
+  dataUrl: 'data:image/png;base64,AAAA', hint: '这张二维码是 8 分钟前生成的，已经过期',
+})
+const qrBody = await (await fetch(base + '/api/qr?token=' + token)).json()
+check('GET /api/qr 返回新鲜度与过期提示',
+  qrBody.ok === true && qrBody.fresh === false && qrBody.ageSeconds === 520 && qrBody.hint.includes('过期'),
+  JSON.stringify(qrBody))
+check('GET /api/qr 直接带出图片 dataUrl（页面不用再开一个端口）', String(qrBody.dataUrl).startsWith('data:image/png;base64,'))
+stubApi.restartNapcatLogin = async () => ({ ok: true, pid: 4242, reason: '已请求提权重启登录流程' })
+const restartBody = await (await fetch(base + '/api/napcat/restart?token=' + token, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json()
+check('POST /api/napcat/restart 走到重启登录流程', restartBody.ok === true && restartBody.pid === 4242, JSON.stringify(restartBody))
+const noQr = await fetch(base + '/api/napcat/restart?token=wrong', { method: 'POST', body: '{}' })
+check('重启接口同样要 token', noQr.status === 401, String(noQr.status))
+
 // ---- v0.5.5 三个新面板：性能 / 定时任务 / 群配置 ----
 const perfBody = await (await fetch(base + '/api/perf?token=' + token)).json()
 check('GET /api/perf 返回 P50/P95 与结论',
@@ -315,6 +335,12 @@ for (const [path, needle] of [['/api/host/start', '宿主已启动'], ['/api/hos
 }
 const freeResponse = await fetch(base + '/api/port/free?token=' + token, { method: 'POST', body: JSON.stringify({ name: 'onebot' }) })
 check('POST /api/port/free 透传端口名', (await freeResponse.json()).reason === '已释放 onebot')
+// 审查 G5：不在受管列表里的端口名必须拒绝（FREEABLE_PORTS = host/onebot/napcat/tts），
+// 否则 token 持有者能借它杀掉任意占用者的进程（control 就是"别的进程"的典型）。
+for (const badName of ['control', '', 'host; rm -rf', 'unknown']) {
+  const bad = await (await fetch(base + '/api/port/free?token=' + token, { method: 'POST', body: JSON.stringify({ name: badName }) })).json()
+  check(`POST /api/port/free 拒绝非受管端口「${badName}」`, bad.ok === false && bad.reason.includes('只能释放受管端口'), JSON.stringify(bad))
+}
 const cfgResponse = await fetch(base + '/api/config?token=' + token, { method: 'POST', body: JSON.stringify({ cwd: 'D:\\qq-bridge-work', ports: { host: 3081, onebot: 999999 } }) })
 const cfgBody = await cfgResponse.json()
 check('POST /api/config 过滤非法端口', cfgBody.ok === true && savedPatch.cwd === 'D:\\qq-bridge-work' && savedPatch.ports.host === 3081 && savedPatch.ports.onebot === 6700, JSON.stringify(savedPatch))
@@ -376,6 +402,95 @@ check('openPanel 无浏览器时回退系统默认浏览器', openFallback.ok ==
 const openThrows = openPanel(panelUrl, { browser: 'C:/Edge/msedge.exe', spawnImpl: () => { throw new Error('boom') }, logger: { warn() {} } })
 check('openPanel 启动失败安全返回', openThrows.ok === false && openThrows.mode === 'app')
 
+// ---- v0.5.6：提权启动 / 登录流程重启 / 二维码（纯函数 + 护栏） ----
+const launch = napcatLaunchCommand('C:\\NapCat\\bootmain\\launcher.bat')
+check('napcatLaunchCommand 用 PowerShell 提权启动', launch.ok === true && launch.command === 'powershell.exe' && launch.args.includes('-Command'), JSON.stringify(launch))
+check('napcatLaunchCommand 带 -Verb RunAs（launcher.bat 需要管理员）', launch.args.join(' ').includes('-Verb RunAs'), launch.args.join(' '))
+check('napcatLaunchCommand 目标脚本用 call + 引号包住（括号路径不会被 cmd 剥引号）',
+  launch.args.join(' ').includes('call \\"C:\\\\NapCat\\\\bootmain\\\\launcher.bat\\"') || launch.args.join(' ').includes('call "C:\\NapCat\\bootmain\\launcher.bat"'),
+  launch.args.join(' ').slice(0, 220))
+check('napcatLaunchCommand 指定工作目录为脚本所在目录',
+  launch.args.join(' ').includes("WorkingDirectory 'C:\\NapCat\\bootmain'"), launch.args.join(' ').slice(0, 220))
+check('napcatLaunchCommand 用 @() 数组传参（不走裸 /c,\'"path"\' 那条会被剥引号的写法）',
+  launch.args.join(' ').includes("@('/c',") && !launch.args.join(' ').includes("-ArgumentList '/c'"),
+  launch.args.join(' ').slice(0, 220))
+check('napcatLaunchCommand 空路径 → 明确拒绝', napcatLaunchCommand('').ok === false && napcatLaunchCommand('').reason.includes('napcatBat'))
+
+const restart = napcatRestartCommand('C:\\NapCat\\bootmain\\launcher.bat', [11460, 11461])
+check('napcatRestartCommand 按 PID 清理（不发 taskkill /IM）',
+  restart.ok === true && restart.args.join(' ').includes('taskkill /PID 11460 /T /F') && restart.args.join(' ').includes('taskkill /PID 11461 /T /F'),
+  restart.args.join(' ').slice(0, 240))
+// 审查 S1 的核心回归：绝不能按镜像名杀 QQ —— 那会把用户自己开着的 QQ 一起杀掉
+check('绝不出现 taskkill /IM（按名杀会误杀个人 QQ）', !/taskkill \/F \/IM|taskkill \/IM/.test(restart.args.join(' ')), restart.args.join(' ').slice(0, 240))
+check('绝不出现 QQ.exe 字样', !/QQ\.exe/i.test(restart.args.join(' ')), restart.args.join(' ').slice(0, 200))
+check('加载器名单只含 NapCat 系进程，不含 QQ',
+  NAPCAT_LOADER_NAMES.every((name) => !/^qq\.exe$/i.test(name)) && NAPCAT_LOADER_NAMES.some((name) => name.includes('napcat')),
+  JSON.stringify(NAPCAT_LOADER_NAMES))
+check('restartNapcatCommand 没有 PID 时拒绝执行（不退回按名杀）',
+  napcatRestartCommand('C:\\NapCat\\launcher.bat', []).ok === false
+  && napcatRestartCommand('C:\\NapCat\\launcher.bat', []).reason.includes('PID'),
+  napcatRestartCommand('C:\\NapCat\\launcher.bat', []).reason)
+check('napcatRestartCommand 清理后仍会启动 launcher.bat', restart.args.join(' ').includes('call "C:\\NapCat\\bootmain\\launcher.bat"'))
+// 回归：清理与启动必须在**同一个提权进程**里，否则非提权的 taskkill 杀不掉由提权 launcher 拉起的 QQ
+const restartScript = restart.args.join(' ')
+check('清理与启动在同一个提权命令里（不是只把启动提权）',
+  restartScript.includes("Start-Process -FilePath 'cmd.exe'") && restartScript.includes("'/c'")
+  && restartScript.indexOf('taskkill') < restartScript.indexOf('launcher.bat'),
+  restartScript.slice(0, 240))
+check('提权命令里只有一次 Start-Process（不会"没杀掉又拉一个"）',
+  (restartScript.match(/Start-Process /g) ?? []).length === 1, String((restartScript.match(/Start-Process /g) ?? []).length))
+// 审查 G1/G2：cmd 的引号剥离规则 + PowerShell 单引号转义
+const launchScript = launch.args.join(' ')
+check('启动命令用 call "<path>"（括号路径不会被 cmd 剥引号）',
+  launchScript.includes("call \\\"C:\\\\NapCat\\\\bootmain\\\\launcher.bat\\\"") || launchScript.includes('call "C:\\NapCat\\bootmain\\launcher.bat"'),
+  launchScript.slice(0, 220))
+check('启动命令用 @() 数组传参（不是裸的 \'/c\',\'"path"\'）',
+  launchScript.includes("@('/c',") && !launchScript.includes("-ArgumentList '/c','\""), launchScript.slice(0, 220))
+const quoted = napcatLaunchCommand("D:\\O'Brien\\napcat.bat")
+check('路径含单引号时 PowerShell 单引号成对转义（否则脚本解析失败）',
+  quoted.ok === true && quoted.args[4].includes("'D:\\O''Brien'"), quoted.args[4].slice(0, 200))
+check('restartNapcatLogin 是 supervisor 的方法', typeof createSupervisor({ ...config, cwd: dir, napcatBat: 'C:\\NapCat\\bootmain\\launcher.bat' }, {}).restartNapcatLogin === 'function')
+check('napcatRestartCommand 空路径 → 拒绝', napcatRestartCommand('').ok === false)
+
+check('qrStatus 新鲜判定用 QR_STALE_SECONDS',
+  qrStatus('x', 1000, { stat: () => ({ mtimeMs: 1000 - (QR_STALE_SECONDS - 1) * 1000 }) }).fresh === true
+  && qrStatus('x', 1000, { stat: () => ({ mtimeMs: 1000 - (QR_STALE_SECONDS + 1) * 1000 }) }).fresh === false,
+  String(QR_STALE_SECONDS))
+
+{
+  const qrDir = mkdtempSync(join(tmpdir(), 'qq-qr-test-'))
+  const qrFile = join(qrDir, 'qrcode.png')
+  writeFileSync(qrFile, Buffer.from('89504e470d0a1a0a', 'hex'))
+  const sup = createSupervisor({ ...config, cwd: qrDir, napcatQr: qrFile, napcatBat: 'C:\\NapCat\\bootmain\\launcher.bat' }, { now: () => Date.now() })
+  const fresh = await sup.qr()
+  check('supervisor.qr 返回 dataUrl 与提示', fresh.ok === true && fresh.dataUrl.startsWith('data:image/png;base64,') && fresh.hint.length > 0, JSON.stringify({ exists: fresh.exists, hint: fresh.hint }))
+  const missing = await createSupervisor({ ...config, cwd: qrDir, napcatQr: join(qrDir, 'nope.png') }, {}).qr()
+  check('supervisor.qr 没有文件时给中文说明而不是报错',
+    missing.ok === true && missing.exists === false && missing.dataUrl === '' && missing.hint.includes('没有二维码'),
+    missing.hint)
+  rmSync(qrDir, { recursive: true, force: true })
+}
+
+check('ui.html 里有二维码卡片与 token 缺失提示',
+  readFileSync(join(here0, '..', 'control', 'ui.html'), 'utf8').includes('loadQr')
+  && readFileSync(join(here0, '..', 'control', 'ui.html'), 'utf8').includes('地址里没有 token'),
+  'ui.html')
+
 rmSync(dir, { recursive: true, force: true })
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)
+
+// 审查 O1/O2：二维码只认 PNG 魔数；stat 报错要区分"不存在"与"读不到"
+{
+  const qrDir2 = mkdtempSync(join(tmpdir(), 'qq-qr-audit-'))
+  const notPng = join(qrDir2, 'fake.png')
+  writeFileSync(notPng, '{"this":"is json, not a png"}')
+  const supNotPng = createSupervisor({ ...config, cwd: qrDir2, napcatQr: notPng }, { now: () => Date.now() })
+  const r = await supNotPng.qr()
+  check('qr() 拒绝非 PNG 文件（不给前端当图片）', r.ok === true && r.dataUrl === '' && r.hint.includes('不是 PNG'), r.hint)
+  const busy = qrStatus('x', 1, { stat: () => { const e = new Error('busy'); e.code = 'EBUSY'; throw e } })
+  check('qrStatus 区分「读不到」与「不存在」', busy.exists === false && busy.error.includes('EBUSY'), JSON.stringify(busy))
+  const missing = qrStatus('x', 1, { stat: () => { const e = new Error('nope'); e.code = 'ENOENT'; throw e } })
+  check('qrStatus ENOENT 才算真的不存在', missing.exists === false && missing.error === '', JSON.stringify(missing))
+  rmSync(qrDir2, { recursive: true, force: true })
+}

@@ -177,9 +177,30 @@ export function perfReport(events, { chatKey = '', slowest = 5, now = Date.now()
  */
 export function jobsView(runtime, { now = Date.now() } = {}) {
   const jobs = runtime?.jobs ?? {}
-  const broadcast = Array.isArray(jobs.broadcast) ? jobs.broadcast : []
-  const webhook = jobs.webhook ?? { enabled: false, port: 0, sources: [] }
-  const autoHeal = jobs.autoHeal ?? { enabled: false, commandConfigured: false }
+  // 元素级畸形也要挡住：`broadcast: [null]` 曾让整个 /api/jobs 500（审查提的 G6）。
+  const broadcast = (Array.isArray(jobs.broadcast) ? jobs.broadcast : []).filter((job) => job && typeof job === 'object')
+  const webhookRaw = jobs.webhook && typeof jobs.webhook === 'object' ? jobs.webhook : {}
+  const autoHealRaw = jobs.autoHeal && typeof jobs.autoHeal === 'object' ? jobs.autoHeal : {}
+  // 控制台侧**自己再挑一次字段**，不整对象透传：今天 writer 有白名单不代表明天还有（审查提的 G7）。
+  const webhook = {
+    enabled: webhookRaw.enabled === true,
+    port: Number(webhookRaw.port) || 0,
+    sources: (Array.isArray(webhookRaw.sources) ? webhookRaw.sources : [])
+      .filter((source) => source && typeof source === 'object')
+      .map((source) => ({
+        name: String(source.name ?? ''),
+        received: Number(source.received) || 0,
+        dropped: Number(source.dropped) || 0,
+        lastAt: Number(source.lastAt) || 0,
+      })),
+  }
+  const autoHeal = {
+    enabled: autoHealRaw.enabled === true,
+    commandConfigured: autoHealRaw.commandConfigured === true,
+    cooldownSeconds: Number(autoHealRaw.cooldownSeconds) || 0,
+    maxPerHour: Number(autoHealRaw.maxPerHour) || 0,
+    attemptsLastHour: Number(autoHealRaw.attemptsLastHour) || 0,
+  }
   const injection = runtime?.injection ?? {}
   const describeNext = (nextAt) => {
     const at = Number(nextAt)
@@ -232,8 +253,8 @@ export function jobsView(runtime, { now = Date.now() } = {}) {
  */
 export function groupsView(runtime, { now = Date.now() } = {}) {
   const features = runtime?.features ?? {}
-  const sessions = Array.isArray(runtime?.sessions) ? runtime.sessions : []
-  const jobs = Array.isArray(runtime?.jobs?.broadcast) ? runtime.jobs.broadcast : []
+  const sessions = (Array.isArray(runtime?.sessions) ? runtime.sessions : []).filter((session) => session && typeof session === 'object')
+  const jobs = (Array.isArray(runtime?.jobs?.broadcast) ? runtime.jobs.broadcast : []).filter((job) => job && typeof job === 'object')
   // 白名单原文在运行快照的 `replay` 块里（离线回放需要它才能判白名单），`features` 里只有计数。
   // 控制台的 supervisor 会把这一块重新命名成 `replayHints`，所以两种形状都认。
   const allowGroupsRaw = runtime?.replay?.allowGroups ?? runtime?.replayHints?.allowGroups

@@ -258,6 +258,17 @@
   </section>
 
   <section class="card" style="grid-column:1/-1">
+    <h2>登录二维码 <span class="meta" id="qrMeta">（NapCat 只在 QQ 侧产出新码时刷新一次；过期后文件就不再变化，看时间比看"文件在不在"可靠）</span></h2>
+    <div class="row">
+      <button onclick="loadQr()">刷新二维码</button>
+      <button onclick="act('/api/napcat/restart')">重启登录流程（会结束 QQ/NapCat 后重开）</button>
+      <span class="meta" id="qrState"></span>
+    </div>
+    <div style="margin-top:8px"><img id="qrImg" alt="登录二维码" style="display:none;width:220px;height:220px;image-rendering:pixelated;background:#fff;padding:6px;border-radius:8px" /></div>
+    <pre id="qrHint">（点「刷新二维码」）</pre>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
     <h2>日志文件</h2>
     <div class="row">
       <button onclick="setLog('hostOut')">宿主 stdout</button>
@@ -282,6 +293,18 @@
 
 <script>
 const token = new URLSearchParams(location.search).get('token') || '';
+// 地址里没有 token 时，直接告诉用户为什么满屏都是「token 无效」，而不是让他自己猜：
+// 控制台与宿主 3080 是**两套** token，宿主每次重启还会换新的。
+if (!token) {
+  const box = document.createElement('section');
+  box.className = 'card badbox';
+  box.style.gridColumn = '1/-1';
+  box.innerHTML = '<h2>地址里没有 token</h2>'
+    + '<div>控制台的每个接口都需要 token，所以下面所有面板都会显示「token 无效」。请用启动控制台时窗口里打印的那行完整地址打开，例如：</div>'
+    + '<div style="margin-top:6px"><code>http://127.0.0.1:' + (location.port || '8799') + '/?token=&lt;控制台 token&gt;</code></div>'
+    + '<div style="margin-top:6px" class="meta">控制台 token 固定保存在 <code>qq-control.json</code> 里；<b>宿主 3080 的 token 每次重启都会变</b>，两者不能混用。</div>';
+  document.body.insertBefore(box, document.body.firstChild);
+}
 // stream=0 → 静态模式：不建立 SSE 长连接（弱网/远程查看/自动截图时用）。
 const streamMode = new URLSearchParams(location.search).get('stream') === '0' ? 'off' : 'on';
 let currentLog = 'hostOut';
@@ -443,6 +466,18 @@ function render(status) {
   const bridgeAlive = (status.runtime?.ageSeconds ?? 9999) < 900;
   bridgePill.textContent = '桥：' + (bridgeAlive ? '活跃' : '无快照');
   bridgePill.className = 'pill ' + (bridgeAlive ? 'on' : 'off');
+  // 扫码页按钮：6099 没在监听时给的是死链，这里直接禁用并说明原因。
+  const link = document.getElementById('napcatLink');
+  if (link) {
+    const napcatPort = (status.ports || []).find((item) => item.name === 'napcat');
+    const up = napcatPort?.listening === true;
+    const btn = link.querySelector('button');
+    link.href = up ? 'http://127.0.0.1:' + napcatPort.port + '/' : '#';
+    if (btn) {
+      btn.disabled = !up;
+      btn.textContent = up ? '打开 NapCat 扫码页' : '扫码页不可用（NapCat 未运行）';
+    }
+  }
   const napcat = status.processes?.napcatLoaders || [];
   const qqClients = status.processes?.qqClients || [];
   const managed = status.processes?.napcatManaged === true;
@@ -840,6 +875,24 @@ async function replayDiff() {
   }
 }
 
+async function loadQr() {
+  const img = document.getElementById('qrImg');
+  const hint = document.getElementById('qrHint');
+  const state = document.getElementById('qrState');
+  state.textContent = '读取中…';
+  try {
+    const r = await api('/api/qr');
+    if (r.ok !== true) { state.textContent = ''; hint.textContent = '⚠️ ' + (r.reason || '二维码不可用'); return; }
+    if (r.dataUrl) { img.src = r.dataUrl; img.style.display = ''; } else { img.style.display = 'none'; }
+    const ago = r.exists ? (r.ageSeconds >= 60 ? Math.round(r.ageSeconds / 60) + ' 分钟前' : r.ageSeconds + ' 秒前') : '—';
+    state.textContent = r.exists ? (r.fresh ? '✅ 新鲜（' + ago + '）' : '⚠️ 已过期（' + ago + '）') : '⚠️ 还没有二维码';
+    hint.textContent = r.hint || '';
+  } catch (error) {
+    state.textContent = '';
+    hint.textContent = '⚠️ ' + error.message;
+  }
+}
+
 async function searchArchive() {
   const q = document.getElementById('archQ').value.trim();
   const days = Number(document.getElementById('archDays').value) || 7;
@@ -872,6 +925,7 @@ loadHistory().then(() => startStream());
 loadLog(true);
 loadInbox(true);
 loadScenarios();
+loadQr();
 loadArchive();
 loadPerf();
 loadJobs();

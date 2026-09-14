@@ -117,12 +117,76 @@ export function qrStatus(file, now = Date.now(), { stat = statSync } = {}) {
   try {
     const info = stat(file)
     const ageSeconds = Math.max(0, Math.round((now - info.mtimeMs) / 1000))
-    return { exists: true, ageSeconds, fresh: ageSeconds < 300, mtimeMs: info.mtimeMs }
-  } catch {
-    return { exists: false, ageSeconds: -1, fresh: false, mtimeMs: 0 }
+    return { exists: true, ageSeconds, fresh: ageSeconds < 300, mtimeMs: info.mtimeMs, error: '' }
+  } catch (error) {
+    // 区分"文件不存在"和"存在但读不到"（EBUSY/EACCES/EPERM）。
+    // 一律当成"不存在"会把真实原因掩盖成"NapCat 没在运行"（审查提的 O1）。
+    const code = error?.code ?? ''
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { exists: false, ageSeconds: -1, fresh: false, mtimeMs: 0, error: '' }
+    return { exists: false, ageSeconds: -1, fresh: false, mtimeMs: 0, error: `${code || 'stat 失败'}：${error?.message ?? ''}`.slice(0, 160) }
   }
 }
 
+/** 二维码超过这个秒数就认为过期（QQ 的码大约 1～2 分钟失效，这里给宽一点）。 */
+export const QR_STALE_SECONDS = 300
+
+/**
+ * NapCat 加载器进程名（重启时**只允许**结束这些，以及它们 /T 带出来的子进程）。
+ *
+ * 为什么不再有 `QQ.exe`：按镜像名杀 QQ 会连**用户自己的 QQ 客户端**一起杀掉
+ * （真机上就有 `D:\yingyong(应用）\QQ.exe` 在跑）。加载器的子进程用 `taskkill /PID … /T`
+ * 连带结束即可，不需要、也不允许按名字杀 QQ。
+ */
+export const NAPCAT_LOADER_NAMES = ['napcatwinbootmain.exe', 'napcat.exe', 'napcatshell.exe']
+
+/** PowerShell 单引号字符串转义（路径里有 `'` 时脚本会解析失败，必须成对写）。 */
+function psQuote(value) {
+  return `'${String(value ?? '').replace(/'/g, "''")}'`
+}
+
+/**
+ * 组装「提权启动 NapCat」的命令（纯函数，不执行，便于单测）。
+ *
+ * 为什么必须提权：NapCat 的 launcher.bat 自己会检查管理员权限，非管理员时它靠
+ * `wt.exe` 自提权重启；实测这台机器上那条路会静默失败（启动器秒退、什么都不做），
+ * 所以由控制台主动 `-Verb RunAs` 拉起，代价只是用户要点一次 UAC。
+ *
+ * 为什么用 `call "<path>"` 而不是 `"<path>"`：cmd 有一条众所周知的引号剥离规则——
+ * 命令行里恰好两个引号、且引号内不是"存在的可执行文件"时会把首尾引号去掉。
+ * 真机验证过：`cmd /c "C:\Program Files (x86)\NapCat\bootmain\napcat.bat"` 会因路径里的
+ * 括号被判成「不是可执行文件」而**静默不执行**（而 startDetached 丢弃了输出，界面照样显示成功）。
+ * 加 `call` 后引号不会再被剥离。
+ */
+export function napcatLaunchCommand(bat, { powershell = 'powershell.exe' } = {}) {
+  const path = String(bat ?? '').trim()
+  if (path === '') return { ok: false, command: '', args: [], reason: '未配置 NapCat 启动脚本（napcatBat）' }
+  const inner = `call "${path.replace(/"/g, '')}"`
+  const script = `Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c',${psQuote(inner)}) -WorkingDirectory ${psQuote(dirname(path))} -Verb RunAs`
+  return { ok: true, command: powershell, args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], reason: '' }
+}
+
+/**
+ * 组装「重启登录流程」的命令：先结束 NapCat 加载器（连同它的子进程），再重新走启动脚本。
+ *
+ * 三条硬规则（每条都对应一次真机/审查结论）：
+ * 1. **按 PID 杀，不按镜像名杀**：`taskkill /IM QQ.exe` 会连用户自己的 QQ 一起杀
+ *    （真机上就有非提权的个人 QQ 在跑）；只对加载器 PID 用 `/T /F`，子进程连带结束。
+ * 2. **必须拿到加载器 PID**：拿不到就拒绝执行（在 supervisor 那层拦），绝不退回"按名杀"。
+ * 3. **清理与启动在同一个提权进程里**：QQ 是提权拉起的，非提权 taskkill 会被拒绝访问，
+ *    结果就是"旧的没杀掉又拉一个新的"。
+ */
+export function napcatRestartCommand(bat, pids, { powershell = 'powershell.exe' } = {}) {
+  const path = String(bat ?? '').trim()
+  if (path === '') return { ok: false, command: '', args: [], reason: '未配置 NapCat 启动脚本（napcatBat）' }
+  const list = (Array.isArray(pids) ? pids : [pids]).map((pid) => Number(pid)).filter((pid) => Number.isFinite(pid) && pid > 0)
+  if (list.length === 0) {
+    return { ok: false, command: '', args: [], reason: '没有拿到 NapCat 加载器的 PID，拒绝执行（按进程名杀会把你自己开的 QQ 也杀掉）' }
+  }
+  const kills = list.map((pid) => `taskkill /PID ${pid} /T /F`).join(' & ')
+  const inner = `${kills} & timeout /t 3 >nul & call "${path.replace(/"/g, '')}"`
+  const script = `Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c',${psQuote(inner)}) -WorkingDirectory ${psQuote(dirname(path))} -Verb RunAs`
+  return { ok: true, command: powershell, args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], reason: '', pids: list }
+}
 // ---------------------------------------------------------------- actions ----
 
 /** Default execFile wrapper (promise, never throws). */
@@ -314,16 +378,94 @@ export function createSupervisor(config, deps = {}) {
   async function startNapcat() {
     if (!config.napcatBat) return { ok: false, reason: '未配置 NapCat 启动脚本（napcatBat）' }
     if (!fileExists(config.napcatBat, deps)) return { ok: false, reason: `NapCat 启动脚本不存在：${config.napcatBat}` }
+    const plan = napcatLaunchCommand(config.napcatBat)
+    if (plan.ok !== true) return { ok: false, reason: plan.reason }
     try {
-      const { pid } = startDetached({
-        command: 'cmd.exe',
-        args: ['/c', 'start', '', config.napcatBat],
-        cwd: config.cwd || undefined,
-        spawnImpl,
-      })
-      return { ok: true, pid, reason: '已请求启动 NapCat（若窗口未出现，请用管理员身份运行控制台）' }
+      const { pid } = startDetached({ command: plan.command, args: plan.args, cwd: config.cwd || undefined, spawnImpl })
+      // 旧实现跑的是 napcat.bat（无参数、不提权），实测秒退什么都不做；提示里把该做的事说清楚。
+      return { ok: true, pid, reason: '已请求提权启动 NapCat：请在 UAC 弹窗点「是」，二维码刷新后 2 分钟内扫掉' }
     } catch (error) {
       return { ok: false, reason: `启动失败：${error.message}` }
+    }
+  }
+
+  /**
+   * 重启登录流程：结束 NapCat 加载器（连同其子进程）后重新走启动脚本。
+   *
+   * 护栏（按审查结论收紧，旧版按镜像名杀 QQ 会误杀用户自己的 QQ）：
+   * 1. 启动脚本必须存在（否则"先杀后启失败"，什么都不剩）；
+   * 2. **必须拿到加载器 PID**：拿不到就拒绝，绝不退回按进程名杀；
+   * 3. 6099 只当提示，不作放行依据（别的程序也可能占用它）；
+   * 4. 只对这些 PID 用 taskkill /T，个人 QQ 客户端不在名单里、也不会被按名杀掉。
+   */
+  async function restartNapcatLogin() {
+    if (!config.napcatBat) return { ok: false, reason: '未配置 NapCat 启动脚本（napcatBat）' }
+    if (!fileExists(config.napcatBat, deps)) return { ok: false, reason: `NapCat 启动脚本不存在：${config.napcatBat}（先杀后启会什么都起不来，已拒绝）` }
+    let loaders = []
+    try {
+      const snapshot = await status()
+      loaders = (snapshot.processes?.napcatLoaders ?? []).filter((entry) => entry && Number.isFinite(entry.pid) && entry.pid > 0)
+    } catch (error) {
+      return { ok: false, reason: `无法确认 NapCat 状态，拒绝重启（避免误杀你自己的 QQ）：${error.message}` }
+    }
+    if (loaders.length === 0) {
+      return {
+        ok: false,
+        reason: `没有检测到 NapCat 加载器进程（${NAPCAT_LOADER_NAMES.join(' / ')}），拒绝执行：按进程名杀 QQ 会连你自己开的 QQ 一起杀掉。请改用「启动 NapCat」，或在任务管理器里结束 NapCatWinBootMain.exe 后再启动`,
+      }
+    }
+    const plan = napcatRestartCommand(config.napcatBat, loaders.map((entry) => entry.pid))
+    if (plan.ok !== true) return { ok: false, reason: plan.reason }
+    try {
+      const { pid } = startDetached({ command: plan.command, args: plan.args, cwd: config.cwd || undefined, spawnImpl })
+      const names = loaders.map((entry) => `${entry.name ?? 'napcat'}#${entry.pid}`).join('、')
+      return { ok: true, pid, reason: `已请求提权重启登录流程：只结束 ${names}（连同其子进程），不会碰你自己的 QQ。UAC 点「是」后等二维码刷新，2 分钟内扫掉` }
+    } catch (error) {
+      return { ok: false, reason: `重启失败：${error.message}` }
+    }
+  }
+
+  /**
+   * 登录二维码：控制台直接画出图片，并说清"这张码是几秒前生成的"。
+   * 为什么要显示新鲜度：NapCat 只在 QQ 侧产出新码时镜像一次，过期后文件就不再变化，
+   * 光看"文件存在"会误以为还能扫（实测：文件是 8 分钟前的旧码）。
+   */
+  function qr({ maxBytes = 512 * 1024 } = {}) {
+    const file = config.napcatQr ?? ''
+    const info = qrStatus(file, now(), deps.stat ? { stat: deps.stat } : undefined)
+    const base = { ...info, path: file, staleSeconds: QR_STALE_SECONDS }
+    if (!info.exists) {
+      return {
+        ok: true,
+        ...base,
+        dataUrl: '',
+        hint: info.error
+          ? `读取二维码文件失败（${info.error}）——不是"没有二维码"，请检查文件是否被占用/权限`
+          : '还没有二维码文件：NapCat 没在运行，或还没走到登录界面',
+      }
+    }
+    try {
+      // 先看大小再读：坏掉/超大的文件不该被整块读进内存（这也是审计里补的一刀）。
+      const size = (deps.stat ? deps.stat(file) : statSync(file)).size
+      if (Number.isFinite(size) && size > maxBytes) {
+        return { ok: true, ...base, dataUrl: '', hint: `二维码文件过大（${Math.round(size / 1024)} KB），请在文件管理器里打开：${file}` }
+      }
+      const buffer = (deps.readFile ?? readFileSync)(file)
+      if (buffer.length > maxBytes) {
+        return { ok: true, ...base, dataUrl: '', hint: `二维码文件过大（${Math.round(buffer.length / 1024)} KB），请在文件管理器里打开：${file}` }
+      }
+      // 只认真正的 PNG（8 字节魔数）；否则把任意文件当图片回给前端（审查提的 O2）。
+      const isPng = buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47
+      if (!isPng) {
+        return { ok: true, ...base, dataUrl: '', hint: `这个文件不是 PNG 图片（${file}），请确认 napcatQr 配置指向二维码文件` }
+      }
+      const dataUrl = `data:image/png;base64,${buffer.toString('base64')}`
+      const hint = info.ageSeconds > QR_STALE_SECONDS
+        ? `这张二维码是 ${Math.round(info.ageSeconds / 60)} 分钟前生成的，已经过期——扫之前请先点「重启登录流程」`
+        : `这张二维码是 ${info.ageSeconds} 秒前生成的，请尽快扫（QQ 的码约 1～2 分钟失效）`
+      return { ok: true, ...base, dataUrl, hint }
+    } catch (error) {
+      return { ok: true, ...base, dataUrl: '', hint: `读取二维码失败：${error.message}` }
     }
   }
 
@@ -334,7 +476,11 @@ export function createSupervisor(config, deps = {}) {
     // 个人 QQ 客户端（没有 NapCat 加载器时的 QQ.exe）绝不触碰。
     for (const entry of snapshot.processes.napcatLoaders ?? []) targets.set(entry.pid, entry.name)
     const napcatPort = portRow(snapshot, 'napcat')
-    if (napcatPort?.listening && napcatPort.pid) targets.set(napcatPort.pid, napcatPort.process)
+    // 6099 在听**不等于**那就是 NapCat：别的程序也可能占用它（审查复现过 nginx 占用 6099）。
+    // 所以只有进程名落在 NapCat 加载器名单里才把它算作目标，否则只提示、不动手。
+    if (napcatPort?.listening && napcatPort.pid && NAPCAT_LOADER_NAMES.includes(String(napcatPort.process ?? '').toLowerCase())) {
+      targets.set(napcatPort.pid, napcatPort.process)
+    }
     if (targets.size === 0) {
       const personal = (snapshot.processes.qqClients ?? []).length
       return {
@@ -732,6 +878,7 @@ export function createSupervisor(config, deps = {}) {
 
   return {
     status, startHost, stopHost, freePort, startNapcat, stopNapcat, startTts, stopTts, stopAll,
+    restartNapcatLogin, qr,
     traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance,
     inboxList, replay, inject, clearQueue, archiveStats, archiveSearch,
     perf, jobsView, groups,
