@@ -8,6 +8,9 @@ qq-*/
 qq-*.json
 qq-*.jsonl
 qq-*.log
+# 原子写盘的临时文件是隐藏名（writeJsonAtomic 写的是 `.m1a2b3-x9y8z7.tmp`）：
+# 内容与正式产物完全相同（qq-engage.json 这类含 QQ 号），写一半崩掉就会留在工作目录里。
+.*.tmp
 # 其它扩展名的产物（敏感词表是 .txt；留出 csv 以免将来新增产物再次漏网）
 qq-*.txt
 qq-*.csv

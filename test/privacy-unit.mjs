@@ -70,6 +70,10 @@ const RUNTIME_ARTIFACTS = [
   'qq-stats/g_1.json', 'qq-checkin/u_1.json', 'qq-points/g_1.json', 'qq-todos/g_1.json',
   'qq-memory/g_1.json', 'qq-media/a.png', 'qq-images/a.png', 'qq-replies/a.png', 'qq-tts/a.mp3',
   'qq-files/a.txt', 'qq-exports/a.md', 'qq-faces/list.json', 'qq-badwords.txt',
+  'qq-engage.json', 'qq-broadcast.json',
+  // writeJsonAtomic 的临时文件是**隐藏名** `.m1a2b3-x9y8z7.tmp`（写一半崩掉就会留下，
+  // 里面是完整的 JSON——qq-engage.json 这类内容含 QQ 号）→ 必须同 .json 一样被忽略。
+  '.m1a2b3-x9y8z7.tmp',
 ]
 
 // ------------------------------------------------------------------ 读文件 --

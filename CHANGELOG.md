@@ -1,5 +1,47 @@
 # 更新日志 / Changelog
 
+## v0.5.3（2026-09-14 发布）— 点一下就完事 / One tap
+
+> 本版主题：**轻互动**。戳一戳、正在输入、表情回应、点赞、标记已读——用真实存在的能力把"群里的小动作"做成一等公民。全部默认关闭；所有写操作过 ActionGate + 出站配额；**注入/回放回合一律不写 QQ**（`injectDryRun: false` 的真发模式除外）。
+
+### 先做真机探针，再动代码（本版最重要的结论是否定的）
+
+- 按钮类能力**没有靠猜**：直接读本机安装的 NapCat 实现包（`bootmain/napcat.mjs`，QQ 9.9.32-50969），逐个确认 action 名、参数 schema 与入站事件字段，结论写进 `lib/engage.js` 文件头并由 `test/engage-bridge-unit.mjs` 逐条钉住
+- **探针结论：这个构建发不了内联按钮**——`"keyboard"` / `"button"` 段名在整个 bundle 里出现 **0 次**（`"text"`/`"json"`/`"markdown"`/`"poke"` 等真实段名都在），OB11 段枚举里只有 `click_inline_keyboard_button`（点**别人**发的按钮）。所以本版**没有做**按钮面板，而是把「点一下就完事」落到真实可用的四种轻互动上
+- 确认可用：`group_poke` / `friend_poke` / `send_poke`、`set_input_status`、`set_msg_emoji_like`、`get_emoji_likes`、`fetch_emoji_like`、`send_like`、`mark_group_msg_as_read` / `mark_private_msg_as_read` / `mark_msg_as_read`；入站 `notice.group_msg_emoji_like`（`message_id`/`likes`/`is_add`/`message_seq`）、`notice.notify/poke`、`notice.notify/input_status`
+
+### 互动能力（`engageEnabled` 总开关 + 每个能力独立子开关，全部默认关）
+
+- **主动戳一戳** `/戳 @某人`（管理员）：`pokeCommandEnabled`，白名单 + ActionGate + 每小时配额 `pokePerHour`（默认 5）三层；命令一律**空白分隔**，`/戳12345` 不认
+- **被戳回戳**：`pokeBackEnabled` 时被戳**真的戳回去**（`group_poke`/`friend_poke`），可配 `pokeBackText` 同时回一句话；仍受既有 `pokeEnabled` 总开关与冷却约束（`pokeEnabled=false` 时 trace 会明确点名）
+- **正在输入**：`typingEnabled` 私聊里模型动脑前发 `set_input_status`（event_type 1），回复落地即撤销（2）。真机探针确认该 action **只拼 C2C 私聊**，群聊里如实记 reason 而不是白发一次注定失败的调用
+- **自动贴表情**：`emojiLikeEnabled` + `emojiLikeId`（默认 `128077`＝👍，`emoji_id` 就是十进制码点，`emojiGlyph` 直接还原成真表情）；`emojiLikeMentionOnly` 默认只对"叫我/引用我"的消息生效
+- **表情回应统计**：`reactionStatsEnabled` 记录 `group_msg_emoji_like`。`/赞榜` 看本会话被回应最多的消息（本地统计 + 原文摘要），`/谁赞了 <消息ID>`（或引用一条消息）看**谁**点的——群里走真机 `get_emoji_likes` 拿实时名单，失败或注入回合回落本地统计并**标注数据来源**（`来源：本地统计` / `来源：get_emoji_likes 实时`）
+- **点赞**：`sendLikeEnabled` → `/点赞 [@某人]`，一次 `sendLikeTimes`（默认 10，QQ 客户端上限），每目标每天 `sendLikePerDay`（默认 3）
+- **标记已读**：`markReadEnabled` → 收到消息顺手 `mark_*_msg_as_read`（按**会话**标记，不按单条消息），每分钟 `markReadPerMinute` 限流
+
+### 红线（v0.4「一切皆可调试」六条硬约束在本版的落点）
+
+- **`set_msg_emoji_like` 只带 `message_id`、没有任何会话键**，scoped dry-run 拦不住它 → 桥里自己判 `__injected`/`__replayed` 并给出真实 reason；`test/engage-bridge-unit.mjs` 逐条断言注入回合 **0 出站**
+- 注入回合里 `/赞榜` 是**纯本地读**，照常回答且 trace 写明"只读本地 JSON，不访问 QQ"；`/谁赞了` 不调 QQ、回落本地并说明原因
+- 每个开关的"关着"分支都有真实 reason（`主动戳未启用（engageEnabled=true，pokeCommandEnabled=false）`），配额拒绝也带数量：`戳一戳 已达每小时上限（5/5 次）`
+- 注入口径与既有 `injectDryRun` 一致：默认干跑拦截，`injectDryRun: false`（"注入并真发"）时照常执行
+
+### 顺手修掉的两个真缺陷（都是 v0.5.2 的，且都属于"静默失效"）
+
+- **状态持久化从来没生效过**：桥对 `JsonStore` 调用的是不存在的 `load()`/`save()`（真实 API 是 `read()`/`write()`），异常被 `try/catch` 吞掉，于是**播报去重与统计跨重启丢失**、且毫无提示。已修全部调用点，并补上跨重启回归（`unattended-unit` D21 / `engage-bridge-unit` G1–G4）
+- **互动配额恢复打空**：`#loadEngageState()` 在配额对象构造**之前**被调用，`restore` 抛错同样被吞掉 → 每小时配额跨重启失效。已调整顺序并加可选链防御
+- 附带：运行快照在记账后不刷新（控制台的表情计数永远停在启动时的 0）→ 记账后按既有 2s 节流补写一次
+
+### 新增配置键（默认值）
+
+`engageEnabled`(false) `pokeBackEnabled`(false) `pokeBackText`("") `pokeCommandEnabled`(false) `pokePerHour`(5) `typingEnabled`(false) `emojiLikeEnabled`(false) `emojiLikeId`("128077") `emojiLikeMentionOnly`(true) `emojiLikePerHour`(20) `reactionStatsEnabled`(false) `reactionStatsFile`("") `sendLikeEnabled`(false) `sendLikeTimes`(10) `sendLikePerDay`(3) `markReadEnabled`(false) `markReadPerMinute`(10) —— 配置键总数 187 → **204**，`test/static-unit.mjs` 的双向校验（schema ↔ 代码读取，含"没有死开关"）全部通过。
+
+### 测试
+
+- 新增 2 套：`engage-unit`（109，纯模块：planner 参数形状、表情统计去重/撤回/排行/落盘、配额三档窗口、榜单渲染、零依赖与"不自己发 QQ"红线）、`engage-bridge-unit`（90，桥层：五类新 API 各一条"注入回合 0 出站"、命令空白分隔、配额与闸门、两种注入模式、跨重启持久化）
+- 全量 **51 套 / 3062 断言全绿**（v0.5.2 为 49 套 / 2860）
+
 ## v0.5.2（2026-09-14 发布）— 无人值守 / Unattended
 
 > 本版主题：**无人值守**。三件事——外部事件能主动进群、定时内容自己发、掉线了自己爬起来。全部默认关闭，写操作与出站一律走既有的闸门/限流/trace 体系。

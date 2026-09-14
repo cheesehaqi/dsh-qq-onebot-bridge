@@ -910,6 +910,31 @@ function healTraces(t) { return t.traceStage('heal') }
   t.stop()
 }
 
+// ---------------------------------------------------------------------------
+// D21. 回归：播报状态真的落盘、并且重启后读得回来
+//   （补这个回归的原因：桥曾经调用 JsonStore 上不存在的 load()/save()，
+//    异常被 try/catch 吞掉 → 去重与统计的持久化从来没生效过，而且完全无感。）
+// ---------------------------------------------------------------------------
+{
+  const cwd = freshCwd()
+  const jobs = [{ id: 'persist', kind: 'mc', chat: 'g:2002', enabled: true, everyMinutes: 5, address: '127.0.0.1:1' }]
+  const t1 = makeBridge({ broadcastEnabled: true, broadcastJobs: jobs, cwd })
+  const first = await t1.bridge.broadcast.runOnce('persist', { manual: true })
+  check('D21 手动触发一次播报（失败也算一次运行）', typeof first?.ok === 'boolean', brief(first))
+  const stateFile = join(cwd, 'qq-broadcast.json')
+  const written = readFileSync(stateFile, 'utf8')
+  check('D21 状态确实写到了 qq-broadcast.json', written.includes('persist'), brief(written).slice(0, 160))
+  const before = t1.bridge.broadcast.snapshot().jobs.persist
+  t1.stop()
+
+  const t2 = makeBridge({ broadcastEnabled: true, broadcastJobs: jobs, cwd })
+  const after = t2.bridge.broadcast.snapshot().jobs.persist
+  check('D21 重启后 lastAt 被恢复（不是从零开始）',
+    Number(after.lastAt) === Number(before.lastAt) && after.runs === before.runs,
+    `before=${brief(before)} after=${brief(after)}`)
+  t2.stop()
+}
+
 for (const dir of dirs) {
   try { rmSync(dir, { recursive: true, force: true }) } catch { /* 临时目录清不掉不影响结论 */ }
 }

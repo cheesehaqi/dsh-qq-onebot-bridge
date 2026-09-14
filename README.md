@@ -264,7 +264,7 @@ ws://127.0.0.1:6700/
 
 ## 测试
 
-49 个单测脚本，共 2860 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
+51 个单测脚本，共 3062 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
 
 ```sh
 # 1) 单元测试：不联网、不起宿主，纯逻辑 + 临时目录（推荐每次改完都跑）
@@ -465,6 +465,35 @@ QQ 客户端断开时，按配置的启动命令把它拉起来：
 
 新增配置键（括号内为默认值）：`webhookEnabled`(false) `webhookPort`(8798) `webhookSources`([]) `webhookRatePerMinute`(30) `webhookMaxBodyBytes`(65536) `broadcastEnabled`(false) `broadcastJobs`([]) `broadcastStateFile`("") `autoHealEnabled`(false) `autoHealCommand`("") `autoHealCooldownSeconds`(300) `autoHealMaxPerHour`(3)。
 
+## 互动：点一下就完事（v0.5.3）
+
+总开关 `engageEnabled`（默认 false），下面每个能力还有自己的子开关，全部默认关。所有写操作都过 ActionGate + 出站配额，且**注入/回放回合一律不写 QQ**（`injectDryRun: false` 的"真发模式"除外）。
+
+### 先做了真机探针，再写代码
+
+按钮这类能力**没有猜**：直接读本机装的那份 NapCat（`bootmain/napcat.mjs`，QQ 9.9.32-50969），逐个确认 action 名、参数形状与入站事件。结论写进了 `lib/engage.js` 的文件头，也被 `test/engage-bridge-unit.mjs` 逐条钉住。
+
+探针结论里最重要的一条是**否定**：这个构建**发不了内联按钮**——`"keyboard"` / `"button"` 段名在整个 bundle 里出现 **0 次**，OB11 段枚举只有 text/image/music/video/record/file/at/reply/json/face/mface/markdown/node/forward/xml/poke/dice/rps/miniapp/contact/location/onlinefile/flashtransfer；只有 `click_inline_keyboard_button`（点**别人**发的按钮）。所以「点一下就完事」用的是真实可用的轻互动，而不是做一个注定发不出去的按钮面板。
+
+| 能力 | 开关 | action（已探针确认） | 说明 |
+|---|---|---|---|
+| 主动戳一戳 | `pokeCommandEnabled` | `group_poke` / `friend_poke` | `/戳 @某人` 或 `/戳 <QQ号>`（管理员）。白名单 + ActionGate + 每小时配额三层 |
+| 被戳回戳 | `pokeBackEnabled` | 同上 | 被戳时**真的戳回去**，可配 `pokeBackText` 同时回一句话；仍受既有 `pokeEnabled` 总开关与冷却约束 |
+| 正在输入 | `typingEnabled` | `set_input_status` | 私聊里模型动脑前发「正在输入」、回复落地即撤销。真机探针：该 action **只支持 C2C 私聊**，群聊会如实记 reason 而不是白发一次注定失败的调用 |
+| 自动贴表情 | `emojiLikeEnabled` + `emojiLikeId` | `set_msg_emoji_like` | 收到消息贴一个表情（默认 👍＝码点 128077）。`emojiLikeMentionOnly` 默认只对"叫我/引用我"的消息生效，避免刷屏 |
+| 表情回应统计 | `reactionStatsEnabled` | 入站 `notice.group_msg_emoji_like` | `/赞榜` 看本会话被回应最多的消息；`/谁赞了 <消息ID>`（或引用一条消息）看**谁**点的 |
+| 点赞 | `sendLikeEnabled` | `send_like` | `/点赞 [@某人]`，一次 `sendLikeTimes`(10，QQ 上限) 个，每天每目标 `sendLikePerDay` 次 |
+| 标记已读 | `markReadEnabled` | `mark_group_msg_as_read` / `mark_private_msg_as_read` | 收到消息顺手把会话标已读，不再堆红点 |
+
+几个刻意的设计点：
+
+- **`/谁赞了` 有两份数据**：本地统计（永远可用，标注"来源：本地统计"）与真机 `get_emoji_likes`（群里可用，标注"来源：get_emoji_likes 实时"）。注入回合不调 QQ，用本地那份并说明原因。
+- **`/赞榜` 是纯本地读**：不做任何 QQ 调用，所以注入/回放回合里它照常回答，trace 里写明"只读本地 JSON，不访问 QQ"。
+- **表情 ID 直接显示成真表情**：`emoji_id` 是十进制码点，`128077 → 👍`，无需查表。
+- **配额拒绝也带真实信息**：`戳一戳 已达每小时上限（5/5 次）`，不是一句"操作失败"。
+
+新增配置键（括号内为默认值）：`engageEnabled`(false) `pokeBackEnabled`(false) `pokeBackText`("") `pokeCommandEnabled`(false) `pokePerHour`(5) `typingEnabled`(false) `emojiLikeEnabled`(false) `emojiLikeId`("128077") `emojiLikeMentionOnly`(true) `emojiLikePerHour`(20) `reactionStatsEnabled`(false) `reactionStatsFile`("") `sendLikeEnabled`(false) `sendLikeTimes`(10) `sendLikePerDay`(3) `markReadEnabled`(false) `markReadPerMinute`(10)。互动状态（表情统计 + 三个配额）落在 `qq-engage.json`，跨重启不丢。
+
 ## 独立控制台（control/，v0.4.0）
 
 插件自带一个**独立的本地运维端**，不依赖 DSH 桌面端：宿主挂掉时它照常可用，端口与进程一目了然。
@@ -508,10 +537,10 @@ npm run control            # 或 node control/bin/qq-control.mjs --open
 
 最近五个版本（始终滚动展示）：
 
+- **v0.5.3** — 「点一下就完事 / One tap」：**先做真机探针再写代码**——直接读本机 NapCat 实现包（`bootmain/napcat.mjs`，QQ 9.9.32-50969）确认能力面，其中最重要的是一条**否定结论**：该构建 `"keyboard"`/`"button"` 段名出现 **0 次**，**发不了内联按钮**，所以本版没做按钮面板，而是把轻互动真正落地。新增：**主动戳一戳** `/戳 @某人`（管理员，`group_poke`/`friend_poke`）、**被戳回戳**（真的戳回去，可配文案）、**私聊正在输入**（`set_input_status`，探针确认只支持 C2C，群聊如实记 reason）、**自动贴表情**（`set_msg_emoji_like`，`emojiLikeMentionOnly` 默认只对叫我/引用我生效）、**表情回应统计**（`/赞榜` 本地榜单 + `/谁赞了` 群里走 `get_emoji_likes` 拿实时名单、失败/注入回合回落本地并标注来源）、**点赞** `/点赞 [@某人]`（`send_like`，每天每目标限量）、**标记已读**（`mark_*_msg_as_read`，按会话）。红线：`set_msg_emoji_like` 只带 `message_id`、scoped dry-run 拦不住 → 桥里自己判注入并给真实 reason，**注入回合逐条断言 0 出站**；每个开关的关闭分支与配额拒绝都带真实 reason。**顺手修掉两个 v0.5.2 的静默缺陷**：桥对 `JsonStore` 调了不存在的 `load()/save()`（真实 API 是 `read()/write()`），异常被吞 → **播报去重/统计跨重启丢失且毫无提示**；`#loadEngageState()` 在配额对象构造前调用导致 **restore 打空、配额跨重启失效**。新增配置键 17 个（总数 187 → 204）；新增 2 套测试（engage 109 / 桥层 engage-bridge 90），全量 **51 套 / 3062 断言全绿**
 - **v0.5.2** — 「无人值守 / Unattended」：**入站 webhook**（`127.0.0.1:8798`，`POST /hook/<来源>`，github / uptime-kuma / generic 三种适配器；token 或 HMAC-SHA256 二选一鉴权，**两者都缺的来源直接不注册**；64 KiB 上限回 413、每来源限频回 429；密钥绝不进日志与运行快照）；**定时播报**（`rss` 自带 RSS/Atom/RDF 解析器并按 guid 去重、`weather` 走 Open-Meteo 免 key、`mc` 复用既有 ping；`at: HH:MM` + `weekdays` 或 `everyMinutes`，间隔递推不漂移；去重与统计落盘跨重启不重复；`/播报` 与 `/播报 测试 <id>` 管理）；**掉线自愈**（按配置命令拉起 QQ 客户端，**只启动不杀进程**，冷却 300s + 每小时 3 次上限，命中即写 trace 说明原因）。新增配置键 12 个（总数 175 → 187，静态双向校验通过）；新增 4 套测试（feed 144 / webhook 114 / broadcast 189 / 桥层 unattended 107），全量 **49 套 / 2860 断言全绿**
 - **v0.5.1** — 审查修复（无新功能）：修掉发布后对抗性审查抓出的 8 个缺陷——`/成员 <昵称>` 对**没设群名片**的成员永远查不到（`card:''` 时未回落到昵称）；转发卡片展开为空（关闭开关/空载荷/调用失败）仍会起一个**内容为空的模型回合**；`/ocr` 的离线闸门放在 `get_msg` 之后、`/好友` 漏判，两者在注入/回放回合仍会真的访问 QQ；`/读图` 被 `/读` 语音朗读整条吃掉（发朗读「图」字的语音 + 消耗 TTS）；归档写入失败完全静默（`/找` 会谎报「没找到」）；控制台「群资产」读的是不存在的 `historyDir`（应为 `historyArchiveDir`），自定义目录时永远显示 0 个文件；`/取` 私聊投递失败会把**本机绝对路径**发进群、`qq-files/` 永不清理、投递注定被限流时仍先下载；trace 补上「另有 N 张转发卡片未展开」。新增 `test/inject-assets-unit.mjs`（28 条，走真实注入通道 + 正对照）与 28 条桥层回归（含**反向验证**：换回修复前的 `lib/bridge.js`，新断言各挂 8 条）
 - **v0.5.0** — 「看得见 · 找得回 / See it, find it」：**合并转发不再被静默丢弃**（`parseMessage` 增加 `forwards`、`get_forward_msg` 展开成正文交给模型，空文本路径补上 @ 门与 `acceptPrivate` 门——原先是违反「无静默分支」硬约束的洞）；接通既有能力 `/成员` `/群信息` `/好友`（默认关）`/退群`（默认关）与 agent 工具 `qq_recent_history` / `qq_member_info` / `qq_react`；新增群资产 `/文件` `/取`（下载只发私聊）`/相册` `/ocr`（图片转文字）；消息按天归档 `qq-history/`，`/找` 与 `qq_search_history` 检索最近 N 天（注入/回放与命令不入档，过期分片移入 `qq-trash/<日期>/` 而非删除）；控制台新增「群资产 · 历史检索」卡片；实测抓出并修掉 5 个自引入缺陷（格式化返回值当字符串发、`/找` 无参数无用法、归档把命令自己搜出来、回收目录日期套两层）+ 1 个门控逃逸
 - **v0.4.1** — 依赖解析与安装修复（社区反馈 [issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)）：`schemastery` 改用作用域名 `@deepseek-ai/schemastery`（裸名是**另一个包**，只在"别的插件恰好把它 hoist 到共享 node_modules"时才能解析，干净环境加载即 `ERR_MODULE_NOT_FOUND`）；`@deepseek-ai/dsh-*` peer 区间补上 `^0.1.5-rc.1`（预发布区间不跨补丁线，0.1.5-rc.1/rc.2 之前不被接受）；README 更正"裸名由 DSH 别名注入"的错误说法并补上本地目录安装需先 `npm install --omit=dev`（`ws`）；`test/static-unit.mjs` 新增静态防线：lib/ 里任何第三方 import 必须已在 `package.json` 声明、官方依赖禁止裸名
-- **v0.4.0** — 「一切皆可调试 / Everything Debuggable」：全链路可调试——traceId 结构化事件（每个静默分支都有 reason）、SSE 实时事件流与决策链、一键体检、诊断包导出、运行快照与生效配置；**录制 / 离线回放 / 事件注入**（`qq-inbox.jsonl` 录制每条入站事件 → 沙箱内用真实桥代码 dry-run 重跑并给出"会回复/静默 + 原因"→ 控制台注入合成事件走真实管线，一次注入 = 一个独立回合、整回合拦截模型回复与工具出站，全链路不碰 QQ）；**硬约束验收台**（6 条约束逐条给实时证据与"该点哪里"）；**诊断包默认脱敏导出**、`.gitignore` 覆盖全部运行产物、`test/privacy-unit.mjs` 隐私回归防线；自带独立控制台（`control/`，进程 8799），端口/进程/日志/扫码总览与启停、启动预检与杀进程护栏、token + Origin 鉴权
 
 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
