@@ -42,6 +42,18 @@ class MockServer extends EventEmitter {
     this.ignored = { join_requests: [{ requester_uin: 10003, requester_nick: '小刚' }], invited_requests: [] }
     this.albumList = { album_list: [{ album_id: 'album_1', album_name: '日常' }], attach_info: '', has_more: false }
     this.kickError = null
+    // v0.5.8 fixtures
+    this.signedList = [
+      { user_id: 10001, nick: '小明', time: Math.floor(Date.now() / 1000) - 1800, rank: 1 },
+      { user_id: 10002, nick: '小红', time: Math.floor(Date.now() / 1000) - 3600, rank: 2.5 },
+    ]
+    this.systemMsg = {
+      join_requests: [{ request_id: 9001, invitor_uin: 10009, requester_nick: '新人', group_id: 2002, message: '求进群', checked: false }],
+      invited_requests: [],
+    }
+    this.doubts = [{ flag: 'uid_doubt_1', uin: 10010, nick: '可疑', msg: '交个朋友', type: 'doubt' }]
+    this.signedError = null
+    this.doubtError = null
   }
 
   #rec(action, params) { this.calls.push({ action, params }) }
@@ -111,6 +123,51 @@ class MockServer extends EventEmitter {
   }
   setGroupNewMemberHistoryVisibility(_socket, groupId, visible) {
     this.#rec('set_group_new_member_history_visibility', { groupId, visible })
+    return Promise.resolve(null)
+  }
+
+  // ---- v0.5.8：管理员 / 邀请策略 / 加群方式 / 打卡名册 / 申请拉取 ----
+  setGroupAdmin(_socket, groupId, userId, enable) {
+    this.#rec('set_group_admin', { groupId, userId, enable })
+    return Promise.resolve(null)
+  }
+  setGroupMemberInvitePolicy(_socket, groupId, policy) {
+    this.#rec('set_group_member_invite_policy', { groupId, policy })
+    return Promise.resolve(null)
+  }
+  setGroupAddOption(_socket, groupId, addType, { question = '', answer = '' } = {}) {
+    const params = { groupId, addType }
+    if (addType === 4 || addType === 5) {
+      params.question = question
+      params.answer = addType === 4 ? answer : ''
+    }
+    this.#rec('set_group_add_option', params)
+    return Promise.resolve(null)
+  }
+  getGroupSignedList(_socket, groupId) {
+    this.#rec('get_group_signed_list', { groupId })
+    if (this.signedError) return Promise.reject(this.signedError)
+    return Promise.resolve(this.signedList)
+  }
+  getGroupSystemMsg(_socket, count) {
+    this.#rec('get_group_system_msg', { count })
+    return Promise.resolve(this.systemMsg)
+  }
+  getDoubtFriendsAddRequest(_socket, count) {
+    this.#rec('get_doubt_friends_add_request', { count })
+    if (this.doubtError) return Promise.reject(this.doubtError)
+    return Promise.resolve(this.doubts)
+  }
+  setDoubtFriendsAddRequest(_socket, flag) {
+    this.#rec('set_doubt_friends_add_request', { flag })
+    return Promise.resolve(null)
+  }
+  setGroupAddRequest(_socket, flag, subType, approve, reason) {
+    this.#rec('set_group_add_request', { flag, subType, approve, reason })
+    return Promise.resolve(null)
+  }
+  setFriendAddRequest(_socket, flag, approve, reason) {
+    this.#rec('set_friend_add_request', { flag, approve, reason })
     return Promise.resolve(null)
   }
 
@@ -677,6 +734,278 @@ function makeBridge(overrides = {}) {
   const out = await t.send(t.message('/历史可见 开'))
   check('I10 opsPolicyEnabled=false → 点名开关且零调用',
     out.includes('opsPolicyEnabled=false') && t.server.count('set_group_new_member_history_visibility') === 0, brief(out))
+  t.stop()
+}
+
+// ---------------------------------------------------------------------------
+// J. v0.5.8 管理员设置：enable 永远显式 + 注入 0 出站
+// ---------------------------------------------------------------------------
+{
+  const t = makeBridge({ groupOpsEnabled: true, opsAdminEnabled: true })
+  await t.send(t.message('/设管理 10005'))
+  const setCall = t.server.paramsOf('set_group_admin')[0]
+  check('J1 /设管理 发出 set_group_admin 且 enable 显式为 true',
+    t.server.count('set_group_admin') === 1 && setCall.enable === true, brief(setCall))
+  check('J2 群号与目标都是字符串', setCall.groupId === '2002' && setCall.userId === '10005', brief(setCall))
+
+  await t.send(t.message('/撤管理 10005'))
+  const unsetCall = t.server.paramsOf('set_group_admin')[1]
+  check('J3 /撤管理 enable 显式为 false（而不是省略字段）',
+    unsetCall.enable === false && Object.prototype.hasOwnProperty.call(unsetCall, 'enable'), brief(unsetCall))
+
+  t.server.reset()
+  await t.send(t.message('/设管理', { ats: [10007] }))
+  check('J4 @某人 也能作为目标', t.server.paramsOf('set_group_admin')[0].userId === '10007', brief(t.server.paramsOf('set_group_admin')))
+
+  const none = await t.send(t.message('/设管理'))
+  check('J5 没给目标 → 中文用法提示且零新增调用',
+    none.includes('用法') && t.server.count('set_group_admin') === 1, brief(none))
+
+  t.server.reset()
+  const inj = await t.send(t.message('/设管理 10005', { __injected: true }))
+  check('J6 注入回合 0 出站：set_group_admin',
+    t.server.count('set_group_admin') === 0 && inj.includes('注入/回放回合不写 QQ'), brief(inj))
+  t.stop()
+}
+{
+  const t = makeBridge({ groupOpsEnabled: true, opsAdminEnabled: false })
+  const out = await t.send(t.message('/设管理 10005'))
+  check('J7 opsAdminEnabled=false → 点名开关且零调用',
+    out.includes('opsAdminEnabled=false') && t.server.count('set_group_admin') === 0, brief(out))
+  t.stop()
+}
+{
+  const t = makeBridge({ groupOpsEnabled: true, opsAdminEnabled: true, adminUsers: [9999] })
+  const out = await t.send(t.message('/设管理 10005'))
+  check('J8 非管理员 → 拒绝且零调用',
+    out.includes('仅管理员可用') && t.server.count('set_group_admin') === 0, brief(out))
+  t.stop()
+}
+
+// ---------------------------------------------------------------------------
+// K. v0.5.8 邀请策略：四个字面量
+// ---------------------------------------------------------------------------
+{
+  const t = makeBridge({ groupOpsEnabled: true, opsInvitePolicyEnabled: true })
+  await t.send(t.message('/邀请策略 关闭'))
+  check('K1 关闭 → disabled',
+    t.server.paramsOf('set_group_member_invite_policy')[0].policy === 'disabled',
+    brief(t.server.paramsOf('set_group_member_invite_policy')))
+  await t.send(t.message('/邀请策略 百人以下'))
+  check('K2 百人以下 → no_approval_under_100',
+    t.server.paramsOf('set_group_member_invite_policy')[1].policy === 'no_approval_under_100',
+    brief(t.server.paramsOf('set_group_member_invite_policy')))
+  const bad = await t.send(t.message('/邀请策略 随便写'))
+  check('K3 未知词 → 中文报错列出四种且零新增调用',
+    bad.includes('四种') && t.server.count('set_group_member_invite_policy') === 2, brief(bad))
+  t.server.reset()
+  await t.send(t.message('/邀请策略 关闭', { __injected: true }))
+  check('K4 注入回合 0 出站：邀请策略', t.server.count('set_group_member_invite_policy') === 0)
+  t.stop()
+}
+
+// ---------------------------------------------------------------------------
+// L. v0.5.8 加群方式：只有 4/5 带问题/答案
+// ---------------------------------------------------------------------------
+{
+  const t = makeBridge({ groupOpsEnabled: true, opsAddOptionEnabled: true })
+  await t.send(t.message('/加群方式 3'))
+  const plain = t.server.paramsOf('set_group_add_option')[0]
+  check('L1 取值 3 不夹带问题/答案',
+    plain.addType === 3 && plain.question === undefined && plain.answer === undefined, brief(plain))
+
+  await t.send(t.message('/加群方式 4 问题=口令是什么 答案=鲸鱼'))
+  const withAnswer = t.server.paramsOf('set_group_add_option')[1]
+  check('L2 取值 4 带问题+答案',
+    withAnswer.addType === 4 && withAnswer.question === '口令是什么' && withAnswer.answer === '鲸鱼', brief(withAnswer))
+
+  await t.send(t.message('/加群方式 5 问题=口令是什么'))
+  const noAnswer = t.server.paramsOf('set_group_add_option')[2]
+  check('L3 取值 5 只带问题（答案空串）',
+    noAnswer.addType === 5 && noAnswer.question === '口令是什么' && noAnswer.answer === '', brief(noAnswer))
+
+  const bad = await t.send(t.message('/加群方式 9'))
+  check('L4 非法取值 → 中文报错且零新增调用',
+    bad.includes('1–5') && t.server.count('set_group_add_option') === 3, brief(bad))
+
+  t.server.reset()
+  await t.send(t.message('/加群方式 4 问题=a 答案=b', { __injected: true }))
+  check('L5 注入回合 0 出站：加群方式', t.server.count('set_group_add_option') === 0)
+  t.stop()
+}
+
+// ---------------------------------------------------------------------------
+// M. v0.5.8 打卡名册（只读）
+// ---------------------------------------------------------------------------
+{
+  const t = makeBridge({ groupOpsEnabled: true })
+  const out = await t.send(t.message('/打卡名册'))
+  check('M1 走 get_group_signed_list 并渲染名册',
+    t.server.count('get_group_signed_list') === 1 && out.includes('今日打卡') && out.includes('10001'), brief(out))
+  t.server.reset()
+  const inj = await t.send(t.message('/打卡名册', { __injected: true }))
+  check('M2 注入回合不访问 QQ：打卡名册',
+    t.server.count('get_group_signed_list') === 0 && inj.includes('未真正访问 QQ'), brief(inj))
+  t.stop()
+}
+{
+  const t = makeBridge({ groupOpsEnabled: true, opsReadEnabled: false })
+  const out = await t.send(t.message('/打卡名册'))
+  check('M3 opsReadEnabled=false → 点名开关且零调用',
+    out.includes('opsReadEnabled=false') && t.server.count('get_group_signed_list') === 0, brief(out))
+  t.stop()
+}
+{
+  const t = makeBridge({ groupOpsEnabled: true })
+  t.server.signedError = new Error('无法获取该群组打卡列表')
+  const out = await t.send(t.message('/打卡名册'))
+  check('M4 接口报错 → 中文失败原因，不崩',
+    out.includes('查询失败') && out.includes('无法获取'), brief(out))
+  t.stop()
+}
+
+// ---------------------------------------------------------------------------
+// N. v0.5.8 /申请：主动拉取 + 并入待审队列 + 审批
+// ---------------------------------------------------------------------------
+{
+  const t = makeBridge({ groupOpsEnabled: true, requestSyncEnabled: true, verifyEnabled: true })
+  const out = await t.send(t.message('/申请'))
+  check('N1 同时拉取入群申请与可疑好友两个接口',
+    t.server.count('get_group_system_msg') === 1 && t.server.count('get_doubt_friends_add_request') === 1,
+    brief(t.server.calls.map((c) => c.action)))
+  check('N2 回执说明并入数量', out.includes('新并入待审 2 条'), brief(out))
+  check('N3 待审列表标出「补拉」与「只能同意」',
+    out.includes('补拉') && out.includes('只能同意'), brief(out))
+
+  const again = await t.send(t.message('/申请'))
+  check('N4 再拉一次不重复并入', again.includes('已有 2 条'), brief(again))
+
+  const approved = await t.send(t.message('/同意 1'))
+  const groupCall = t.server.paramsOf('set_group_add_request')[0]
+  check('N5 /同意 走 set_group_add_request，flag = request_id',
+    t.server.count('set_group_add_request') === 1 && groupCall.flag === '9001' && groupCall.approve === true, brief(groupCall))
+  check('N6 批准成功文案', approved.includes('已批准'), brief(approved))
+
+  const rejectedDoubt = await t.send(t.message('/拒绝 2'))
+  check('N7 可疑好友 /拒绝 → 不发任何请求并说明只能同意',
+    t.server.count('set_doubt_friends_add_request') === 0 && rejectedDoubt.includes('只能同意'), brief(rejectedDoubt))
+
+  const approvedDoubt = await t.send(t.message('/同意 2'))
+  const doubtCall = t.server.paramsOf('set_doubt_friends_add_request')[0]
+  check('N8 可疑好友 /同意 走 set_doubt_friends_add_request（不是 group）',
+    t.server.count('set_doubt_friends_add_request') === 1 && doubtCall.flag === 'uid_doubt_1' && t.server.count('set_group_add_request') === 1,
+    brief(doubtCall))
+  check('N9 队列清空', t.bridge.joinGuard.list().length === 0, String(t.bridge.joinGuard.list().length))
+  t.stop()
+}
+{
+  const t = makeBridge({ groupOpsEnabled: true, requestSyncEnabled: false })
+  const out = await t.send(t.message('/申请'))
+  check('N10 requestSyncEnabled=false → 点名开关且零调用',
+    out.includes('requestSyncEnabled=false') && t.server.count('get_group_system_msg') === 0, brief(out))
+  t.stop()
+}
+{
+  const t = makeBridge({ groupOpsEnabled: true, requestSyncEnabled: true, verifyEnabled: true, adminUsers: [9999] })
+  const out = await t.send(t.message('/申请'))
+  check('N11 非管理员 → 拒绝且零调用',
+    out.includes('仅管理员可用') && t.server.count('get_group_system_msg') === 0, brief(out))
+  t.stop()
+}
+{
+  const t = makeBridge({ groupOpsEnabled: true, requestSyncEnabled: true, verifyEnabled: true })
+  const inj = await t.send(t.message('/申请', { __injected: true }))
+  check('N12 注入回合 0 出站：拉取不访问 QQ',
+    t.server.count('get_group_system_msg') === 0 && inj.includes('注入/回放回合不写 QQ'), brief(inj))
+  t.stop()
+}
+{
+  const t = makeBridge({ groupOpsEnabled: true, requestSyncEnabled: true, verifyEnabled: true })
+  t.server.doubtError = new Error('可疑好友接口挂了')
+  const out = await t.send(t.message('/申请'))
+  check('N13 可疑好友接口失败不拖垮入群申请拉取',
+    t.server.count('get_group_system_msg') === 1 && out.includes('新并入待审 1 条') && out.includes('可疑好友申请拉取失败'), brief(out))
+  t.stop()
+}
+
+{
+  const t = makeBridge({ groupOpsEnabled: true, requestSyncEnabled: true, verifyEnabled: true })
+  await t.send(t.message('/申请'))
+  // 补拉的条目没有验证题：申请人随后私聊说话，绝不能被当成"答题"而回一句空的答案提示。
+  const chatter = await t.send(t.message('在吗', { messageType: 'private', groupId: undefined, userId: 10009, atMe: false }))
+  check('N14 补拉条目不会被当成验证答题（不会回空题提示）',
+    !chatter.includes('答案不对'), brief(chatter))
+  check('N15 补拉条目也不会因此被自动放行', t.bridge.joinGuard.list().length === 2, String(t.bridge.joinGuard.list().length))
+  t.stop()
+}
+
+// ---------------------------------------------------------------------------
+// O. 审批的注入红线（这一版修掉的真缺陷）
+// ---------------------------------------------------------------------------
+{
+  const t = makeBridge({ groupOpsEnabled: true, requestSyncEnabled: true, verifyEnabled: true })
+  await t.send(t.message('/申请'))
+  t.server.reset()
+  const inj = await t.send(t.message('/同意 1', { __injected: true }))
+  check('O1 注入回合不真的批准任何人（flag 参数落不进 scoped dry-run）',
+    t.server.count('set_group_add_request') === 0 && inj.includes('不真的审批'), brief(inj))
+  check('O2 被拦下的条目仍在队列里（没有被静默消费）',
+    t.bridge.joinGuard.list().length === 2, String(t.bridge.joinGuard.list().length))
+  const injList = await t.send(t.message('/待审', { __injected: true }))
+  check('O3 注入回合连 /待审 也走同一道闸', injList.includes('不真的审批'), brief(injList))
+  t.stop()
+}
+
+// ---------------------------------------------------------------------------
+// P. v0.5.8 权限自愈：group_admin 事件
+// ---------------------------------------------------------------------------
+{
+  const t = makeBridge({ groupOpsEnabled: true, opsKickEnabled: true, adminWatchEnabled: true })
+  const notice = (subType) => t.server.emit('notice', {
+    noticeType: 'group_admin', subType, adminSet: subType !== 'unset', groupId: 2002, userId: 999, selfId: 999,
+  })
+  notice('unset')
+  await sleep(140)
+  check('P1 被撤管理员 → 群里收到说明',
+    t.server.sent.some((item) => item.segments.some((seg) => String(seg.data?.text ?? '').includes('已不是本群管理员'))),
+    brief(t.server.sent.map((item) => item.segments.map((s) => s.data?.text).join(''))))
+  check('P2 状态记为 false', t.bridge.botAdminKnown.get(2002) === false, String(t.bridge.botAdminKnown.get(2002)))
+
+  t.server.reset()
+  await t.send(t.message('/批量踢 10002'))
+  const confirm = await t.send(t.message('/批量踢 确认'))
+  check('P3 已知被撤管理员 → 写命令给真话且零调用',
+    confirm.includes('已被取消') && t.server.count('set_group_kick_members') === 0, brief(confirm))
+
+  const adminCmd = await t.send(t.message('/mute 10002 60'))
+  check('P4 老管理命令同样被拦（说真话而不是 API 报错）',
+    adminCmd.includes('已被取消') && t.server.count('set_group_ban') === 0, brief(adminCmd))
+
+  notice('set')
+  await sleep(140)
+  check('P5 恢复管理员 → 状态回到 true 并再次通知',
+    t.bridge.botAdminKnown.get(2002) === true
+    && t.server.sent.some((item) => item.segments.some((seg) => String(seg.data?.text ?? '').includes('已恢复群管理员'))))
+  t.server.reset()
+  await t.send(t.message('/批量踢 10002'))
+  await t.send(t.message('/批量踢 确认'))
+  check('P6 恢复后写命令照常执行', t.server.count('set_group_kick_members') === 1)
+  t.stop()
+}
+{
+  const t = makeBridge({ groupOpsEnabled: true, adminWatchEnabled: false })
+  t.server.emit('notice', { noticeType: 'group_admin', subType: 'unset', adminSet: false, groupId: 2002, userId: 999, selfId: 999 })
+  await sleep(140)
+  check('P7 adminWatchEnabled=false 不发通知，但状态照记',
+    t.bridge.botAdminKnown.get(2002) === false && t.server.sent.length === 0, String(t.server.sent.length))
+  t.stop()
+}
+{
+  const t = makeBridge({ groupOpsEnabled: true, adminWatchEnabled: true })
+  t.server.emit('notice', { noticeType: 'group_admin', subType: 'set', adminSet: true, groupId: 2002, userId: 10077, selfId: 999 })
+  await sleep(140)
+  check('P8 别人的管理员变动不写我们的状态，也不打扰群',
+    t.bridge.botAdminKnown.has(2002) === false && t.server.sent.length === 0, String(t.server.sent.length))
   t.stop()
 }
 

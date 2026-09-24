@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import {
   FILE_ACTIONS,
+  INVITE_POLICIES,
   MAX_KICK_BATCH,
   OPS_EVENT_NAMES,
   OpsCounters,
@@ -17,23 +18,31 @@ import {
   SIGN_ACTION,
   TODO_ACTIONS,
   batchTargets,
+  collectPendingRequests,
   formatAlbumMediaList,
   formatAtAllRemain,
   formatFileOp,
   formatGroupInfoEx,
   formatIgnoredNotifies,
+  formatPullResult,
   formatShutList,
   formatShutRemain,
+  formatSignedList,
   formatWeeklyReport,
+  invitePolicyLabel,
   isValidGroupId,
   isValidQq,
   normalizeTargets,
+  parseInvitePolicy,
   parseOpsArgs,
   parseToggle,
+  planAddOption,
   planAlbumUpload,
   planFileOp,
+  planGroupAdmin,
   planGroupSign,
   planHistoryVisibility,
+  planInvitePolicy,
   planKickMembers,
   planMemberPermissions,
   planProfileChange,
@@ -257,6 +266,126 @@ check('parseOpsArgs 没有空格 → 明确拒绝',
   parseOpsArgs('/踢10001', '/踢').reason.includes('空格'), parseOpsArgs('/踢10001', '/踢').reason)
 check('parseOpsArgs 空参数 → 明确拒绝', parseOpsArgs('/踢', '/踢').reason.includes('需要参数'))
 check('parseOpsArgs 不是该命令 → 拒绝', parseOpsArgs('/群名 x', '/踢').reason.includes('不是'))
+
+// —— 14. v0.5.8：管理员设置 / 邀请策略 / 加群方式 ——
+{
+  // planGroupAdmin：enable 必须显式。探针确认 NapCat 在 enable 省略时按 false 处理
+  // （等于静默撤管理员），所以"参数没写全"绝不能变成一次撤销。
+  const on = planGroupAdmin({ groupId: 2002, userId: 10001, enable: true })
+  const off = planGroupAdmin({ groupId: 2002, userId: 10001, enable: false })
+  check('planGroupAdmin 设管理员带显式 true', on.ok === true && on.action === 'set_group_admin' && on.params.enable === true, JSON.stringify(on.params))
+  check('planGroupAdmin 撤管理员带显式 false', off.ok === true && off.params.enable === false, JSON.stringify(off.params))
+  const missing = planGroupAdmin({ groupId: 2002, userId: 10001 })
+  check('planGroupAdmin 缺 enable → 明确报错（绝不默认成撤管理员）',
+    missing.ok === false && missing.params === null && missing.reason.includes('设'), missing.reason)
+  check('planGroupAdmin 参数都是字符串', on.params.group_id === '2002' && on.params.user_id === '10001')
+  check('planGroupAdmin 非法 QQ → 报错', planGroupAdmin({ groupId: 2002, userId: 12, enable: true }).ok === false)
+  check('planGroupAdmin 非法群号 → 报错', planGroupAdmin({ groupId: 1, userId: 10001, enable: true }).ok === false)
+
+  // planInvitePolicy：四个字面量来自探针读到的 schema 联合类型。
+  const policyWords = { 关闭: 'disabled', 需审核: 'require_approval', 免审核: 'no_approval', 百人以下: 'no_approval_under_100' }
+  check('parseInvitePolicy 四个中文词都能解析',
+    Object.entries(policyWords).every(([word, policy]) => parseInvitePolicy(word) === policy),
+    Object.entries(policyWords).map(([word, policy]) => `${word}=${parseInvitePolicy(word)}`).join(' '))
+  check('parseInvitePolicy 认字面量本身', parseInvitePolicy('require_approval') === 'require_approval')
+  check('parseInvitePolicy 不认识 → null', parseInvitePolicy('随便') === null && parseInvitePolicy('') === null)
+  check('INVITE_POLICIES 恰好四个且都是探针字面量',
+    INVITE_POLICIES.length === 4 && INVITE_POLICIES.every((item) => ['disabled', 'require_approval', 'no_approval', 'no_approval_under_100'].includes(item.policy)),
+    INVITE_POLICIES.map((item) => item.policy).join(','))
+  const invite = planInvitePolicy({ groupId: 2002, policy: 'no_approval_under_100' })
+  check('planInvitePolicy 产出正确 action/params',
+    invite.ok === true && invite.action === 'set_group_member_invite_policy' && invite.params.policy === 'no_approval_under_100' && invite.params.group_id === '2002',
+    JSON.stringify(invite.params))
+  check('planInvitePolicy 未知策略 → 报错并列出四种',
+    planInvitePolicy({ groupId: 2002, policy: 'whatever' }).reason.includes('四种'), planInvitePolicy({ groupId: 2002, policy: 'whatever' }).reason)
+  check('invitePolicyLabel 能回中文', invitePolicyLabel('disabled').includes('关闭'))
+
+  // planAddOption：add_type 是裸数字，只有 4/5 连问题/答案一起写（探针）。
+  const plain = planAddOption({ groupId: 2002, addType: 3 })
+  check('planAddOption 1–3 不夹带问题/答案',
+    plain.ok === true && plain.params.add_type === 3 && plain.params.group_question === undefined && plain.params.group_answer === undefined,
+    JSON.stringify(plain.params))
+  const withAnswer = planAddOption({ groupId: 2002, addType: 4, question: '口令？', answer: '鲸鱼' })
+  check('planAddOption 4 带问题+答案',
+    withAnswer.ok === true && withAnswer.params.group_question === '口令？' && withAnswer.params.group_answer === '鲸鱼',
+    JSON.stringify(withAnswer.params))
+  const noAnswer = planAddOption({ groupId: 2002, addType: 5, question: '口令？' })
+  check('planAddOption 5 只带问题（答案固定空串）',
+    noAnswer.ok === true && noAnswer.params.group_question === '口令？' && noAnswer.params.group_answer === '',
+    JSON.stringify(noAnswer.params))
+  check('planAddOption 4 缺答案 → 报错', planAddOption({ groupId: 2002, addType: 4, question: '口令？' }).ok === false)
+  check('planAddOption 5 缺问题 → 报错', planAddOption({ groupId: 2002, addType: 5 }).ok === false)
+  for (const bad of [0, 6, 'abc', '']) {
+    const denied = planAddOption({ groupId: 2002, addType: bad })
+    check(`planAddOption 拒绝非法取值 ${JSON.stringify(bad)}`, denied.ok === false && denied.params === null, denied.reason)
+  }
+  check('planAddOption 取值仍是数字而不是字符串', typeof planAddOption({ groupId: 2002, addType: '3' }).params.add_type === 'number')
+}
+
+// —— 15. v0.5.8：打卡名册渲染 ——
+{
+  const now = new Date('2026-09-14T10:00:00').getTime()
+  const rows = [
+    { user_id: 10003, nick: '小红', time: Math.floor(now / 1000) - 3600, rank: 5.5 },
+    { user_id: 10001, nick: '小明', time: Math.floor(now / 1000) - 7200, rank: 1 },
+    { user_id: 10002, nick: '', time: 0, rank: 3 },
+  ]
+  const text = formatSignedList(rows, { groupId: 2002, now })
+  check('打卡名册：标题带人数', text.includes('今日打卡（3 人'), text.replace(/\n/g, ' | '))
+  check('打卡名册：按 rank 升序（小数 rank 排在小 rank 后面）',
+    text.indexOf('10001') < text.indexOf('10002') && text.indexOf('10002') < text.indexOf('10003'),
+    text.replace(/\n/g, ' | '))
+  check('打卡名册：小数 rank 四舍五入显示', text.includes('第 6 名') && !text.includes('5.5'), text.replace(/\n/g, ' | '))
+  check('打卡名册：时间按 HH:MM 显示', /09:00|08:00/.test(text), text.replace(/\n/g, ' | '))
+  check('打卡名册：time=0 不显示 1970', !text.includes('1970') && !text.includes('08:00:00'))
+  check('打卡名册：limit 生效并提示剩余',
+    formatSignedList(rows, { groupId: 2002, limit: 2, now }).includes('…还有 1 人'))
+  check('打卡名册：空列表给中文说明', formatSignedList([], { groupId: 2002 }).includes('还没有人打卡'))
+  check('打卡名册：非数组不抛错', formatSignedList(null, { groupId: 2002 }).includes('没有返回数据'))
+}
+
+// —— 16. v0.5.8：申请拉取（两种来源形状不同，探针确认） ——
+{
+  const systemMsg = {
+    join_requests: [
+      { request_id: 111, invitor_uin: 10001, requester_nick: '小明', group_id: 2002, message: '让我进群', checked: false },
+      { request_id: 222, invitor_uin: 10002, requester_nick: '已处理', group_id: 2002, message: '', checked: true },
+    ],
+    invited_requests: [
+      { request_id: 333, invitor_uin: 10003, invitor_nick: '小红', group_id: 3003, message: '来玩', checked: false },
+    ],
+  }
+  // NapCat 里 invited_requests 与 InvitedRequest 是同一个数组引用，重复喂进来也只能并入一次。
+  const systemMsgDup = { ...systemMsg, InvitedRequest: systemMsg.invited_requests }
+  const doubts = [
+    { flag: 'uid_abc', uin: 10004, nick: '可疑的人', msg: '加个好友', type: 'doubt' },
+    { flag: 'uid_abc', uin: 10004, nick: '可疑的人', msg: '加个好友', type: 'doubt' },
+  ]
+  const list = collectPendingRequests({ systemMsg: systemMsgDup, doubts, groupId: 2002 })
+  check('申请拉取：已处理（checked）的条目不进队列', !list.some((item) => item.flag === '222'), list.map((item) => item.flag).join(','))
+  check('申请拉取：同一 flag 只并入一次（含 InvitedRequest 重复引用）',
+    list.filter((item) => item.flag === '333').length === 1 && list.filter((item) => item.flag === 'uid_abc').length === 1,
+    list.map((item) => item.flag).join(','))
+  check('申请拉取：入群申请 → group/add', (() => {
+    const item = list.find((row) => row.flag === '111')
+    return item && item.kind === 'group' && item.subType === 'add' && item.approveOnly === false && item.userId === 10001 && item.groupId === 2002
+  })())
+  check('申请拉取：入群邀请 → invite 子类型', (() => {
+    const item = list.find((row) => row.flag === '333')
+    return item && item.kind === 'invite' && item.subType === 'invite' && item.groupId === 3003
+  })())
+  check('申请拉取：可疑好友 → doubt 且只能同意', (() => {
+    const item = list.find((row) => row.flag === 'uid_abc')
+    return item && item.kind === 'doubt' && item.approveOnly === true && item.userId === 10004 && item.groupId === 0
+  })())
+  check('申请拉取：缺 request_id 的条目被跳过', collectPendingRequests({ systemMsg: { join_requests: [{ invitor_uin: 1 }] } }).length === 0)
+  check('申请拉取：空输入返回空数组', collectPendingRequests({}).length === 0)
+
+  const summary = formatPullResult({ adopted: list, already: 2, skipped: 1, fetched: 5 })
+  check('拉取回执：说明并入数量与明细', summary.includes('新并入待审 3 条') && summary.includes('入群申请 1'), summary.replace(/\n/g, ' | '))
+  check('拉取回执：说明跳过与重复', summary.includes('已有 2 条') && summary.includes('跳过 1 条'))
+  check('拉取回执：可疑好友提醒只能同意', summary.includes('只能同意'))
+}
 
 // —— 13. 红线：纯模块，零依赖，不自己发 QQ ——
 const here = dirname(fileURLToPath(import.meta.url))

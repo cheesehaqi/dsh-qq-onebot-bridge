@@ -1,5 +1,43 @@
 # 更新日志 / Changelog
 
+## v0.5.8（2026-09-14）— 群权限补全 · 申请补拉 · 权限自愈 / Admin & requests
+
+> 这一版继续"先用真机探针把参数摸准，再动代码"：4 个新动作的参数形状全部来自静态读本机 NapCat 包
+> （QQ 9.9.32-50969 / NapCat 4.18.19），而且**有两个能力被探针挡下来了**——见「按住的」一节。
+> ⚠️ 这 4 项尚未在登录状态的真机上跑过（本机 NapCat 当时未登录），验证清单见文末。
+
+### 新增
+
+- **管理员设置 `/设管理 @某人` · `/撤管理 @某人`**（`set_group_admin`）：探针挖出一个会咬人的细节——`enable` **省略时 NapCat 按 `false` 处理**（`!!undefined === false`），也就是"字段没写全"会**静默把人撤成普通成员**。所以 `planGroupAdmin` 强制要求显式布尔值，缺了直接报错，并且**永远把 `enable` 发给 API**；测试专门钉住"`enable === false` 时字段必须存在"。
+- **邀请策略 `/邀请策略 关闭|需审核|免审核|百人以下`**（`set_group_member_invite_policy`）：映射到探针读到的四个字面量 `disabled` / `require_approval` / `no_approval` / `no_approval_under_100`。
+- **加群方式 `/加群方式 1–5 [问题=… 答案=…]`**（`set_group_add_option`）：`add_type` 是 QQ 的裸数字，NapCat 官方 schema 只写「加群方式: number」、**没有枚举**；探针确认底层只在 `4/5` 时写问题/答案（4 带答案、5 只写问题），所以 1–3 一律不夹带这两个字段，文案里也不替用户"翻译" 1/2/3 的含义。
+- **打卡名册 `/打卡名册`**（`get_group_signed_list`，只读，随 `opsReadEnabled`）：今天谁打了卡、第几名、几点打的。探针确认 `rank = (signInRank-1)/2+1` **可能是小数**，所以渲染四舍五入、排序用原始值；时间戳离谱（如 0）不会显示成 1970。
+- **申请补拉 `/申请`**（`get_group_system_msg` + `get_doubt_friends_add_request`）：把离线期间错过的入群申请、入群邀请、可疑好友申请**主动拉回来**并入待审队列，复用既有的 `/待审` `/同意 N` `/拒绝 N`——事件驱动只能处理"当时在场"的请求，管理员不在线就永远错过。两个接口形状完全不同，分别归一化；`checked === true`（已处理）的条目不回灌，同一 `flag` 只并入一次，队列满时如实说明。
+  - 关键一环是探针挖出来的：`set_group_add_request` 的 `flag` 在实现里是 `find(i => i.seq === flag)`，而 `get_group_system_msg` 的 `request_id` 正是 `+seq`——所以**主动拉回来的申请真的能审批**，不是只能看。
+- **权限自愈（`group_admin` 事件）**：机器人自己被设/撤管理员时记账（`群号 → true/false`，来源只有这个事件，不知道的群绝不猜），可选在群里说明（`adminWatchEnabled`）；已知被撤管理员后，写命令（批量踢/待办/文件/传图/群名/群权限/历史可见…以及 `/mute` `/kick` `/公告` 这些老管理命令）**直接给中文真话并零调用**，而不是让 API 去撞墙报一句模糊错误。恢复管理员后自动解除。
+
+### 修掉一个真缺陷（注入红线）
+
+- **注入/回放回合 `/同意` 会真的批准人**：`set_group_add_request` 的参数里只有 `flag`，没有 `group_id`/`user_id`，落不进 scoped dry-run 的拦截条件——与 v0.5.1 修的 `/ocr`、`/好友` 是同一类洞（当时那条 P1 没覆盖审批路径）。现在 `#handleVerifyCommand` 与 `#resolveJoin` 都显式判断离线回合，直接拒绝执行并写 trace；新测试 `O1`–`O3` 用"注入回合 0 出站 + 队列条目仍在（没有被静默消费）"钉住它。
+
+### 按住的（探针说"别猜"）
+
+- **不做 `/群搜索`**：`set_group_search` 的两个参数 `no_code_finger_open` / `no_finger_open` 在 NapCat 里连 schema 描述都是「未知」，官方 API 文档也没写语义。给用户一个"传 0/1 的魔法数字"命令是错的，宁可等真机确认。
+- **可疑好友申请只能同意**：探针读到 `set_doubt_friends_add_request` 的 handler **完全忽略 `approve`**（源码注释「该字段没有语义 仅做保留 强制为True」）。`/拒绝` 对这类条目会被显式拒绝执行并在文案里说明，不假装拒绝成功。
+
+### 配置
+
+- 新增 6 个开关/参数键（总数 217 → 223）：`opsAdminEnabled`、`opsInvitePolicyEnabled`、`opsAddOptionEnabled`、`requestSyncEnabled`、`requestSyncCount`、`adminWatchEnabled`，全部默认关闭；`/打卡名册` 归入既有 `opsReadEnabled`，不新增开关。
+
+### 测试
+
+- `ops-unit` 106 → **147**、`ops-bridge-unit` 96 → **143**；全量 **55 套 / 3522 断言全绿**。
+- 新断言覆盖：`enable` 显式性（含"缺 enable 必须报错"）、邀请策略四个字面量、`add_type` 只有 4/5 带问题/答案、名册小数 rank 与空时间戳、申请归一化（checked 过滤 / 去重 / 三类 kind / 可疑好友 approveOnly）、审批 flag == `request_id`、注入回合 0 出站、权限自愈的记账与拦截。自审时又抓到一个自己写的 UX 缺陷并修掉：补拉回来的条目没有验证题，申请人随后私聊说话会被误判成"答题"、回一句空的「答案不对哦」，现在只认真正发过题目的条目（`N14`/`N15` 钉住）。
+
+### 待真机验证（本机 NapCat 未登录，跑不了）
+
+`/设管理`、`/撤管理`、`/邀请策略`、`/加群方式`、`/打卡名册`、`/申请` 各来一次，重点看：`/打卡名册` 的 `rank`/`time` 字段是否与探针一致、`/申请` 拉回来的 `request_id` 能否被 `/同意` 接受、被撤管理员时是否真的走"真话"分支。
+
 ## v0.5.7（2026-09-14 发布）— 文档：总览只列两个大版本 / Docs only
 
 > **纯文档改动，无代码变更**（`test/static-unit.mjs` 的守卫随文档惯例一起回到原样）。
