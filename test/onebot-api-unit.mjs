@@ -80,6 +80,36 @@ await expectFrame('set_msg_emoji_like 负载', () => server.setMsgEmojiLike(sock
 await expectFrame('get_version_info 负载', () => server.getVersionInfo(socket), (f) => f.action === 'get_version_info')
 await expectFrame('get_group_notice 负载', () => server.getGroupNotice(socket, 9), (f) => f.action === '_get_group_notice' && f.params.group_id === 9)
 await expectFrame('get_group_msg_history 负载', () => server.getGroupMsgHistory(socket, 9, 100, 5), (f) => f.action === 'get_group_msg_history' && f.params.count === 5)
+
+// ---- v0.5.8 新动作：**线路级**负载（真正的组装在 lib/onebot.js，mock 层断言不了它）----
+// 探针红线：`enable` 省略时 NapCat 按 false 处理（= 静默撤管理员），
+// 所以这里必须看到 enable **始终存在**，撤管理员时是 false 而不是缺字段。
+await expectFrame('set_group_admin 设管理员', () => server.setGroupAdmin(socket, 9, 1001, true),
+  (f) => f.action === 'set_group_admin' && f.params.group_id === '9' && f.params.user_id === '1001' && f.params.enable === true)
+await expectFrame('set_group_admin 撤管理员带显式 false', () => server.setGroupAdmin(socket, 9, 1001, false),
+  (f) => f.action === 'set_group_admin' && Object.hasOwn(f.params, 'enable') && f.params.enable === false)
+await expectFrame('set_group_admin 传非布尔也只发布尔', () => server.setGroupAdmin(socket, 9, 1001, 'yes'),
+  (f) => f.params.enable === false)
+await expectFrame('set_group_member_invite_policy 负载', () => server.setGroupMemberInvitePolicy(socket, 9, 'no_approval_under_100'),
+  (f) => f.action === 'set_group_member_invite_policy' && f.params.policy === 'no_approval_under_100' && f.params.group_id === '9')
+// 探针：只有 4/5 会连问题/答案一起写；1–3 夹带字段等于往群设置里写脏数据。
+await expectFrame('set_group_add_option 取值 3 不带问题/答案', () => server.setGroupAddOption(socket, 9, 3, { question: '不该出现', answer: '也不该' }),
+  (f) => f.action === 'set_group_add_option' && f.params.add_type === 3 && !('group_question' in f.params) && !('group_answer' in f.params))
+await expectFrame('set_group_add_option 取值 4 带问题+答案', () => server.setGroupAddOption(socket, 9, 4, { question: '口令？', answer: '鲸鱼' }),
+  (f) => f.params.add_type === 4 && f.params.group_question === '口令？' && f.params.group_answer === '鲸鱼')
+await expectFrame('set_group_add_option 取值 5 答案强制空串', () => server.setGroupAddOption(socket, 9, 5, { question: '口令？', answer: '给了也不要' }),
+  (f) => f.params.add_type === 5 && f.params.group_question === '口令？' && f.params.group_answer === '')
+await expectFrame('get_group_signed_list 负载', () => server.getGroupSignedList(socket, 9),
+  (f) => f.action === 'get_group_signed_list' && f.params.group_id === '9')
+await expectFrame('get_group_system_msg 负载', () => server.getGroupSystemMsg(socket, 50),
+  (f) => f.action === 'get_group_system_msg' && f.params.count === 50)
+await expectFrame('get_doubt_friends_add_request 负载', () => server.getDoubtFriendsAddRequest(socket, 30),
+  (f) => f.action === 'get_doubt_friends_add_request' && f.params.count === 30)
+// 探针：可疑好友只能同意（approve 被 NapCat 忽略）→ 这里**不该**出现 approve 字段。
+await expectFrame('set_doubt_friends_add_request 只带 flag', () => server.setDoubtFriendsAddRequest(socket, 'uid-abc'),
+  (f) => f.action === 'set_doubt_friends_add_request' && f.params.flag === 'uid-abc' && !('approve' in f.params))
+await expectFrame('get_group_list 负载（控制台/群发现用）', () => server.getGroupSystemMsg(socket, 1),
+  (f) => f.action === 'get_group_system_msg' && f.params.count === 1)
 check('每次调用 echo 唯一', new Set(frames.map((f) => f.echo)).size === frames.length)
 
 // ---- inbound frames ----

@@ -161,7 +161,15 @@ async function boot({ resumeMode = 'fail' } = {}) {
   bridge.start()
 
   let seq = 0
-  const send = async (text, extra = {}) => {
+  /**
+   * 发一条消息并收集这一轮的回复。
+   *
+   * `waitMs` 是**上限**而不是固定等待：只要见到回复就再等 30ms（让紧随其后的分段
+   * 落地）后返回。原实现死等 40ms，走 agent 的那几条（首条消息、/summary）在机器
+   * 忙的时候会偶发拿不到回复——全量跑时真的红过一次（随后连跑 3 次全绿），
+   * 这种"看起来是回归、其实是计时"的假红比慢 200ms 贵得多。
+   */
+  const send = async (text, extra = {}, waitMs = 400) => {
     const before = server.sent.length
     server.emit('message', {
       bot: server.socket,
@@ -180,7 +188,9 @@ async function boot({ resumeMode = 'fail' } = {}) {
       raw: { message: [] },
       ...extra,
     })
-    await new Promise((resolve) => setTimeout(resolve, 40))
+    const deadline = Date.now() + waitMs
+    while (Date.now() < deadline && server.sent.length === before) await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 30))
     return server.sent.slice(before).map((item) => item.segments.map((segment) => segment.data?.text ?? `[${segment.type}]`).join('')).join('\n')
   }
   const notice = async (payload) => {

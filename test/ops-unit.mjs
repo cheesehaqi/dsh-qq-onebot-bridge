@@ -335,7 +335,12 @@ check('parseOpsArgs 不是该命令 → 拒绝', parseOpsArgs('/群名 x', '/踢
   check('打卡名册：按 rank 升序（小数 rank 排在小 rank 后面）',
     text.indexOf('10001') < text.indexOf('10002') && text.indexOf('10002') < text.indexOf('10003'),
     text.replace(/\n/g, ' | '))
-  check('打卡名册：小数 rank 四舍五入显示', text.includes('第 6 名') && !text.includes('5.5'), text.replace(/\n/g, ' | '))
+  // 名次用**排序后的位置**：rank 是 QQ 的 (signInRank-1)/2+1，四舍五入会让
+  // 1/1.5/2 显示成 第1名/第2名/第2名（重复且没有第 3 名）——审查提的 P2。
+  check('打卡名册：名次是连续位置而不是四舍五入的 rank',
+    text.includes('第 1 名 10001') && text.includes('第 2 名 10002') && text.includes('第 3 名 10003'),
+    text.replace(/\n/g, ' | '))
+  check('打卡名册：不再出现 rank 原始小数', !text.includes('5.5') && !text.includes('2.5'))
   check('打卡名册：时间按 HH:MM 显示', /09:00|08:00/.test(text), text.replace(/\n/g, ' | '))
   check('打卡名册：time=0 不显示 1970', !text.includes('1970') && !text.includes('08:00:00'))
   check('打卡名册：limit 生效并提示剩余',
@@ -381,10 +386,13 @@ check('parseOpsArgs 不是该命令 → 拒绝', parseOpsArgs('/群名 x', '/踢
   check('申请拉取：缺 request_id 的条目被跳过', collectPendingRequests({ systemMsg: { join_requests: [{ invitor_uin: 1 }] } }).length === 0)
   check('申请拉取：空输入返回空数组', collectPendingRequests({}).length === 0)
 
-  const summary = formatPullResult({ adopted: list, already: 2, skipped: 1, fetched: 5 })
-  check('拉取回执：说明并入数量与明细', summary.includes('新并入待审 3 条') && summary.includes('入群申请 1'), summary.replace(/\n/g, ' | '))
-  check('拉取回执：说明跳过与重复', summary.includes('已有 2 条') && summary.includes('跳过 1 条'))
+  const summary = formatPullResult({ adopted: list, already: 2, full: 1, invalid: 3, raw: 9, pendingMax: 20 })
+  check('拉取回执：说明接口原始条数与并入数量', summary.includes('接口共返回 9 条') && summary.includes('新并入待审 3 条') && summary.includes('入群申请 1'), summary.replace(/\n/g, ' | '))
+  check('拉取回执：三类跳过各自说各自的真原因',
+    summary.includes('跳过 3 条：已处理过') && summary.includes('已有 2 条') && summary.includes('队列已满（verifyMaxPending=20）'),
+    summary.replace(/\n/g, ' | '))
   check('拉取回执：可疑好友提醒只能同意', summary.includes('只能同意'))
+  check('拉取回执：没有队列满时不提队列', !formatPullResult({ adopted: [], raw: 2, invalid: 2 }).includes('队列已满'))
 }
 
 // —— 13. 红线：纯模块，零依赖，不自己发 QQ ——

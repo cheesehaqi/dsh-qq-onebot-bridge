@@ -180,7 +180,10 @@ class MockServer extends EventEmitter {
   setGroupWholeBan() { return Promise.resolve({}) }
   setGroupBan() { return Promise.resolve({}) }
   setGroupKick() { return Promise.resolve({}) }
-  setGroupLeave() { return Promise.resolve({}) }
+  setGroupLeave(_socket, groupId, isDismiss) {
+    this.#rec('set_group_leave', { groupId, isDismiss })
+    return Promise.resolve({})
+  }
   getForwardMsg() { return Promise.resolve({ messages: [] }) }
   getGroupMemberList() { return Promise.resolve([]) }
   getFriendList() { return Promise.resolve([]) }
@@ -799,8 +802,9 @@ function makeBridge(overrides = {}) {
   check('K3 未知词 → 中文报错列出四种且零新增调用',
     bad.includes('四种') && t.server.count('set_group_member_invite_policy') === 2, brief(bad))
   t.server.reset()
-  await t.send(t.message('/邀请策略 关闭', { __injected: true }))
-  check('K4 注入回合 0 出站：邀请策略', t.server.count('set_group_member_invite_policy') === 0)
+  const injInvite = await t.send(t.message('/邀请策略 关闭', { __injected: true }))
+  check('K4 注入回合 0 出站：邀请策略（业务调用总数为 0 + 回复说明原因）',
+    t.server.calls.filter((c) => c.action !== 'send_msg').length === 0 && injInvite.includes('注入/回放回合不写 QQ'), brief(injInvite))
   t.stop()
 }
 
@@ -829,8 +833,9 @@ function makeBridge(overrides = {}) {
     bad.includes('1–5') && t.server.count('set_group_add_option') === 3, brief(bad))
 
   t.server.reset()
-  await t.send(t.message('/加群方式 4 问题=a 答案=b', { __injected: true }))
-  check('L5 注入回合 0 出站：加群方式', t.server.count('set_group_add_option') === 0)
+  const injAddOption = await t.send(t.message('/加群方式 4 问题=a 答案=b', { __injected: true }))
+  check('L5 注入回合 0 出站：加群方式（业务调用总数为 0 + 回复说明原因）',
+    t.server.calls.filter((c) => c.action !== 'send_msg').length === 0 && injAddOption.includes('注入/回放回合不写 QQ'), brief(injAddOption))
   t.stop()
 }
 
@@ -952,7 +957,18 @@ function makeBridge(overrides = {}) {
   check('O2 被拦下的条目仍在队列里（没有被静默消费）',
     t.bridge.joinGuard.list().length === 2, String(t.bridge.joinGuard.list().length))
   const injList = await t.send(t.message('/待审', { __injected: true }))
-  check('O3 注入回合连 /待审 也走同一道闸', injList.includes('不真的审批'), brief(injList))
+  check('O3 注入回合的 /待审 仍可看队列（纯本地读，不该被写闸门连坐）',
+    injList.includes('待处理请求') && injList.includes('补拉'), brief(injList))
+  t.stop()
+}
+{
+  // injectDryRun:false（"真发"模式）下，注入回合的审批照常执行——与 /群打卡 等处的口径一致。
+  const t = makeBridge({ groupOpsEnabled: true, requestSyncEnabled: true, verifyEnabled: true, injectDryRun: false })
+  await t.send(t.message('/申请'))
+  t.server.reset()
+  await t.send(t.message('/同意 1', { __injected: true }))
+  check('O4 injectDryRun=false 时注入回合的审批真的执行（与全项目口径一致）',
+    t.server.count('set_group_add_request') === 1, brief(t.server.calls.map((c) => c.action)))
   t.stop()
 }
 {
@@ -1041,6 +1057,77 @@ function makeBridge(overrides = {}) {
   const secretKeys = ['ttsApiKey', 'sttApiKey', 'imageGenApiKey', 'notifyToken', 'notifyPushUrl', 'accessToken', 'verifyKeyword', 'ttsLocalRefAudio']
   check('Q2 新开关没有把密钥类字段带进快照',
     !secretKeys.some((key) => key in f), secretKeys.filter((key) => key in f).join(','))
+  t.stop()
+}
+
+{
+  // P1（独立审查抓到）：`/撤管理` 曾经用 `raw.includes('设管理')` 判断动作，
+  // 于是参数里出现"设管理员"三个字就会**反向提权**。这里把那条路钉死。
+  const t = makeBridge({ groupOpsEnabled: true, opsAdminEnabled: true })
+  await t.send(t.message('/撤管理 10009 设管理员'))
+  const call = t.server.paramsOf('set_group_admin')[0]
+  check('R1 参数里出现"设管理员"不会把 /撤管理 变成提权',
+    call !== undefined && call.enable === false && call.userId === '10009', brief(call))
+  const out = await t.send(t.message('/撤管理 10009 顺便说一句设管理员不行'))
+  check('R2 目标仍取第一个数字，回复说的是"取消"',
+    out.includes('已取消') && t.server.paramsOf('set_group_admin')[1].enable === false, brief(out))
+  t.server.reset()
+  await t.send(t.message('/设管理 10009 撤管理员'))
+  check('R3 反过来也一样（/设管理 里的"撤管理员"不该把它变成撤销）',
+    t.server.paramsOf('set_group_admin')[0].enable === true, brief(t.server.paramsOf('set_group_admin')))
+  t.stop()
+}
+{
+  // 注入器/回放管线送来的 notice **不带** adminSet（只有 parseNotice 会补），
+  // 早前 `adminSet !== false` 会把 undefined 当成 true ⇒ 'unset' 被记成"已恢复管理员"。
+  const t = makeBridge({ groupOpsEnabled: true, opsKickEnabled: true, adminWatchEnabled: true })
+  t.server.emit('notice', { noticeType: 'group_admin', subType: 'unset', groupId: 2002, userId: 999, selfId: 999 })
+  await sleep(140)
+  check('R4 没有 adminSet 的 unset 事件仍然记成"已取消"（不许反向）',
+    t.bridge.botAdminKnown.get(2002) === false, String(t.bridge.botAdminKnown.get(2002)))
+  check('R5 推播文案也是"已不是管理员"',
+    t.server.sent.some((item) => item.segments.some((seg) => String(seg.data?.text ?? '').includes('已不是本群管理员'))),
+    brief(t.server.sent.map((item) => item.segments.map((s) => s.data?.text).join(''))))
+  t.server.reset()
+  await t.send(t.message('/批量踢 10002'))
+  await t.send(t.message('/批量踢 确认'))
+  check('R6 于是写命令被真话拦住（零调用）', t.server.count('set_group_kick_members') === 0)
+  // 缺 sub_type 的事件既不记账也不推播（宁可不猜）
+  const t2 = makeBridge({ groupOpsEnabled: true, adminWatchEnabled: true })
+  t2.server.emit('notice', { noticeType: 'group_admin', groupId: 2002, userId: 999, selfId: 999 })
+  await sleep(140)
+  check('R7 缺 sub_type 的 group_admin 事件不记账、不推播（不猜）',
+    t2.bridge.botAdminKnown.has(2002) === false && t2.server.sent.length === 0, String(t2.server.sent.length))
+  t2.stop()
+  t.stop()
+}
+{
+  // verifyEnabled=false 时不入队：没有 /同意、/拒绝 可用，入队只会把队列占满（审查 P3-12）。
+  const t = makeBridge({ groupOpsEnabled: true, requestSyncEnabled: true, verifyEnabled: false })
+  const out = await t.send(t.message('/申请'))
+  check('R8 verifyEnabled=false → 只预览不入队',
+    out.includes('未并入待审队列') && t.bridge.joinGuard.list().length === 0, brief(out))
+  check('R9 但拉取接口确实被调用了', t.server.count('get_group_system_msg') === 1)
+  t.stop()
+}
+{
+  // 白名单外的群：机器人被撤管理员不发播报（与欢迎语/戳一戳/防撤回同口径）。
+  const t = makeBridge({ groupOpsEnabled: true, adminWatchEnabled: true, allowGroups: [3003] })
+  t.server.emit('notice', { noticeType: 'group_admin', subType: 'unset', groupId: 2002, userId: 999, selfId: 999 })
+  await sleep(140)
+  check('R10 白名单外的群不播报管理员变更（但状态照记）',
+    t.bridge.botAdminKnown.get(2002) === false && t.server.sent.length === 0, String(t.server.sent.length))
+  t.stop()
+}
+{
+  // /退群 只需要普通成员权限：被撤管理员时不该被"权限自愈"假理由拦住（审查 P3-9）。
+  const t = makeBridge({ groupOpsEnabled: true, leaveGroupEnabled: true, adminWatchEnabled: true })
+  t.server.emit('notice', { noticeType: 'group_admin', subType: 'unset', groupId: 2002, userId: 999, selfId: 999 })
+  await sleep(140)
+  t.server.reset()
+  const out = await t.send(t.message('/退群 确认'))
+  check('R11 被撤管理员后 /退群 仍然可用（它不需要管理员权限）',
+    t.server.count('set_group_leave') === 1 && !out.includes('已被取消'), brief(out))
   t.stop()
 }
 
