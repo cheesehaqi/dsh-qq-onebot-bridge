@@ -204,6 +204,10 @@ check('groupsView 开关表带中文名与生效值',
   && groups.switches.every((row) => row.label.length > 0),
   JSON.stringify(groups.switches.slice(0, 3)))
 check('groupsView 统计打开的开关数', groups.onCount === 3, String(groups.onCount))
+check('groupsView 含 v0.5.8 的五个新开关（键必须与运行快照白名单一致）',
+  ['opsAdminEnabled', 'opsInvitePolicyEnabled', 'opsAddOptionEnabled', 'requestSyncEnabled', 'adminWatchEnabled']
+    .every((key) => groups.switches.some((row) => row.key === key && row.label.length > 0)),
+  groups.switches.map((row) => row.key).join(','))
 check('groupsView 带实时计数', groups.counters.reactionMessages === 12 && groups.counters.pendingKickBatches === 1, JSON.stringify(groups.counters))
 check('groupsView 说明开关真源在插件配置',
   groups.note.includes('cordis.patch.yml'), groups.note)

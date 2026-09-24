@@ -134,7 +134,7 @@ export const QR_STALE_SECONDS = 300
  * NapCat 加载器进程名（重启时**只允许**结束这些，以及它们 /T 带出来的子进程）。
  *
  * 为什么不再有 `QQ.exe`：按镜像名杀 QQ 会连**用户自己的 QQ 客户端**一起杀掉
- * （真机上就有 `D:\yingyong(应用）\QQ.exe` 在跑）。加载器的子进程用 `taskkill /PID … /T`
+ * （真机上就有一个非提权的个人 QQ 客户端在跑）。加载器的子进程用 `taskkill /PID … /T`
  * 连带结束即可，不需要、也不允许按名字杀 QQ。
  */
 export const NAPCAT_LOADER_NAMES = ['napcatwinbootmain.exe', 'napcat.exe', 'napcatshell.exe']

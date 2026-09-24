@@ -276,6 +276,13 @@ export function groupsView(runtime, { now = Date.now() } = {}) {
     { key: 'opsProfileEnabled', label: '群资料修改' },
     { key: 'opsPolicyEnabled', label: '入群与发言策略' },
     { key: 'opsReportEnabled', label: '运营周报' },
+    // v0.5.8：群权限 / 申请补拉 / 权限自愈。键必须与 lib/bridge.js 运行快照的
+    // features 白名单一致——快照里没有的键会让面板永远显示"关"。
+    { key: 'opsAdminEnabled', label: '管理员设置' },
+    { key: 'opsInvitePolicyEnabled', label: '邀请策略' },
+    { key: 'opsAddOptionEnabled', label: '加群方式' },
+    { key: 'requestSyncEnabled', label: '申请补拉' },
+    { key: 'adminWatchEnabled', label: '管理员变动播报' },
   ]
   const switches = switchRows.map((row) => ({ ...row, on: features[row.key] === true }))
   const groups = new Map()

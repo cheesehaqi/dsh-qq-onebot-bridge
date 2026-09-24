@@ -18,7 +18,38 @@
 
 ### 修掉一个真缺陷（注入红线）
 
-- **注入/回放回合 `/同意` 会真的批准人**：`set_group_add_request` 的参数里只有 `flag`，没有 `group_id`/`user_id`，落不进 scoped dry-run 的拦截条件——与 v0.5.1 修的 `/ocr`、`/好友` 是同一类洞（当时那条 P1 没覆盖审批路径）。现在 `#handleVerifyCommand` 与 `#resolveJoin` 都显式判断离线回合，直接拒绝执行并写 trace；新测试 `O1`–`O3` 用"注入回合 0 出站 + 队列条目仍在（没有被静默消费）"钉住它。
+- **注入/回放回合 `/同意` 会真的批准人**：`set_group_add_request` 的参数里只有 `flag`，没有 `group_id`/`user_id`，落不进 scoped dry-run 的拦截条件——与 v0.5.1 修的 `/ocr`、`/好友` 是同一类洞（当时那条 P1 没覆盖审批路径）。现在 `#handleVerifyCommand` 与 `#resolveJoin` 都显式判断离线回合，直接拒绝执行并写 trace；新测试 `O1`–`O5` 用"注入回合 0 出站 + 队列条目仍在（没有被静默消费）"钉住它，其中 `O5` 专门覆盖**第二层防线**（申请人答对验证题的自动放行路径不经过命令处理，只能靠 `#resolveJoin` 自己兜）。
+
+### 独立审计发现并修掉的隐私问题（**发布前拦下**）
+
+一轮独立隐私审计（只读、扫工作树 + **全部 git 对象**）在**已提交的代码里**抓到三处：
+
+- **`control/lib/supervisor.mjs` 注释里有作者机器的真实应用路径**（`D:` 盘下一个具体安装目录的 `QQ.exe`）。它已进入**可达历史**（由 v0.5.6 的提交引入）并会随 `git archive` 打进发布包；`privacy-unit` 却全绿——因为它的路径规则只认 `C:\Users\<名>`/`/home/<名>`/`/Users/<名>`。现已改为不含任何本机路径的描述。
+- **`control/启动控制台.bat` 硬编码了作者机器上的 node 安装路径**（D 盘下一个非默认目录，本机真实存在）。它之所以从没被扫到：`git ls-files` 对**非 ASCII 文件名**输出 C 引号形式（`"control/\345\220\257…bat"`），旧的测试直接拿这串去 `readFileSync` → ENOENT → `catch { continue }` **静默丢文件**（128 个被跟踪文件只扫到 126 个）。现在改成通用的 `%ProgramFiles%`/`%LOCALAPPDATA%` 候选 + `QQ_BRIDGE_NODE` 环境变量兜底。
+- **`test/control-unit.mjs` 里有一条真机 token 形态的字符串**（`?token=<44 位随机串>`）。真机核对：它不在 `qq-control.json`/`qq-runtime.json`/调试日志里，**当前不是活 token**，但仍应清理——已换成明显的假值。
+
+**隐私套件本身也一并加固**（`test/privacy-unit.mjs` 33 → 36 断言，8 个结构性盲点全部堵上）：
+
+- `git ls-files -z`（+ `core.quotePath=false`）→ 中文文件名不再被丢；新增断言"每个被跟踪文件都被扫到"（读不出来就点名失败）与"非 ASCII 文件名也在清单里"。
+- 不再按扩展名白名单过滤（旧实现漏掉 `LICENSE`、`.sh/.ps1/.toml/.env` 与无扩展名文件）；二进制内容按 latin1 再扫一遍。
+- **新增"盘符绝对路径"规则**：判据是**"这台机器上真的存在"**（`existsSync`），比"形状像路径"精确，也不会误伤文档里的虚构示例（`X:\qq-history`、`D:\evil`、`C:\NapCat\…` 都不存在）；`C:\Windows\`/`C:\Program Files\` 这类系统路径豁免。
+- 密钥形态新增 `?token=<长随机串>` 与"赋值型长密钥"两类；占位符放行改成**显式白名单**（旧实现用 `/your|example|xxx/` 一刀切，会吞掉任何恰好含这些子串的真密钥）。
+- schema 密钥字段默认值检查同时认单/双引号，并点名要求 `sttApiKey`/`ttsApiKey`/`imageGenApiKey` 必须被覆盖（旧实现只认单引号，双引号写法整片隐形而"至少 4 个"照样通过）。
+- 私有号清单：本机明明有 profile 却收不到号时**判失败而不是静默 SKIP**；收集规则扩到"配置块里身份类键（qq/uin/user/admin/owner/group/chat/notify/friend）的纯数字值"（第一版收得太宽，把 `fileSendMaxBytes` 的字节上限当成了 QQ 号，套件当场误报 5 处，已收紧）。
+- **新增可选的"历史/对象库"扫描**（`DSH_QQ_PRIVACY_HISTORY=1`）：工作树干净 ≠ 历史干净。它会遍历 `git cat-file --batch-all-objects` 的全部 blob，报告私有号、本机用户名路径与"真实存在的绝对路径"。真机现状：私有号 **0 命中**；3 个**悬空** blob 含家目录路径；9 个 blob 含真实路径（历史版本的 `supervisor.mjs` + 那些悬空对象）。
+
+> 历史残留的处理说明：悬空对象可用 `git gc --prune=now` 清除；**已进入可达提交的**那处路径只能靠改写历史（会改所有提交哈希）。这两件事都会删除数据，按本项目规矩**不在未确认前自行执行**。
+
+### 顺手修掉的其它问题（自查发现）
+
+- **控制台「群配置页」漏接新开关**：运行快照的 `features` 是显式白名单、面板开关表也是静态列表，两边都没加 v0.5.8 的键 → 面板会永远显示"关"。两处都补上（`opsAdminEnabled`/`opsInvitePolicyEnabled`/`opsAddOptionEnabled`/`requestSyncEnabled`/`adminWatchEnabled`），并加断言钉住"快照里有、面板里有"。
+- **补拉回来的申请会被当成"答题"**：这类条目没有验证题（申请人当时不在线），他随后私聊说句话会被误判成答题、回一句空的「答案不对哦」。现在只认真正发过题目的条目。
+- **文档口径**：仓库根目录那个**被跟踪**的 `cordis.patch.yml` 是安装用的 bundle patch，与 README 让用户改的 profile 配置文件**同名**——用户若改错文件填密钥就会提交进仓库。已在 README（中英）与根文件里都加了醒目的"别填这里"提示。
+- `.gitignore` 补齐 `qq-*.md`/`qq-*.bin`/`qq-*.html`（规则既然按扩展名兜底，就不该只兜一半）。
+
+### 测试
+
+- `ops-unit` 106 → **147**、`ops-bridge-unit` 96 → **148**、`privacy-unit` 33 → **36**、`perf-unit` 66 → **67**；全量 **55 套 / 3531 断言全绿**。
 
 ### 按住的（探针说"别猜"）
 
@@ -32,7 +63,8 @@
 ### 测试
 
 - `ops-unit` 106 → **147**、`ops-bridge-unit` 96 → **143**；全量 **55 套 / 3522 断言全绿**。
-- 新断言覆盖：`enable` 显式性（含"缺 enable 必须报错"）、邀请策略四个字面量、`add_type` 只有 4/5 带问题/答案、名册小数 rank 与空时间戳、申请归一化（checked 过滤 / 去重 / 三类 kind / 可疑好友 approveOnly）、审批 flag == `request_id`、注入回合 0 出站、权限自愈的记账与拦截。自审时又抓到一个自己写的 UX 缺陷并修掉：补拉回来的条目没有验证题，申请人随后私聊说话会被误判成"答题"、回一句空的「答案不对哦」，现在只认真正发过题目的条目（`N14`/`N15` 钉住）。
+- 新断言覆盖：`enable` 显式性（含"缺 enable 必须报错"）、邀请策略四个字面量、`add_type` 只有 4/5 带问题/答案、名册小数 rank 与空时间戳、申请归一化（checked 过滤 / 去重 / 三类 kind / 可疑好友 approveOnly）、审批 flag == `request_id`、注入回合 0 出站（两层防线）、权限自愈的记账与拦截、运行快照与控制台开关表同步。
+- **变异测试**：把注入闸门临时拿掉后 `O1`/`O3` 确实变红（不是恒真断言），随后恢复。
 
 ### 待真机验证（本机 NapCat 未登录，跑不了）
 

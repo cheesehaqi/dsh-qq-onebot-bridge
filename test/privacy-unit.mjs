@@ -14,7 +14,7 @@
  */
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -55,6 +55,22 @@ export function collectPrivateIds({ env = process.env, home = homedir(), readFil
       if (!block) continue
       for (const match of `${block[1]}\n${block[2]}`.matchAll(/\d{5,12}/g)) ids.add(match[0])
     }
+    // 再把整个插件配置块里**身份类键**的纯数字值一并纳入（键名会随版本增加/改名，
+    // 漏一个键就等于少比对一个真号：本机实测旧实现只收到 4 个号）。
+    // 只认键名像"人/群"的行（qq/uin/user/admin/owner/group/chat/notify/friend），
+    // 且值必须本身就是数字或数字列表——否则会把「字节上限」这类默认值
+    // （`fileSendMaxBytes` 的五十兆）当成 QQ 号收进来（第一版就踩了，套件立刻误报 5 处）。
+    const block = /(?:^|\n)\s*-\s*id:\s*dsh-qq-onebot-bridge\s*\n([\s\S]*?)(?=\n\s*-\s*id:|\s*$)/.exec(text)
+    if (block) {
+      for (const raw of block[1].split(/\r?\n/)) {
+        const line = raw.replace(/#.*$/, '')
+        const key = (/^\s*([\w.-]+)\s*:/.exec(line) ?? [])[1] ?? ''
+        if (!/(qq|uin|user|admin|owner|group|chat|notify|friend)/i.test(key)) continue
+        const value = line.replace(/^\s*[\w.-]+\s*:/, '')
+        if (!/^\s*[[\]\d,\s'"]*$/.test(value)) continue
+        for (const match of value.matchAll(/\d{6,12}/g)) ids.add(match[0])
+      }
+    }
   }
   return ids
 }
@@ -71,6 +87,8 @@ const RUNTIME_ARTIFACTS = [
   'qq-memory/g_1.json', 'qq-media/a.png', 'qq-images/a.png', 'qq-replies/a.png', 'qq-tts/a.mp3',
   'qq-files/a.txt', 'qq-exports/a.md', 'qq-faces/list.json', 'qq-badwords.txt',
   'qq-engage.json', 'qq-broadcast.json',
+  // 审计提的缺口：规则按扩展名兜底，就不能只兜一半（`/export` 产出的就是 .md）。
+  'qq-export.md', 'qq-notes.md', 'qq-raw.bin', 'qq-dump.html',
   // writeJsonAtomic 的临时文件是**隐藏名** `.m1a2b3-x9y8z7.tmp`（写一半崩掉就会留下，
   // 里面是完整的 JSON——qq-engage.json 这类内容含 QQ 号）→ 必须同 .json 一样被忽略。
   '.m1a2b3-x9y8z7.tmp',
@@ -79,9 +97,15 @@ const RUNTIME_ARTIFACTS = [
 // ------------------------------------------------------------------ 读文件 --
 // 发布包里没有 .git（用户直接从 zip 解包时也跑不动 `git ls-files`），所以这里退化：
 // 有 git 就用 git 的文件清单，没有就遍历目录（排除 node_modules 与运行产物）。
+//
+// ⚠️ 必须用 `-z`：`git ls-files` 对非 ASCII 文件名会输出 C 引号形式
+// （`"control/\345\220\257…bat"`），旧实现把这一串当路径去 readFileSync → ENOENT →
+// `catch { continue }` 静默丢掉该文件。真机实测：128 个被跟踪文件只扫到 126 个，
+// 被丢的正是 `control/启动控制台.bat`——而它当时硬编码着作者机器的 node 路径。
 function listFiles() {
   try {
-    const fromGit = execFileSync('git', ['ls-files'], { cwd: repo, encoding: 'utf8' }).split(/\r?\n/).filter(Boolean)
+    const raw = execFileSync('git', ['-c', 'core.quotePath=false', 'ls-files', '-z'], { cwd: repo, encoding: 'utf8' })
+    const fromGit = raw.split('\u0000').filter(Boolean)
     if (fromGit.length > 0) return { names: fromGit, source: 'git' }
   } catch { /* 不是 git 仓库（解包副本） */ }
   const names = []
@@ -101,15 +125,27 @@ function listFiles() {
 const listed = listFiles()
 const tracked = listed.names
 check('被跟踪/枚举文件数量合理', tracked.length >= 90, `${tracked.length} 个（来源 ${listed.source}）`)
+
+// **每个**文件都必须被读到：读不出来就点名失败，绝不静默跳过。
+// 也不再按扩展名白名单过滤（旧实现漏掉 LICENSE、.sh/.ps1/.toml/.env 与无扩展名文件）；
+// 二进制内容按 latin1 再扫一遍，宁可多扫也不能漏。
 const textFiles = []
+const unreadable = []
 for (const name of tracked) {
-  if (!/\.(mjs|js|json|md|yml|yaml|html|txt|bat|gitignore)$/i.test(name) && name !== '.gitignore') continue
-  let text = ''
-  try { text = readFileSync(join(repo, name), 'utf8') } catch { continue }
+  let buffer
+  try { buffer = readFileSync(join(repo, name)) } catch { unreadable.push(name); continue }
+  const text = buffer.includes(0) && buffer.length > 4
+    ? `${buffer.toString('utf8')}\n${buffer.toString('latin1')}`
+    : buffer.toString('utf8')
   textFiles.push({ name, text })
 }
-check('读到可扫描的文本文件', textFiles.length >= 60, `${textFiles.length} 个`)
-check('无 .git 时也能枚举文件（解包副本可用）', listed.source === 'git' || listed.source === 'walk', listed.source)
+check('每个被跟踪文件都被扫到（不许静默跳过）', unreadable.length === 0, unreadable.slice(0, 5).join(', '))
+check('扫描数量与文件清单一致', textFiles.length === tracked.length, `${textFiles.length}/${tracked.length}`)
+if (listed.source === 'git') {
+  // 上面 `-z` 的回归断言：中文文件名必须真的出现在清单里。
+  const nonAscii = tracked.filter((name) => /[^\u0000-\u007F]/.test(name))
+  check('非 ASCII 文件名也在清单里（-z 清单生效）', nonAscii.length > 0, nonAscii.join(','))
+}
 
 // ------------------------------------------------------- ① 路径与用户名泄露 --
 const USERNAME_PATTERNS = [
@@ -125,6 +161,25 @@ for (const { name, text } of textFiles) {
 }
 check('没有硬编码的本机用户名/家目录路径', pathHits.length === 0, pathHits.slice(0, 5).join(' | '))
 
+// 盘符绝对路径（`D:\…`、`C:/…`）：家目录之外的真实路径同样是泄露面。
+// 旧实现只认 `C:\Users\<名>`/`/home/<名>`/`/Users/<名>`，于是作者机器上某个
+// 非家目录的真实应用路径（D 盘下的一个目录）一路通过，隐私套件全绿却是假的。
+// 判据是**"这台机器上真的存在"**——比"形状像路径"精确得多，也不会误伤文档里
+// 的虚构示例（`X:\qq-history`、`D:\evil`、`C:\NapCat\…`、`D:/voice/…` 都不存在）。
+// 例外：操作系统自带路径（`C:\Windows\`、`C:\Program Files\`）不含个人信息。
+const OS_PATH_ALLOW = [/^C:[\\/]Windows[\\/]/i, /^C:[\\/]Program Files(?: \(x86\))?[\\/]/i]
+const DRIVE_PATH = /(?:^|[^\w:/])([A-Za-z]:[\\/][^\s"'`)\]},;]*)/g
+const realPathHits = []
+for (const { name, text } of textFiles) {
+  for (const match of text.matchAll(DRIVE_PATH)) {
+    const candidate = match[1].replace(/[.,;:]+$/, '')
+    if (candidate.length < 5) continue
+    if (OS_PATH_ALLOW.some((re) => re.test(candidate))) continue
+    if (existsSync(candidate)) realPathHits.push(`${name}: 本机真实存在的绝对路径 → ${candidate}`)
+  }
+}
+check('没有"本机真实存在"的绝对路径（盘符路径不只家目录）', realPathHits.length === 0, [...new Set(realPathHits)].slice(0, 5).join(' | '))
+
 // 作者机器的工作目录不应作为默认值出现（示例/文档里的路径说明允许，默认值不允许）
 const cwdDefaultHits = textFiles
   .filter(({ name, text }) => /(config\.cwd|env\.DSH_QQ_CWD)[^\n]*\n?[^\n]*'[A-Za-z]:\\\\/.test(text) || /exists\('[A-Za-z]:\\\\[^']+'\)/.test(text))
@@ -134,6 +189,11 @@ check('控制台配置探测不假设作者机器的目录', cwdDefaultHits.leng
 // ----------------------------------------------------------- ② 真实 QQ 号 --
 const PRIVATE_IDS = collectPrivateIds()
 const idHits = []
+// 本机明明有 profile 却一个号都没收到 → 这是**检查失效**，必须红，不许静默 SKIP
+// （旧实现只打印 SKIP，于是"清单收集坏了"和"清单是空的"看起来一模一样）。
+const hasLocalProfile = (() => { try { return existsSync(join(homedir(), '.dsh', 'profiles')) } catch { return false } })()
+check('私有号清单可用（本机有 profile 时不许静默跳过）',
+  PRIVATE_IDS.size > 0 || !hasLocalProfile, `size=${PRIVATE_IDS.size} hasProfile=${hasLocalProfile}`)
 if (PRIVATE_IDS.size === 0) {
   console.log('SKIP 没有可用的私有号清单（本机无 profile 配置且未设置 DSH_QQ_PRIVATE_IDS），跳过真实号比对')
 } else {
@@ -162,12 +222,22 @@ const SECRET_PATTERNS = [
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/g, '私钥'],
   [/Bearer\s+[A-Za-z0-9._-]{24,}/g, 'Bearer token'],
   [/\b[0-9a-f]{32}\.[A-Za-z0-9_-]{12,}\b/g, '复合形态 key（如智谱）'],
+  // 早期版本漏了这一类：一条真机上的 `?token=<44 位随机串>` 被抄进测试文件后一路通过。
+  [/[?&](?:token|access_token|key|apikey|api_key|secret)=([A-Za-z0-9._~-]{16,})/gi, 'URL 里的长 token'],
+  [/\b(?:token|apiKey|api_key|secret|password)\s*[:=]\s*["']([A-Za-z0-9._~-]{24,})["']/gi, '赋值型长密钥'],
 ]
+// 允许的**显式假值**：只有命中这张表才放行。旧实现用 /your|example|xxx|\.\.\./ 一刀切，
+// 会把任何恰好含这些子串的真密钥一起吞掉。
+const FAKE_SECRET_ALLOW = [
+  /example-token/i, /OLD_token_value/i, /NEW_token_value/i, /test-token/i, /SECRET-TOKEN/i,
+  /<[^>]{1,40}>/, /placeholder/i, /dummy/i, /^[?&]token=x?abc$/i,
+]
+const isFakeSecret = (match) => FAKE_SECRET_ALLOW.some((re) => re.test(match))
 const secretHits = []
 for (const { name, text } of textFiles) {
   for (const [re, label] of SECRET_PATTERNS) {
     for (const match of text.matchAll(re)) {
-      if (/your|example|placeholder|xxx|\.\.\./i.test(match[0])) continue
+      if (isFakeSecret(match[0])) continue
       secretHits.push(`${name}: ${label}`)
     }
   }
@@ -176,10 +246,15 @@ check('没有密钥形态的字符串', secretHits.length === 0, [...new Set(sec
 
 // 配置 schema 里所有"密钥类"字段的默认值必须是空串/占位（真实值只应存在于机器本地配置）
 const schema = textFiles.find(({ name }) => name === 'lib/index.js')?.text ?? ''
-const keyDefaults = [...schema.matchAll(/(\w*(?:ApiKey|Token|Password|Secret)\w*)\s*:\s*z\.string\(\)[^\n]*?\.default\(\s*'([^']*)'\s*\)/gi)]
-const nonEmptyKeyDefaults = keyDefaults.filter(([, , value]) => value !== '')
-check('配置 schema 里的密钥字段默认值为空', nonEmptyKeyDefaults.length === 0, nonEmptyKeyDefaults.map(([, field, value]) => `${field}=${value.length}字符`).join(','))
-check('schema 里确实存在密钥类字段（检查本身有效）', keyDefaults.length >= 4, `${keyDefaults.length} 个`)
+const keyDefaults = [...schema.matchAll(/(\w*(?:ApiKey|Token|Password|Secret)\w*)\s*:\s*z\.string\(\)[^\n]*?\.default\(\s*(['"])([^'"]*)\2\s*\)/gi)]
+const nonEmptyKeyDefaults = keyDefaults.filter((match) => match[3] !== '')
+check('配置 schema 里的密钥字段默认值为空', nonEmptyKeyDefaults.length === 0, nonEmptyKeyDefaults.map((match) => `${match[1]}=${match[3].length}字符`).join(','))
+// 这条检查自身必须有效：旧正则只认单引号 `.default('…')`，双引号写法会整片隐形，
+// 而"至少 4 个"的下限照样通过。所以这里点名几个必须被覆盖到的字段。
+const defaultedNames = new Set(keyDefaults.map((match) => match[1]))
+check('关键密钥字段确实被默认值检查覆盖',
+  ['sttApiKey', 'ttsApiKey', 'imageGenApiKey'].every((field) => defaultedNames.has(field)) && keyDefaults.length >= 4,
+  `${keyDefaults.length} 个：${[...defaultedNames].join(',')}`)
 
 // 示例配置里也不能填值
 const example = textFiles.find(({ name }) => name === 'examples/cordis.patch.example.yml')?.text ?? ''
@@ -267,6 +342,49 @@ const injected = collectPrivateIds({
   readFile: () => { throw new Error('no file') },
 })
 check('私有号清单可被环境变量注入（CI 用，不需要本机配置）', injected.size === 2 && injected.has(NINE_ONES) && injected.has(NINE_NINES))
+
+// --------------------------------------------- ⑧ 历史 / 对象库（可选，只报告）--
+// 工作树干净 ≠ 历史干净：被后续提交删掉的、以及**悬空**的 blob 里可能还留着
+// 本机路径或密钥（真机实测：3 个悬空 blob 含家目录路径，正常 push 不会带走，
+// 但 `--mirror`、复制 `.git`、`clone --local` 会）。
+// 这类残留只能用「改写历史 / git gc --prune」清除，不是一次提交能修的，
+// 所以默认**只报告不判失败**：`DSH_QQ_PRIVACY_HISTORY=1 node test/privacy-unit.mjs`。
+if (String(process.env.DSH_QQ_PRIVACY_HISTORY ?? '') === '1' && listed.source === 'git') {
+  const historyBodies = () => {
+    const out = execFileSync('git', ['cat-file', '--batch-all-objects', '--batch'], { cwd: repo, encoding: 'latin1', maxBuffer: 256 * 1024 * 1024 })
+    const bodies = []
+    let at = 0
+    while (at < out.length) {
+      const headerEnd = out.indexOf('\n', at)
+      if (headerEnd < 0) break
+      const parts = out.slice(at, headerEnd).split(' ')
+      const size = Number(parts[2])
+      if (parts.length !== 3 || !Number.isFinite(size)) { at = headerEnd + 1; continue }
+      bodies.push([parts[0].slice(0, 8), out.slice(headerEnd + 1, headerEnd + 1 + size)])
+      at = headerEnd + 1 + size + 1
+    }
+    return bodies
+  }
+  const scanHistory = (matcher) => historyBodies().filter(([, body]) => matcher(body)).map(([oid]) => oid)
+  const user = homedir().split(/[\\/]/).filter(Boolean).pop() ?? ''
+  const reports = []
+  if (PRIVATE_IDS.size > 0) reports.push(['真机私有号', scanHistory((body) => [...PRIVATE_IDS].some((id) => body.includes(id)))])
+  if (user !== '') reports.push([`本机用户名路径（Users/${user.slice(0, 2)}…）`, scanHistory((body) => new RegExp(`Users[\\\\/]+${user}`, 'i').test(body))])
+  // 历史里的盘符路径同样按"这台机器上真的存在"判定；blob 正文是 latin1 解码的字节，
+  // 含中文的路径要按字节还原成 utf8 才能 existsSync（否则永远判"不存在"）。
+  reports.push(['本机真实存在的绝对路径', scanHistory((body) => {
+    for (const match of body.matchAll(DRIVE_PATH)) {
+      const candidate = Buffer.from(match[1].replace(/[.,;:]+$/, ''), 'latin1').toString('utf8')
+      if (candidate.length < 5 || OS_PATH_ALLOW.some((re) => re.test(candidate))) continue
+      if (existsSync(candidate)) return true
+    }
+    return false
+  })])
+  for (const [label, hits] of reports) {
+    console.log(hits.length === 0 ? `HISTORY 干净：${label}` : `HISTORY 命中 ${hits.length} 个 blob（${label}）：${[...new Set(hits)].slice(0, 8).join(', ')}`)
+  }
+  console.log('HISTORY 说明：命中的对象若为悬空 blob，可 `git gc --prune=now` 清除；若在可达提交里，只能改写历史（会改所有提交哈希，需谨慎）。')
+}
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

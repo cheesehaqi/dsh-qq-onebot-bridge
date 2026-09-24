@@ -1,4 +1,9 @@
 # Mount the QQ OneBot bridge in any DSH profile that installs this package.
+#
+# ⚠️ 这里**只放挂载声明**，不要填任何配置（更不能填 APIKey/token）：
+#    仓库根目录这份文件是**被 git 跟踪**的，填进来的密钥会直接进版本库。
+#    插件配置请写进 profile 的 cordis.patch.yml（仓库外），例如
+#    ~/.dsh/profiles/web/cordis.patch.yml，见 README 的「配置」一节。
 - insert:
     - id: dsh-qq-onebot-bridge
       name: dsh-qq-onebot-bridge

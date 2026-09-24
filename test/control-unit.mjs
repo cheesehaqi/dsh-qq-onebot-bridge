@@ -64,11 +64,14 @@ check('端口摘要带中文标签', summary.every((item) => item.label.length >
 
 // ------------------------------------------------------------------ reads ----
 const logFile = join(dir, 'host.log')
+// 这里的 token 必须是**明显的假值**：早期版本抄了真机上的一条 token 字面量，
+// 结果被 git 永久记住（审计发现）。任何看起来像真 token 的字符串都不许进仓库。
+const FAKE_TOKEN = 'example-token-not-a-real-secret'
 writeFileSync(logFile, [
-  'dsh web: http://127.0.0.1:3080/?token=xZRVGw6peedZUCdn6w_yh617gQFmKXURCLkjylA5Amc',
+  `dsh web: http://127.0.0.1:3080/?token=${FAKE_TOKEN}`,
   'dsh web: opening the default browser; pass --no-open to disable',
 ].join('\n'), 'utf8')
-check('从宿主日志提取 3080 token 链接', extractHostUrl(tailLines(logFile, 10).join('\n')) === 'http://127.0.0.1:3080/?token=xZRVGw6peedZUCdn6w_yh617gQFmKXURCLkjylA5Amc')
+check('从宿主日志提取 3080 token 链接', extractHostUrl(tailLines(logFile, 10).join('\n')) === `http://127.0.0.1:3080/?token=${FAKE_TOKEN}`)
 check('多次启动时取最新 token（避免 401）', extractHostUrl([
   'dsh web: http://127.0.0.1:3080/?token=OLD_token_value',
   'dsh web: opening the default browser; pass --no-open to disable',

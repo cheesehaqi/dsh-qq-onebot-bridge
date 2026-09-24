@@ -955,6 +955,24 @@ function makeBridge(overrides = {}) {
   check('O3 注入回合连 /待审 也走同一道闸', injList.includes('不真的审批'), brief(injList))
   t.stop()
 }
+{
+  // 第二层防线：申请人"答对验证题"的自动放行路径不经过命令处理，所以它只能靠
+  // #resolveJoin 自己的离线判断兜住。这里用真实的 request 事件建一条带题目的待审条目，
+  // 再用注入回合发正确答案——一次真实审批都不许发生。
+  const t = makeBridge({ verifyEnabled: true, groupOpsEnabled: true })
+  t.server.emit('request', {
+    requestType: 'group', subType: 'add', userId: 10055, groupId: 2002, comment: '求进群', flag: 'flag-10055', name: '新人',
+  })
+  await sleep(140)
+  const entry = t.bridge.joinGuard.list().find((item) => item.userId === 10055)
+  check('O4 request 事件建出带验证题的待审条目', Boolean(entry && entry.answer), brief(entry))
+  t.server.reset()
+  const replied = await t.send(t.message(entry.answer, { messageType: 'private', groupId: undefined, userId: 10055, __injected: true }))
+  check('O5 注入回合答对题也不会真的放行（第二层防线）',
+    t.server.count('set_group_add_request') === 0, brief(t.server.calls.map((c) => c.action)))
+  check('O6 条目仍在队列里', t.bridge.joinGuard.list().some((item) => item.userId === 10055), brief(replied))
+  t.stop()
+}
 
 // ---------------------------------------------------------------------------
 // P. v0.5.8 权限自愈：group_admin 事件
@@ -1006,6 +1024,23 @@ function makeBridge(overrides = {}) {
   await sleep(140)
   check('P8 别人的管理员变动不写我们的状态，也不打扰群',
     t.bridge.botAdminKnown.has(2002) === false && t.server.sent.length === 0, String(t.server.sent.length))
+  t.stop()
+}
+
+// ---------------------------------------------------------------------------
+// Q. v0.5.8：控制台「群配置页」按运行快照的 features 白名单渲染开关
+// ---------------------------------------------------------------------------
+{
+  const t = makeBridge({ groupOpsEnabled: true, opsAdminEnabled: true, opsInvitePolicyEnabled: true, opsAddOptionEnabled: true, requestSyncEnabled: true, adminWatchEnabled: true })
+  const snap = JSON.parse(readFileSync(join(t.cwd, 'qq-runtime.json'), 'utf8'))
+  const f = snap.features ?? {}
+  check('Q1 五个新开关 + 拉取条数都进了运行快照',
+    f.opsAdminEnabled === true && f.opsInvitePolicyEnabled === true && f.opsAddOptionEnabled === true
+    && f.requestSyncEnabled === true && f.adminWatchEnabled === true && f.requestSyncCount === 50,
+    brief(f))
+  const secretKeys = ['ttsApiKey', 'sttApiKey', 'imageGenApiKey', 'notifyToken', 'notifyPushUrl', 'accessToken', 'verifyKeyword', 'ttsLocalRefAudio']
+  check('Q2 新开关没有把密钥类字段带进快照',
+    !secretKeys.some((key) => key in f), secretKeys.filter((key) => key in f).join(','))
   t.stop()
 }
 
