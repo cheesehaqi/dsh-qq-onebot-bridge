@@ -6,7 +6,7 @@
  * feature-focused suites do not cover.
  */
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Config } from '../lib/index.js'
@@ -477,6 +477,27 @@ async function boot({ resumeMode = 'fail' } = {}) {
     skipped.length >= 1 && String(skipped[skipped.length - 1].reason).includes('ttsApiKey'),
     JSON.stringify(skipped.map((e) => String(e.reason).slice(0, 50))))
   cloud.bridge.stop()
+}
+
+// ===== v0.5.9：运行快照心跳（空闲也要新鲜，否则控制台把"空闲"误报成"桥没了"）=====
+{
+  const hbDir = mkdtempSync(join(tmpdir(), 'qq-heartbeat-'))
+  const { ctx } = makeCtx({})
+  const mock = new MockServer()
+  const bridge = new QQBridge(ctx, { ...config, cwd: hbDir }, mock, { info() {}, warn() {}, error() {} })
+  bridge.runtimeHeartbeatMs = 60
+  bridge.start()
+  const snap = join(hbDir, 'qq-runtime.json')
+  const first = statSync(snap).mtimeMs
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  const second = statSync(snap).mtimeMs
+  check('桥跑着的时候，没有任何消息也会持续刷新运行快照（心跳）',
+    second > first, `mtime ${first} → ${second}`)
+  bridge.stop()
+  const afterStop = statSync(snap).mtimeMs
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  check('stop() 之后心跳停止（快照不再刷新 → 陈旧就真的代表桥不在了）',
+    statSync(snap).mtimeMs === afterStop, `mtime ${afterStop} → ${statSync(snap).mtimeMs}`)
 }
 
 rmSync(baseDir, { recursive: true, force: true })
