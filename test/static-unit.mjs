@@ -149,6 +149,17 @@ check('lib/ 的第三方 import 全部已在 package.json 声明', undeclaredImp
 check('官方依赖统一用 @deepseek-ai/* 作用域名（不依赖他人 hoist 的裸名）', bareOfficialImports.length === 0, bareOfficialImports.join('; '))
 check('规格名扫描确实抓到了官方依赖（防止正则失效假通过）', [...specifiers].some((spec) => spec.startsWith('@deepseek-ai/')), [...specifiers].join(','))
 
+// ---- v0.5.9：peer 范围必须覆盖当前 DSH 运行时线 ----
+// 为什么要有这条：DSH 从 0.1.x 升到 0.2.0-rc.2 后，profile 因为 peer 范围不含 0.2 **直接拒载插件**
+// （`skipping profile bundle … is incompatible with dsh 0.2.0-rc.2`），而且官方桌面端
+// （Electron，`~/.dsh/profiles/desktop`）与 CLI 版是同一个运行时版本——范围漏一条线，
+// web 宿主和桌面端**两边都装不上**。这条守卫让下次升级必须显式改这里，而不是线上才发现。
+const peerDsh = Object.entries(pkg.peerDependencies ?? {}).filter(([name]) => name.startsWith('@deepseek-ai/dsh-'))
+const missingModernLine = peerDsh.filter(([, range]) => !/\^0\.2\./.test(String(range)))
+check('dsh-* 的 peer 范围覆盖 0.2 线（官方桌面端与 CLI 同为 0.2.0-rc.2）',
+  peerDsh.length >= 5 && missingModernLine.length === 0,
+  missingModernLine.map(([name, range]) => `${name}=${range}`).join('; ') || `${peerDsh.length} 个`)
+
 // ---- README 惯例：更新日志只展示最近五版 ----
 const readme = readFileSync(join(libDir, '..', 'README.md'), 'utf8')
 const versionBullets = [...readme.matchAll(/^- \*\*v([0-9.]+)\*\* —/gm)].map((match) => match[1])

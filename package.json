@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-onebot-bridge",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "description": "QQ ↔ DeepSeek Harness agent bridge over OneBot v11 (reverse WebSocket). v0.5.x \"See it, find it\": merged-forward chat records are expanded for the model instead of being dropped, group member/roster and group-info queries, recent-history and emoji-reaction agent tools, group file listing and download, group albums, image OCR, and a keyword-searchable per-day message archive (/找) — plus the whole v0.4 debugging stack (trace id on every message, a Chinese reason on every silent drop, structured JSONL events, live SSE event stream with per-message decision chains, one-click diagnosis, diagnostic-bundle export, offline sandboxed dry-run replay and event injection, a 6-hard-constraint acceptance page) and a standalone control console (control/). Independent bundle; remove anytime: dsh plugin --profile web remove dsh-qq-onebot-bridge",
   "type": "module",
   "main": "lib/index.js",
@@ -51,12 +51,12 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1",
-    "@deepseek-ai/dsh-agent-default-model": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1",
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1",
-    "@deepseek-ai/dsh-session": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1",
-    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1",
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1",
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1 || ^0.2.0-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1 || ^0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1 || ^0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1 || ^0.2.0-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1 || ^0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6 || ^0.1.1-rc.2 || ^0.1.2-rc.1 || ^0.1.5-rc.1 || ^0.2.0-rc.2",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "license": "MIT"

@@ -1,5 +1,36 @@
 # 更新日志 / Changelog
 
+## v0.5.9（2026-10-03）— 兼容 DSH 0.2 与官方桌面端 / DSH 0.2 & desktop client
+
+> 起因是一次**静默停摆**：DSH 运行时升到 **0.2.0-rc.2** 之后，profile 因为插件的 peer 范围只声明到
+> `^0.1.x` 而**直接拒载**——`dsh: skipping profile bundle "dsh-qq-onebot-bridge": … is incompatible with dsh 0.2.0-rc.2`，
+> 于是 QQ 桥从 9/27 起就没再跑过（6700 无人监听，但没有任何"报错"落到常见日志里，
+> 只在 profile 启动输出与插件管理器的操作日志中）。官方新出的桌面端（Electron 版
+> `DeepSeek Harness.exe`，跑 `~/.dsh/profiles/desktop`）用的是**同一个运行时版本**，所以两边一起修。
+
+### 兼容
+
+- **peer 范围放行 `^0.2.0-rc.2`**：六个 `@deepseek-ai/dsh-*` 都加上（旧范围保留），CLI/web 宿主与官方桌面端**都能直接加载，不再需要 `dsh plugin allow-version` 豁免**。
+  - 真机验证：先 `revoke-version` 撤掉豁免（`version-exemptions` 回到 `{}`），`dsh --profile web --dump-config` **不再 skip**、插件在树里；再另起一个宿主实例，**6700 正常监听**、`qq-runtime.json`/`qq-trace.jsonl` 立即刷新（= 桥真的起来了）。
+  - 兼容性预检不是只看版本号：在 0.2.0-rc.2 里真 import 了一遍，并逐项确认插件用到的接口仍在——`dsh-llm.createUserMessage`、`dsh-tools.defineTool`、`dsh-session.SessionId`、`ctx.agents.create/resume/get`、`ctx.on('session/event')`（该事件在 dsh-agent-loop / dsh-api-session-controller 等包里仍存在）、`agentDefaultModel`。
+- **OneBot 端口被占：不再崩溃、不再卡住宿主启动**（web 宿主与桌面端必然会同抢 6700）。旧实现是三连击：`start()` 返回 void、`this.emit('error', …)` 没有订阅者 → EventEmitter **直接抛出未捕获错误**（历史上那次 EADDRINUSE 崩溃就是这么来的）、等 `'listening'` 的 Promise **永不 resolve**（宿主启动卡死）。现在：
+  - `OneBotServer.start()` 返回 `{ ok: true }` 或 `{ ok: false, code, reason }`——**永不抛、永不挂**，`'error'` 只在真的有人订阅时才 emit（否则走 `server-error`）；
+  - 插件入口按 **15 秒退避重试**，并说清是哪一种失败（`EADDRINUSE` 时直接给排查方法：控制台端口摘要，或 `netstat -ano | findstr :6700`）；
+  - 绑不上时**先不启动桥**——避免"两个实例都在跑定时任务/回消息"的假象；
+  - 真机三实例实测：占用者被杀后，**重试的那个在 15 秒内自动接管 6700 并启动桥**（产物时间戳当场刷新）。
+- `stop()` 对"从未监听成功"的实例同样安全，重试路径反复 start/stop 不会泄漏 Server。
+- 一台机器**只允许一个实例托管 QQ 桥**：两个 profile 都装是对的（谁先起谁服务），另一个如实说明并在端口释放后接管；想固定由某一个托管，就把另一个 profile 的 `port` 改成不同值。
+
+### 文档
+
+- README（中英）新增「官方桌面端（DSH Desktop）」一节：桌面端跑的是应用独占管理的 `desktop` profile、与 CLI **同版本运行时**、装法与配置位置（`~/.dsh/profiles/desktop/cordis.patch.yml`，不要写进仓库），以及"一台机器只托管一个 QQ 桥"的口径。
+
+### 测试
+
+- `onebot-api-unit` 44 → **50**：新增端口冲突四条（`ok:false`、错误码 `EADDRINUSE`、走 `server-error` 而**不抛 uncaughtException**、冲突之后原实例照常工作）+ "同一个 server 连续两次 start() 结论一致"。
+- `static-unit` 17 → **18**：新增静态守卫「`dsh-*` 的 peer 范围必须覆盖 0.2 线」——下次运行时升级若忘了改这里，测试直接红，而不是等线上发现插件被拒载。
+- 全量 **55 套 / 3564 断言全绿**。
+
 ## v0.5.8（2026-09-14）— 群权限补全 · 申请补拉 · 权限自愈 / Admin & requests
 
 > 这一版继续"先用真机探针把参数摸准，再动代码"：4 个新动作的参数形状全部来自静态读本机 NapCat 包

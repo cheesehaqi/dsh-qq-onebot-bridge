@@ -37,7 +37,9 @@ server.on('message', (message) => events.message.push(message))
 server.on('notice', (notice) => events.notice.push(notice))
 server.on('request', (request) => events.request.push(request))
 
-await server.start()
+const started = await server.start()
+// v0.5.9：start() 返回结果对象（旧实现返回 void，且端口被占时会挂死 + 抛未捕获错误）。
+check('start() 成功时返回 { ok: true }', started?.ok === true, JSON.stringify(started))
 const client = new WebSocket(`ws://127.0.0.1:${port}`)
 await once(client, 'open')
 await new Promise((resolve) => setTimeout(resolve, 50))
@@ -124,6 +126,38 @@ await new Promise((resolve) => setTimeout(resolve, 80))
 check('收到群消息事件且识别 @', events.message.length === 1 && events.message[0].atMe === true && events.message[0].text === '你好')
 check('收到撤回 notice 事件', events.notice.length === 1 && events.notice[0].messageId === 31)
 check('收到入群请求事件', events.request.length === 1 && events.request[0].flag === 'req-1' && events.request[0].comment === '答案：19')
+
+// ---- v0.5.9：端口被占时必须"如实返回失败"，不许挂死、不许抛未捕获错误 ----
+// 场景：web 宿主与官方桌面端（Electron）同时跑同一份配置，只有一个能绑上 6700。
+{
+  const second = new OneBotServer({ host: '127.0.0.1', port, accessToken: '', botQq: 12345 }, logger)
+  const errors = []
+  let unhandled = null
+  const onUncaught = (error) => { unhandled = error }
+  process.once('uncaughtException', onUncaught)
+  second.on('server-error', (error) => errors.push(error))
+  const result = await second.start()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  process.removeListener('uncaughtException', onUncaught)
+  check('端口被占时 start() 返回 ok:false 而不是挂死', result?.ok === false, JSON.stringify(result))
+  check('端口被占的错误码是 EADDRINUSE', result?.code === 'EADDRINUSE', String(result?.code))
+  check('端口被占时走 server-error 事件（不抛 uncaughtException）', unhandled === null && errors.length === 1, unhandled ? String(unhandled.message) : `server-error=${errors.length}`)
+  await second.stop()
+  // 第一个实例必须毫发无损：再走一次请求-响应
+  const before = frames.length
+  await server.getVersionInfo(socket)
+  check('端口冲突之后原实例仍能正常工作', frames.length === before + 1, `frames=${frames.length - before}`)
+}
+{
+  // 重试路径：同一个 server 反复 start()，最后一次仍应给出同样的结论（不泄漏、不抛）。
+  const retry = new OneBotServer({ host: '127.0.0.1', port, accessToken: '', botQq: 12345 }, logger)
+  const first = await retry.start()
+  const secondTry = await retry.start()
+  check('连续两次 start() 都返回失败且结论一致',
+    first?.ok === false && secondTry?.ok === false && secondTry?.code === 'EADDRINUSE',
+    JSON.stringify([first, secondTry]))
+  await retry.stop()
+}
 
 client.close()
 await server.stop()
