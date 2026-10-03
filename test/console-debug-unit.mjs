@@ -121,6 +121,21 @@ check('体检：宿主未运行时 verdict=blocked', broken.summary.verdict === 
 check('体检：缺依赖项给出修复提示', broken.checks.find((check) => check.id === 'node')?.hint.includes('nodeExe') || true)
 check('体检：端口未监听给出操作建议', broken.checks.find((check) => check.id === 'port-host')?.hint.includes('启动宿主'))
 check('体检：机器人离线给出扫码建议', broken.checks.find((check) => check.id === 'bot-online')?.hint.includes('NapCat'))
+// v0.5.9 全面检测抓到的真 bug：`bot-online` 一直读 `snapshot.botOnline`，而插件从来没写过这个字段，
+// 于是明明连着也永远红。现在：插件写了该字段，且"未知"时回落到 6700 的 ESTABLISHED 连接数。
+{
+  const noField = { ...healthySnapshot }
+  delete noField.botOnline
+  const fallback = runDiagnose({ config, snapshot: noField, runtime: readRuntime(runtimeFile), events: [event({ ts: now - 1000 })], now, files: { exists: () => true } })
+  check('体检：快照没有 botOnline 字段时，回落到 6700 连接数（不再永远红）',
+    fallback.checks.find((check) => check.id === 'bot-online')?.ok === true,
+    JSON.stringify(fallback.checks.find((check) => check.id === 'bot-online')))
+  const offlineAccount = runDiagnose({ config, snapshot: { ...healthySnapshot, botOnline: false }, runtime: readRuntime(runtimeFile), events: [event({ ts: now - 1000 })], now, files: { exists: () => true } })
+  check('体检：NapCat 报了 bot_offline 时不算在线（socket 还挂着也不算）',
+    offlineAccount.checks.find((check) => check.id === 'bot-online')?.ok === false
+      && offlineAccount.checks.find((check) => check.id === 'bot-online')?.detail.includes('bot_offline'),
+    JSON.stringify(offlineAccount.checks.find((check) => check.id === 'bot-online')))
+}
 check('体检：桥无事件标记为 warn 而非 blocker', broken.checks.find((check) => check.id === 'bridge-alive')?.severity === 'warn')
 const text = formatDiagnose(broken)
 check('体检文本含通过数与 verdict', text.includes('诊断结果') && text.includes('blocked'), text.split('\n')[0])

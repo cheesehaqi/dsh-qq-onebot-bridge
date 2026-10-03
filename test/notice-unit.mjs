@@ -1,4 +1,4 @@
-/** Unit tests for OneBot notice parsing (poke / member join). */
+/** Unit tests for OneBot notice parsing (poke / member join / bot lifecycle). */
 import { parseNotice } from '../lib/onebot.js'
 
 let passed = 0
@@ -36,6 +36,13 @@ check('退群 noticeType', leave.noticeType === 'group_decrease' && leave.groupI
 // 非 notice 帧
 check('message 帧返回 null', parseNotice({ post_type: 'message', message_type: 'group' }) === null)
 check('空对象返回 null', parseNotice(null) === null && parseNotice({}) === null)
+
+// 机器人上下线（v0.5.9：真机上 NapCat 发 bot_offline，桥以前只会记"未处理的 notice"）
+const offline = parseNotice({ post_type: 'notice', notice_type: 'bot_offline', user_id: 2000000003, sub_type: 'kick' })
+check('bot_offline 解析出 noticeType/subType',
+  offline.noticeType === 'bot_offline' && offline.subType === 'kick', JSON.stringify(offline))
+const online = parseNotice({ post_type: 'notice', notice_type: 'bot_online', user_id: 2000000003 })
+check('bot_online 解析出 noticeType', online.noticeType === 'bot_online', JSON.stringify(online))
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

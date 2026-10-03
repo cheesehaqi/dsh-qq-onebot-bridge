@@ -460,8 +460,19 @@ function render(status) {
   hostPill.textContent = '宿主：' + (host?.listening ? '运行中' : '未运行');
   hostPill.className = 'pill ' + (host?.listening ? 'on' : 'off');
   const botPill = document.getElementById('botPill');
-  botPill.textContent = '机器人：' + (status.botOnline ? '在线' : '离线');
-  botPill.className = 'pill ' + (status.botOnline ? 'on' : 'off');
+  // v0.5.9：两个来源合起来看——`status.botOnline` 是 6700 上有没有 ESTABLISHED 连接（控制台自己数的），
+  // `runtime.botOnline` 是 NapCat 的 bot_online/bot_offline 通知（null = 这一版桥还没收到过）。
+  // 只看前者会把"账号被顶下线、socket 还挂着"显示成在线；只看后者在旧版桥上是 undefined。
+  const accountOnline = status.runtime?.botOnline;
+  const connected = status.botOnline === true;
+  const botUp = connected && accountOnline !== false;
+  botPill.textContent = '机器人：' + (botUp ? '在线' : accountOnline === false ? '离线（账号掉线）' : '离线');
+  botPill.className = 'pill ' + (botUp ? 'on' : 'off');
+  botPill.title = botUp
+    ? `6700 上有 OneBot 连接${accountOnline === true ? '，NapCat 也报了 bot_online' : ''}`
+    : accountOnline === false
+      ? 'NapCat 报了 bot_offline：QQ 掉线，或同一账号在别处登录（同一客户端再开一个实例会抢会话）'
+      : '6700 上没有已建立的连接（NapCat 可能没在运行）';
   const bridgePill = document.getElementById('bridgePill');
   const bridgeAlive = (status.runtime?.ageSeconds ?? 9999) < 900;
   bridgePill.textContent = '桥：' + (bridgeAlive ? '活跃' : '无快照');

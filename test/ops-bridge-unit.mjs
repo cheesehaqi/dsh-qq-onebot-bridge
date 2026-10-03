@@ -396,6 +396,29 @@ function makeBridge(overrides = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// A0-b. 机器人掉线通知（v0.5.9 真机抓到：以前只记"未处理的 notice"，控制台看不出来）
+// ---------------------------------------------------------------------------
+{
+  const t = makeBridge({})
+  t.server.emit('notice', {
+    bot: t.server.socket, noticeType: 'bot_offline', subType: 'kick',
+    userId: 999, selfId: 999, groupId: 0, raw: {},
+  })
+  await sleep(120)
+  const notices = t.traceStage('notice', false)
+  check('S8 bot_offline 留下带真原因的 trace（不再是"未处理的 notice"）',
+    t.reasonsOf(notices).includes('机器人已离线'), t.reasonsOf(notices).slice(0, 120))
+  const snap = JSON.parse(readFileSync(join(t.cwd, 'qq-runtime.json'), 'utf8'))
+  check('S9 掉线写进运行快照（控制台的「机器人：离线」才有数据）',
+    snap.botOnline === false && Number(snap.botOnlineAt) > 0, JSON.stringify({ botOnline: snap.botOnline }))
+  t.server.emit('notice', { bot: t.server.socket, noticeType: 'bot_online', subType: '', userId: 999, selfId: 999, groupId: 0, raw: {} })
+  await sleep(120)
+  const back = JSON.parse(readFileSync(join(t.cwd, 'qq-runtime.json'), 'utf8'))
+  check('S10 bot_online 把状态改回在线', back.botOnline === true, JSON.stringify({ botOnline: back.botOnline }))
+  t.stop()
+}
+
+// ---------------------------------------------------------------------------
 // A. 总开关与关闭分支的真实原因
 // ---------------------------------------------------------------------------
 {

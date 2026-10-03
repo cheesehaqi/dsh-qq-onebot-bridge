@@ -53,8 +53,16 @@ export function runDiagnose({ config, snapshot, runtime, events = [], now = Date
     'ttsEnabled=true 而 9880 未运行时，每条回复都会记一条 tts failed（文字照发）', 'warn'))
 
   // ---- 链路 ----
-  checks.push(item('bot-online', '机器人已连上桥（6700 有连接）', snapshot?.botOnline === true,
-    snapshot?.botOnline ? `${onebot?.established ?? 0} 条连接` : '无 ESTABLISHED 连接',
+  // 真 bug（v0.5.9 全面检测抓到）：这里一直在读 `snapshot.botOnline`，而插件**从来没写过这个字段**，
+  // 于是"机器人已连上桥"这一项在验收台上永远是红的（明细永远显示"无 ESTABLISHED 连接"）。
+  // 现在插件会写它（NapCat 的 bot_online/bot_offline），并且这里补上"未知就回落到 TCP 连接数"。
+  const accountOnline = typeof snapshot?.botOnline === 'boolean' ? snapshot.botOnline : null
+  const established = onebot?.established ?? 0
+  const botConnected = accountOnline === false ? false : (accountOnline === true || established > 0)
+  checks.push(item('bot-online', '机器人已连上桥（6700 有连接）', botConnected,
+    accountOnline === false
+      ? `NapCat 报了 bot_offline（${established} 条连接）`
+      : botConnected ? `${established} 条连接${accountOnline === true ? '，且 NapCat 报了 bot_online' : ''}` : '无 ESTABLISHED 连接',
     'NapCat 未启动/未登录时不会连过来：检查 QQ 是否在线、NapCat 是否扫码'))
   const bridgeSeen = events.some((event) => now - event.ts < FRESH_WINDOW_MS)
   checks.push(item('bridge-alive', '桥在最近 15 分钟内产生过事件', bridgeSeen,
