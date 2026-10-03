@@ -6,7 +6,7 @@
 import { once } from 'node:events'
 import { createServer } from 'node:net'
 import { WebSocket } from 'ws'
-import { OneBotServer, parseNotice, parseRequest } from '../lib/onebot.js'
+import { OneBotServer, mentionsByName, parseNotice, parseRequest, stripMentionName } from '../lib/onebot.js'
 
 let passed = 0
 let failed = 0
@@ -202,6 +202,23 @@ check('收到入群请求事件', events.request.length === 1 && events.request[
     probe.listen(freePort2, '127.0.0.1', () => probe.close(() => resolve(true)))
   })
   check('并发路径 stop() 之后端口同样被释放', rebindable2 === true, `port=${freePort2}`)
+}
+
+// ---- v0.5.9：文本 @机器人（真机抓到：客户端把 @ 发成纯文本，群里一个字都不回）----
+{
+  check('mentionsByName 认出正文里的 @名字', mentionsByName('@小鲸鱼 /打卡名册', ['小鲸鱼']) === '小鲸鱼')
+  check('mentionsByName 把名字当字面量（含正则元字符也不炸）',
+    mentionsByName('@A.B+C 帮我看看', ['A.B+C']) === 'A.B+C')
+  check('mentionsByName 没有 @ 就不认（避免把昵称当提及）',
+    mentionsByName('小鲸鱼 /打卡名册', ['小鲸鱼']) === '' && mentionsByName('/打卡名册', ['小鲸鱼']) === '')
+  check('mentionsByName 空别名/空文本都安全',
+    mentionsByName('@小鲸鱼', []) === '' && mentionsByName('', ['小鲸鱼']) === '' && mentionsByName('@小鲸鱼', ['  ']) === '')
+  check('stripMentionName 把 @名字 摘掉，命令回到行首',
+    stripMentionName('@小鲸鱼 /打卡名册', '小鲸鱼') === '/打卡名册')
+  check('stripMentionName 处理名字在中间的句子',
+    stripMentionName('你好 @小鲸鱼 帮我看下', '小鲸鱼') === '你好 帮我看下')
+  check('stripMentionName 名字不匹配时原样返回',
+    stripMentionName('@别人 /打卡名册', '小鲸鱼') === '@别人 /打卡名册')
 }
 
 client.close()

@@ -79,6 +79,17 @@ class MockServer extends EventEmitter {
   getGroupAtAllRemain(_socket, groupId) { this.#rec('get_group_at_all_remain', { groupId }); return Promise.resolve(this.atAll) }
   getGroupShutList(_socket, groupId) { this.#rec('get_group_shut_list', { groupId }); return Promise.resolve(this.shutList) }
   getGroupInfoEx(_socket, groupId) { this.#rec('get_group_info_ex', { groupId }); return Promise.resolve(this.groupInfo) }
+  // 文本 @ 的学习路径（v0.5.9）：桥开机后会读一次昵称与各群名片。
+  getLoginInfo(_socket) {
+    this.#rec('get_login_info', {})
+    if (this.loginError) return Promise.reject(this.loginError)
+    return Promise.resolve({ user_id: 999, nickname: this.botNickname ?? '小鲸鱼' })
+  }
+  getGroupMemberInfo(_socket, groupId, userId) {
+    this.#rec('get_group_member_info', { groupId, userId })
+    if (this.memberError) return Promise.reject(this.memberError)
+    return Promise.resolve({ user_id: userId, nickname: this.botNickname ?? '小鲸鱼', card: this.botCard ?? '' })
+  }
   getGroupIgnoredNotifies(_socket) { this.#rec('get_group_ignored_notifies', {}); return Promise.resolve(this.ignored) }
   kickGroupMembers(_socket, groupId, userIds, rejectAddRequest) {
     this.#rec('set_group_kick_members', { groupId, userIds, rejectAddRequest })
@@ -341,6 +352,47 @@ function makeBridge(overrides = {}) {
     bridge, server, config, cwd, turns, message, send, traceStage, reasonsOf,
     stop: () => bridge.stop(),
   }
+}
+
+// ---------------------------------------------------------------------------
+// A0. 文本 @机器人（v0.5.9 真机抓到：客户端把 @ 发成纯文本，群里一个字都不回）
+// ---------------------------------------------------------------------------
+{
+  // 配了别名：正文里的 "@小鲸鱼 /禁言名单" 也算 @，命令要真的执行（读一次群禁言名单）。
+  const t = makeBridge({ groupOpsEnabled: true, mentionAliases: ['小鲸鱼'] })
+  await t.send(t.message('@小鲸鱼 /禁言名单', { atMe: false, ats: [] }))
+  check('S1 文本 @ + 配置别名 → 群命令照常执行（不再静默丢掉）',
+    t.server.count('get_group_shut_list') === 1, String(t.server.count('get_group_shut_list')))
+  check('S2 放行原因写进了 trace（说清是"文本 @ 命中"而不是真 at 段）',
+    t.reasonsOf(t.traceStage('mention', true)).includes('文本 @ 命中'), t.reasonsOf(t.traceStage('mention', true)))
+  t.stop()
+}
+{
+  // 没配别名、也没学到名字：仍然按"没 @"忽略（零调用），且 trace 说真话。
+  const t = makeBridge({ groupOpsEnabled: true })
+  t.server.botNickname = ''
+  t.server.botCard = ''
+  const out = await t.send(t.message('@某个不存在的东西 /禁言名单', { atMe: false, ats: [] }))
+  check('S3 文本 @ 命中不了任何名字 → 仍然忽略且零出站',
+    out === '' && t.server.count('get_group_shut_list') === 0, `${brief(out)}|${t.server.count('get_group_shut_list')}`)
+  check('S4 忽略原因是"群聊未 @ 机器人"', t.reasonsOf(t.traceStage('mention', false)).includes('群聊未 @ 机器人'),
+    t.reasonsOf(t.traceStage('mention', false)))
+  t.stop()
+}
+{
+  // 没配别名，但桥自己学到了昵称 → 也要认（真机上就是这种情况：@Deepseek_小鲸鱼）。
+  const t = makeBridge({ groupOpsEnabled: true })
+  t.server.botNickname = 'Deepseek_小鲸鱼'
+  await t.send(t.message('@Deepseek_小鲸鱼 /禁言名单', { atMe: false, ats: [] }))
+  check('S5 未配置别名时，桥学到的昵称同样能认（读 get_login_info）',
+    t.server.count('get_group_shut_list') === 1 && t.reasonsOf(t.traceStage('mention', true)).includes('Deepseek_小鲸鱼'),
+    `${t.server.count('get_group_shut_list')}|${t.reasonsOf(t.traceStage('mention', true))}`)
+  check('S6 学习只读一次', t.server.count('get_login_info') === 1, String(t.server.count('get_login_info')))
+  await t.send(t.message('@Deepseek_小鲸鱼 /禁言名单', { atMe: false, ats: [] }))
+  check('S7 第二条同样认（缓存生效，没有第二次登录信息读取）',
+    t.server.count('get_group_shut_list') === 2 && t.server.count('get_login_info') === 1,
+    `shut=${t.server.count('get_group_shut_list')} login=${t.server.count('get_login_info')}`)
+  t.stop()
 }
 
 // ---------------------------------------------------------------------------
