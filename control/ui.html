@@ -506,7 +506,9 @@ function render(status) {
   const hostLink = document.getElementById('hostLink');
   if (status.hostUrl && host?.listening) { hostLink.href = status.hostUrl; hostLink.style.display = ''; }
   else hostLink.style.display = 'none';
-  document.getElementById('napcatLink').href = 'http://127.0.0.1:' + ((status.config?.ports?.napcat) || 6099);
+  // 注意：napcatLink 的 href 由上面「扫码页按钮」那段统一负责（含带 token 的升级），
+  // 这里**不要**再写一遍不带 token 的地址——那样每 4 秒就会把带 token 的链接覆盖掉，
+  // 用户点到的永远是「token 无效」那个（v0.5.9 全面检测发现）。
   document.getElementById('stamp').textContent = '刷新于 ' + new Date(status.scannedAt || Date.now()).toLocaleTimeString('zh-CN', { hour12: false });
   const warnings = status.warnings || [];
   document.getElementById('warnCard').style.display = warnings.length ? '' : 'none';

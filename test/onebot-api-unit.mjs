@@ -4,6 +4,7 @@
  * and client in-process, so no DSH host and no external OneBot implementation.
  */
 import { once } from 'node:events'
+import { createServer } from 'node:net'
 import { WebSocket } from 'ws'
 import { OneBotServer, parseNotice, parseRequest } from '../lib/onebot.js'
 
@@ -157,6 +158,50 @@ check('收到入群请求事件', events.request.length === 1 && events.request[
     first?.ok === false && secondTry?.ok === false && secondTry?.code === 'EADDRINUSE',
     JSON.stringify([first, secondTry]))
   await retry.stop()
+}
+{
+  // P1 回归（独立审查实测复现）：对**正在监听**的实例再次 start()，绝不能把已绑定的
+  // socket 变成孤儿——旧实现会让端口一直被占、桥却没起来，还反过来赖"端口被占用"。
+  const freePort = await new Promise((resolve) => {
+    const probe = createServer()
+    probe.listen(0, '127.0.0.1', () => {
+      const chosen = probe.address().port
+      probe.close(() => resolve(chosen))
+    })
+  })
+  const live = new OneBotServer({ host: '127.0.0.1', port: freePort, accessToken: '', botQq: 12345 }, logger)
+  const ok1 = await live.start()
+  const ok2 = await live.start()
+  check('已监听时再次 start() 幂等返回 ok（不关掉健康实例）',
+    ok1?.ok === true && ok2?.ok === true && ok2.already === true, JSON.stringify([ok1, ok2]))
+  await live.stop()
+  const rebindable = await new Promise((resolve) => {
+    const probe = createServer()
+    probe.once('error', () => resolve(false))
+    probe.listen(freePort, '127.0.0.1', () => probe.close(() => resolve(true)))
+  })
+  check('stop() 之后端口真的能重新绑定（没有被孤儿化）', rebindable === true, `port=${freePort}`)
+  const freePort2 = await new Promise((resolve) => {
+    const probe = createServer()
+    probe.listen(0, '127.0.0.1', () => {
+      const chosen = probe.address().port
+      probe.close(() => resolve(chosen))
+    })
+  })
+  const live2 = new OneBotServer({ host: '127.0.0.1', port: freePort2, accessToken: '', botQq: 12345 }, logger)
+  // 同一 tick 里连续两次 start()：第二次必须**复用第一次还在飞行的 Promise**，
+  // 而不是另起一个 Server（那会先 EADDRINUSE、再把健康实例关掉）。
+  const [flyA, flyB] = await Promise.all([live2.start(), live2.start()])
+  check('同一 tick 的并发 start() 复用同一个 Promise（都没有 already 标记）',
+    flyA?.ok === true && flyB?.ok === true && flyA.already === undefined && flyB.already === undefined,
+    JSON.stringify([flyA, flyB]))
+  await live2.stop()
+  const rebindable2 = await new Promise((resolve) => {
+    const probe = createServer()
+    probe.once('error', () => resolve(false))
+    probe.listen(freePort2, '127.0.0.1', () => probe.close(() => resolve(true)))
+  })
+  check('并发路径 stop() 之后端口同样被释放', rebindable2 === true, `port=${freePort2}`)
 }
 
 client.close()

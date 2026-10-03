@@ -8,7 +8,7 @@
  */
 import { execFile, spawn } from 'node:child_process'
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { dirname, join, sep } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PORT_LABELS, configWarnings } from './config.mjs'
 import { createTraceTailer, filterEvents, formatChain, groupChains, readRuntime, readTraceFile, summarizeEvents } from './trace.mjs'
@@ -889,9 +889,14 @@ export function createSupervisor(config, deps = {}) {
   function napcatWebui() {
     const qr = String(config.napcatQr ?? '')
     if (qr === '') return { ok: false, url: '', reason: '未配置 NapCat 二维码路径（napcatQr），无法定位 webui.json' }
-    const dir = qr.replace(/[\\/][^\\/]*$/, '')                       // …/bootmain/cache
-    const root = dir.replace(/[\\/][^\\/]*$/, '')                    // …/bootmain
-    const file = `${root}${sep}config${sep}webui.json`
+    // 路径必须是**绝对路径且至少三层**（…/bootmain/cache/qrcode.png）：否则 `qrcode.png`
+    // 这种相对路径会被 dirname 两次算到别处去，读出不相干文件的 token（审查提的 P3）。
+    const dir = dirname(dirname(qr))
+    const segments = dir.split(/[\\/]/).filter(Boolean)
+    if (!isAbsolute(qr) || segments.length < 2) {
+      return { ok: false, url: '', reason: `napcatQr 不是可用的绝对路径（${qr}），无法定位 bootmain/config/webui.json` }
+    }
+    const file = join(dir, 'config', 'webui.json')
     let parsed = null
     try {
       parsed = JSON.parse((deps.readFile ?? readFileSync)(file, 'utf8'))
@@ -899,7 +904,8 @@ export function createSupervisor(config, deps = {}) {
       return { ok: false, url: '', reason: `读不到 NapCat WebUI 配置（${file}）：${error.code ?? error.message}` }
     }
     const token = String(parsed?.token ?? '').trim()
-    const port = Number(config.ports?.napcat) || 6099
+    // 端口以 webui.json 里的为准（用户在 NapCat 里改过端口时 config.ports 会过时）。
+    const port = Number(parsed?.port) || Number(config.ports?.napcat) || 6099
     if (token === '') return { ok: false, url: `http://127.0.0.1:${port}/webui`, reason: 'webui.json 里没有 token（可能未启用鉴权）' }
     return { ok: true, url: `http://127.0.0.1:${port}/webui?token=${encodeURIComponent(token)}`, reason: '' }
   }

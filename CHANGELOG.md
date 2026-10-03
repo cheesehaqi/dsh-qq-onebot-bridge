@@ -35,13 +35,24 @@
 - **每日日报**：没有可用连接时记 `stage:'report'` + 真实原因。
 - **推送通知**：`notifyEnabled=true` 但没配 `notifyPushUrl`/`notifyToken` 时记一条 `level:'warn'`——配置类错误运行期不会变，**每个进程只提示一次**，不会灌满 trace。
 
+### 独立对抗性审查（针对 v0.5.9 两个提交）发现并修掉的问题
+
+- **P1 · `start()` 会把正在监听的 socket 变成孤儿**：v0.5.9 那版"关闭上一次没绑上的实例"只处理了失败分支，于是**重复调用 `start()`**（超时重试路径）会另起一个 Server → EADDRINUSE，同时把**真正在监听的那个**丢掉：端口一直被占、桥却没起来，日志还反过来赖"端口被另一个进程占用"；`stop()` 之后端口仍然占着（审查用探针实测复现）。现在 `start()` **幂等**（已监听直接返回 `ok:true, already:true`，绝不去关健康实例）、同一 tick 的并发调用**复用同一个 Promise**、失败分支就地关掉没绑上的实例、**超时不再等于失败**（先看 `address()`，慢机器上刚绑成功也算 ok）。新增四条回归断言（含"`stop()` 之后端口能重新绑定"）——旧实现下这几条会直接红。
+- **P2 · 重试回调漏 catch + 半初始化**：`setTimeout` 里的 `void tryServe()` 没有 catch（Node CLI 宿主上未处理 rejection 是致命的）；`bridgeStarted` 在 `bridge.start()` 之后才置位，中途抛错会让 dispose 不再管它。现在 `.catch(logger.error)` + `try/finally` 置位。
+- **P2 · 稳态日志刷屏**：另一个实例长期占着端口时，旧实现每 15 秒一条 error（≈5760 条/天，会把真错误淹掉）。现在只在第 1 次与每 10 分钟各记一条。
+- **P2 · `napcatWebui()` 忽略 `webui.json` 里的端口**：用户改过 NapCat WebUI 端口时会给出一条死链。现在以文件里的 `port` 为准（缺失才回落到配置）。
+- **P2 · 静态守卫是假的保障**：旧守卫只 grep 字面 `^0.2.`，"下次升到 0.3 照样绿"。现在以 `package.json` 的 **`dsh.supportedRuntimeLines`（唯一真源）** 为准：每声明一条线，六个 peer 范围都必须覆盖它，且六个 peer 一个都不能少——升运行时线必须同步改表，否则测试直接红。
+- **P3 · 路径推导未校验**：`qrcode.png` 这种相对路径会被 dirname 两次算到别处、读出不相干文件的 token。现在要求 `napcatQr` **是绝对路径且至少三层**，否则如实拒绝。
+- **P3 · UI 每 4 秒把带 token 的链接覆盖掉**（既有缺陷，v0.5.9 的修复差点被它吃掉）：状态渲染里另有一行把 `napcatLink.href` 写成不带 token 的地址。已删除该行，链接只由"扫码页按钮"那段统一负责。
+- **P3 · 文档**：删掉"给另一个 profile 改个端口"这条**危险建议**（两个实例共用同一份 `cwd`，同时读写会互相覆盖状态文件、注入还会发两遍），改成"只在一个 profile 里启用 / 连 `cwd` 一起分开"；并补上"手动装本地目录必须同时加进 `dsh.profile.bundles`，否则只装依赖不会工作"（本机实测）。
+
 ### 测试
 
-- `onebot-api-unit` 44 → **50**：新增端口冲突四条（`ok:false`、错误码 `EADDRINUSE`、走 `server-error` 而**不抛 uncaughtException**、冲突之后原实例照常工作）+ "同一个 server 连续两次 start() 结论一致"。
+- `onebot-api-unit` 44 → **54**：端口冲突四条（`ok:false`、错误码 `EADDRINUSE`、走 `server-error` 而**不抛 uncaughtException**、冲突之后原实例照常工作）+ "同一个 server 连续两次 start() 结论一致" + **幂等/孤儿化回归四条**（已监听时重复 `start()` 返回 `already:true`、同一 tick 并发复用同一个 Promise、`stop()` 后端口能重新绑定、并发路径同样释放端口）——最后四条在审查发现的旧实现下会直接红。
 - `control-unit` 152 → **160**：新增「NapCat WebUI 带 token 地址」六条（接口要 token、透传 `ok/url`、不支持时如实说明、`napcatWebui()` 的四种分支）。
 - `commands-unit` 72 → **76**：新增 TTS trace 四条（本地打不通时必须有 `ok:false` 的 tts 事件、原因含"语音合成/发送失败"、同原因不重复刷、云端缺 key 时点名 `ttsApiKey`）。
-- `static-unit` 17 → **18**：新增静态守卫「`dsh-*` 的 peer 范围必须覆盖 0.2 线」——下次运行时升级若忘了改这里，测试直接红，而不是等线上发现插件被拒载。
-- 全量 **55 套 / 3576 断言全绿**。
+- `static-unit` 17 → **20**：新增守卫三条——六个 `dsh-*` peer 一个不少、声明了支持的运行时线、**每条声明的线都被 peer 范围覆盖**（以 `package.json` 的 `dsh.supportedRuntimeLines` 为唯一真源）。
+- 全量 **55 套 / 3582 断言全绿**。
 
 ## v0.5.8（2026-09-14）— 群权限补全 · 申请补拉 · 权限自愈 / Admin & requests
 
