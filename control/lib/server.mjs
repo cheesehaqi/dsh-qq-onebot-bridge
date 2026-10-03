@@ -200,6 +200,17 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
         json(response, 200, await api.qr())
         return
       }
+      // NapCat WebUI 的带 token 地址：避免「打开扫码页」点进去只看到「token 无效」
+      // （NapCat 的 WebUI 有自己的 token，存在 bootmain/config/webui.json）。
+      if (request.method === 'GET' && path === '/api/napcat/webui') {
+        if (typeof api.napcatWebui !== 'function') {
+          json(response, 200, { ok: false, url: '', reason: '当前控制台不支持该接口' })
+          return
+        }
+        const result = await api.napcatWebui()
+        json(response, 200, { ok: result.ok === true, url: String(result.url ?? ''), reason: String(result.reason ?? '') })
+        return
+      }
       if (request.method === 'GET' && path === '/api/diagnose') {
         const result = await api.diagnose()
         json(response, 200, { ok: true, ...result })

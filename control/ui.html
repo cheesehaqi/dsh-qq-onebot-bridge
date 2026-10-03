@@ -467,15 +467,29 @@ function render(status) {
   bridgePill.textContent = '桥：' + (bridgeAlive ? '活跃' : '无快照');
   bridgePill.className = 'pill ' + (bridgeAlive ? 'on' : 'off');
   // 扫码页按钮：6099 没在监听时给的是死链，这里直接禁用并说明原因。
+  // v0.5.9：链接必须是**带 token 的**——NapCat 的 WebUI 自己有 token（webui.json），
+  // 不带 token 点进去只会看到「token 无效」，这正是用户报的那个坑。
   const link = document.getElementById('napcatLink');
   if (link) {
     const napcatPort = (status.ports || []).find((item) => item.name === 'napcat');
     const up = napcatPort?.listening === true;
     const btn = link.querySelector('button');
     link.href = up ? 'http://127.0.0.1:' + napcatPort.port + '/' : '#';
+    link.removeAttribute('title');
     if (btn) {
       btn.disabled = !up;
       btn.textContent = up ? '打开 NapCat 扫码页' : '扫码页不可用（NapCat 未运行）';
+    }
+    if (up) {
+      // 异步补上 token；拿不到就保留不带 token 的地址，并把原因写在 title 里
+      api('/api/napcat/webui').then((info) => {
+        if (info?.ok === true && info.url) {
+          link.href = info.url;
+          link.title = '已带上 NapCat 自己的 token（来自 bootmain/config/webui.json）';
+        } else {
+          link.title = '未能自动带上 NapCat token：' + (info?.reason || '未知原因') + '（可在 webui.json 里找 token 手动拼接）';
+        }
+      }).catch(() => {});
     }
   }
   const napcat = status.processes?.napcatLoaders || [];

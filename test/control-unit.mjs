@@ -3,7 +3,7 @@
  * every side effect is injected, and the server is exercised with real requests
  * against a stubbed supervisor).
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -277,6 +277,46 @@ const restartBody = await (await fetch(base + '/api/napcat/restart?token=' + tok
 check('POST /api/napcat/restart 走到重启登录流程', restartBody.ok === true && restartBody.pid === 4242, JSON.stringify(restartBody))
 const noQr = await fetch(base + '/api/napcat/restart?token=wrong', { method: 'POST', body: '{}' })
 check('重启接口同样要 token', noQr.status === 401, String(noQr.status))
+
+// ---- v0.5.9：NapCat WebUI 的带 token 地址（用户报的「token 无效」就是这个坑） ----
+{
+  const noTokenRoute = await fetch(base + '/api/napcat/webui')
+  check('GET /api/napcat/webui 无 token 返回 401', noTokenRoute.status === 401, String(noTokenRoute.status))
+  stubApi.napcatWebui = async () => ({ ok: true, url: 'http://127.0.0.1:6099/webui?token=napcat-t', reason: '' })
+  const withToken = await (await fetch(base + '/api/napcat/webui?token=' + token)).json()
+  check('带上 token 时返回的就是可直接打开的地址',
+    withToken.ok === true && withToken.url.includes('6099/webui?token='), JSON.stringify(withToken))
+  delete stubApi.napcatWebui
+  const unsupported = await (await fetch(base + '/api/napcat/webui?token=' + token)).json()
+  check('控制台不支持该接口时如实说明（而不是 500）',
+    unsupported.ok === false && unsupported.reason.includes('不支持'), JSON.stringify(unsupported))
+}
+{
+  // supervisor 侧：从 napcatQr 推出 bootmain/config/webui.json，读出 token 拼进地址。
+  const root = mkdtempSync(join(tmpdir(), 'qq-napcat-webui-'))
+  const qrDir = join(root, 'cache')
+  const cfgDir = join(root, 'config')
+  mkdirSync(qrDir, { recursive: true })
+  mkdirSync(cfgDir, { recursive: true })
+  const qrFile = join(qrDir, 'qrcode.png')
+  writeFileSync(qrFile, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+  writeFileSync(join(cfgDir, 'webui.json'), JSON.stringify({ token: 'napcat-fake', port: 6099 }), 'utf8')
+  const sup = createSupervisor({ ...config, napcatQr: qrFile }, {})
+  const info = sup.napcatWebui()
+  check('napcatWebui 给出带 token 的 6099 地址',
+    info.ok === true && info.url === 'http://127.0.0.1:6099/webui?token=napcat-fake', info.url)
+  check('napcatWebui 只回 ok/url/reason 三个字段（不外泄别的配置）',
+    Object.keys(info).sort().join(',') === 'ok,reason,url', Object.keys(info).join(','))
+  const none = createSupervisor({ ...config, napcatQr: '' }, {}).napcatWebui()
+  check('未配置 napcatQr 时明确拒绝并点名', none.ok === false && none.reason.includes('napcatQr'), none.reason)
+  // 换一个**没有 config/ 子目录**的 bootmain 位置，才真的触发"读不到"
+  const missing = createSupervisor({ ...config, napcatQr: join(root, 'elsewhere', 'cache', 'qrcode.png') }, {}).napcatWebui()
+  check('webui.json 读不到时给真实原因', missing.ok === false && missing.reason.includes('webui.json'), missing.reason)
+  writeFileSync(join(cfgDir, 'webui.json'), JSON.stringify({ port: 6099 }), 'utf8')
+  const noTok = sup.napcatWebui()
+  check('webui.json 没有 token 时降级为不带 token 的地址并说明原因',
+    noTok.ok === false && noTok.url.endsWith('/webui') && noTok.reason.includes('token'), noTok.reason)
+}
 
 // ---- v0.5.5 三个新面板：性能 / 定时任务 / 群配置 ----
 const perfBody = await (await fetch(base + '/api/perf?token=' + token)).json()

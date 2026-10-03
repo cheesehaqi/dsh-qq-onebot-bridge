@@ -8,7 +8,7 @@
  */
 import { execFile, spawn } from 'node:child_process'
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PORT_LABELS, configWarnings } from './config.mjs'
 import { createTraceTailer, filterEvents, formatChain, groupChains, readRuntime, readTraceFile, summarizeEvents } from './trace.mjs'
@@ -876,9 +876,37 @@ export function createSupervisor(config, deps = {}) {
     return { ok: true, ...groupsReport(runtime(), { now: now() }) }
   }
 
+  /**
+   * NapCat WebUI 的**带 token** 地址（v0.5.9）。
+   *
+   * 为什么需要它：控制台「打开扫码页」原来指向 `http://127.0.0.1:6099`，而 NapCat 的 WebUI
+   * 自己也要 token（存在 `bootmain/config/webui.json`）——不带 token 点进去只会看到
+   * 「token 无效」。这里按 `napcatQr` 推出同一份配置目录去读它。
+   *
+   * 安全口径：token **只在这次响应里返回**，不写进运行快照、不进诊断包、不落日志；
+   * 接口本身与控制台其它接口一样受 token + 同源校验保护。
+   */
+  function napcatWebui() {
+    const qr = String(config.napcatQr ?? '')
+    if (qr === '') return { ok: false, url: '', reason: '未配置 NapCat 二维码路径（napcatQr），无法定位 webui.json' }
+    const dir = qr.replace(/[\\/][^\\/]*$/, '')                       // …/bootmain/cache
+    const root = dir.replace(/[\\/][^\\/]*$/, '')                    // …/bootmain
+    const file = `${root}${sep}config${sep}webui.json`
+    let parsed = null
+    try {
+      parsed = JSON.parse((deps.readFile ?? readFileSync)(file, 'utf8'))
+    } catch (error) {
+      return { ok: false, url: '', reason: `读不到 NapCat WebUI 配置（${file}）：${error.code ?? error.message}` }
+    }
+    const token = String(parsed?.token ?? '').trim()
+    const port = Number(config.ports?.napcat) || 6099
+    if (token === '') return { ok: false, url: `http://127.0.0.1:${port}/webui`, reason: 'webui.json 里没有 token（可能未启用鉴权）' }
+    return { ok: true, url: `http://127.0.0.1:${port}/webui?token=${encodeURIComponent(token)}`, reason: '' }
+  }
+
   return {
     status, startHost, stopHost, freePort, startNapcat, stopNapcat, startTts, stopTts, stopAll,
-    restartNapcatLogin, qr,
+    restartNapcatLogin, qr, napcatWebui,
     traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance,
     inboxList, replay, inject, clearQueue, archiveStats, archiveSearch,
     perf, jobsView, groups,
