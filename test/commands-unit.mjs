@@ -426,6 +426,59 @@ async function boot({ resumeMode = 'fail' } = {}) {
   bridge.stop()
 }
 
+// ===== v0.5.9：TTS 的跳过/失败必须写进 trace（此前只躺在 debug 日志里）=====
+// 真机场景：ttsEnabled=true + 本地 GPT-SoVITS 没启动 → 回复没有语音，而控制台
+// （trace/事件流）里一个字都没有，用户无从判断"为什么没语音"。违反硬约束①。
+{
+  const ttsDir = mkdtempSync(join(tmpdir(), 'qq-tts-trace-'))
+  const ref = join(ttsDir, 'ref.wav')
+  writeFileSync(ref, 'x', 'utf8')
+  const ttsConfig = {
+    ...config,
+    cwd: ttsDir,
+    ttsEnabled: true,
+    ttsProvider: 'local',
+    ttsLocalRefAudio: ref,
+    ttsLocalUrl: 'http://127.0.0.1:1/api',   // 打不通 = 本地 TTS 没启动
+  }
+  const bootTts = (overrides) => {
+    const built = makeCtx({})
+    const mock = new MockServer()
+    const bridge = new QQBridge(built.ctx, { ...ttsConfig, ...overrides }, mock, { info() {}, warn() {}, error() {} })
+    bridge.start()
+    return { bridge, mock }
+  }
+  const drive = async (mock, text) => {
+    mock.emit('message', {
+      bot: mock.socket, userId: 1001, messageType: 'private', groupId: 0, text,
+      atMe: true, ats: [], reply: null, records: [], images: [], files: [],
+      messageId: `tts-${Math.random().toString(36).slice(2, 8)}`, senderName: '管理员', raw: { message: [] },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 600))
+  }
+
+  const local = bootTts({})
+  await drive(local.mock, '你好')
+  const failures = local.bridge.trace.recent({ limit: 50, stage: 'tts' })
+  check('本地 TTS 打不通时，trace 里有一条失败事件（不再只写 debug 日志）',
+    failures.length === 1 && failures[0].ok === false, JSON.stringify(failures.map((e) => [e.ok, String(e.reason).slice(0, 40)])))
+  check('失败原因说清是"语音合成/发送失败"并带上原始错误',
+    String(failures[0]?.reason ?? '').includes('语音合成/发送失败'), String(failures[0]?.reason))
+  await drive(local.mock, '再说一句')
+  check('同一失败原因 5 分钟内不重复刷 trace',
+    local.bridge.trace.recent({ limit: 50, stage: 'tts' }).length === 1,
+    String(local.bridge.trace.recent({ limit: 50, stage: 'tts' }).length))
+  local.bridge.stop()
+
+  const cloud = bootTts({ ttsProvider: 'openai', ttsApiKey: '' })
+  await drive(cloud.mock, '你好')
+  const skipped = cloud.bridge.trace.recent({ limit: 50, stage: 'tts' })
+  check('云端 TTS 没配 key 时，trace 里点名缺的是 ttsApiKey',
+    skipped.length >= 1 && String(skipped[skipped.length - 1].reason).includes('ttsApiKey'),
+    JSON.stringify(skipped.map((e) => String(e.reason).slice(0, 50))))
+  cloud.bridge.stop()
+}
+
 rmSync(baseDir, { recursive: true, force: true })
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

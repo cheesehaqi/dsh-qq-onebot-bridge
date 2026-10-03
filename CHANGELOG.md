@@ -26,12 +26,22 @@
 - README（中英）新增「官方桌面端（DSH Desktop）」一节：桌面端跑的是应用独占管理的 `desktop` profile、与 CLI **同版本运行时**、装法与配置位置（`~/.dsh/profiles/desktop/cordis.patch.yml`，不要写进仓库），以及"一台机器只托管一个 QQ 桥"的口径。
 - **控制台「打开扫码页」不再撞「token 无效」**（真机踩到）：那个按钮原来指向 `http://127.0.0.1:6099`，而 NapCat 的 WebUI **自己也有 token**（存在 `bootmain/config/webui.json`）——不带 token 点进去只会被 NapCat 拒。新增 `GET /api/napcat/webui`：从 `napcatQr` 推出同一份配置目录去读 token，返回可直接打开的地址；接口与控制台其它接口一样受 token + 同源校验保护，响应只有 `ok/url/reason` 三个字段（token 不写运行快照、不进诊断包、不落日志），读不到就如实说明原因。UI 在 6099 监听时自动把带 token 的地址填进按钮。
 
+### 修掉 4 条静默分支（违反硬约束①，全面检测时抓到）
+
+在真机上收到"回复没有语音"的现象后按 trace 排查，发现 **TTS 的三条分支（没配 key / 没配参考音频 / 合成或发送失败）只写 `debugLog`，trace 与控制台里一个字都没有**——用户无从判断"为什么没语音"。同类还查出三处：
+
+- **TTS**：三条跳过分支与失败分支全部写 `stage:'tts'` 的 trace；成功也记一条（带 KB 与格式）。**同一原因 5 分钟内只记一次**，避免本地 GPT-SoVITS 没启动时每次回复都刷屏。
+- **投票结果公布**：没有可用连接时记 `stage:'vote'` + 真实原因（以前只有 debug 日志）。
+- **每日日报**：没有可用连接时记 `stage:'report'` + 真实原因。
+- **推送通知**：`notifyEnabled=true` 但没配 `notifyPushUrl`/`notifyToken` 时记一条 `level:'warn'`——配置类错误运行期不会变，**每个进程只提示一次**，不会灌满 trace。
+
 ### 测试
 
 - `onebot-api-unit` 44 → **50**：新增端口冲突四条（`ok:false`、错误码 `EADDRINUSE`、走 `server-error` 而**不抛 uncaughtException**、冲突之后原实例照常工作）+ "同一个 server 连续两次 start() 结论一致"。
 - `control-unit` 152 → **160**：新增「NapCat WebUI 带 token 地址」六条（接口要 token、透传 `ok/url`、不支持时如实说明、`napcatWebui()` 的四种分支）。
+- `commands-unit` 72 → **76**：新增 TTS trace 四条（本地打不通时必须有 `ok:false` 的 tts 事件、原因含"语音合成/发送失败"、同原因不重复刷、云端缺 key 时点名 `ttsApiKey`）。
 - `static-unit` 17 → **18**：新增静态守卫「`dsh-*` 的 peer 范围必须覆盖 0.2 线」——下次运行时升级若忘了改这里，测试直接红，而不是等线上发现插件被拒载。
-- 全量 **55 套 / 3572 断言全绿**。
+- 全量 **55 套 / 3576 断言全绿**。
 
 ## v0.5.8（2026-09-14）— 群权限补全 · 申请补拉 · 权限自愈 / Admin & requests
 
