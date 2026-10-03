@@ -768,6 +768,14 @@ function makeBridge(overrides = {}) {
   const inj = await t.send(t.message('/设管理 10005', { __injected: true }))
   check('J6 注入回合 0 出站：set_group_admin',
     t.server.count('set_group_admin') === 0 && inj.includes('注入/回放回合不写 QQ'), brief(inj))
+  // 干跑逐条实测抓到：设/撤曾经共用「设置管理员」一个标签，`/撤管理` 被拦下时
+  // 回一句"设置管理员未执行"，用户会以为发错了命令。真话口径必须区分方向。
+  const injDemote = await t.send(t.message('/撤管理 10005', { __injected: true }))
+  check('J8 注入回合的 /撤管理 说的是"撤销管理员"，不是"设置管理员"',
+    injDemote.includes('撤销管理员') && !injDemote.includes('设置管理员'),
+    brief(injDemote))
+  check('J9 两条注入都没有真的发出 set_group_admin',
+    t.server.count('set_group_admin') === 0, String(t.server.count('set_group_admin')))
   t.stop()
 }
 {
