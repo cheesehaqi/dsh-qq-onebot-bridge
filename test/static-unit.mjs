@@ -185,5 +185,18 @@ const versionBulletsEn = [...readmeEn.matchAll(/^- \*\*v([0-9.]+)\*\* —/gm)].m
 check('README.en 更新日志恰好五版', versionBulletsEn.length === 5, versionBulletsEn.join(','))
 check('英文 README 首版同版本', versionBulletsEn[0] === pkg.version, versionBulletsEn[0])
 
+// ---- v0.5.9：OPS_ARG_WORDS（识别"命令粘住参数"用的词表）必须与命令正则同步 ----
+// 为什么：这张表决定"`/设管理123` 该不该回用法提示"，漏一个词就意味着那个命令
+// 粘了参数后仍然会悄悄落到模型（真机现场：`/设管理17xxxxxxxx` 就是这条路）。
+const bridgeSrc = readFileSync(join(libDir, 'bridge.js'), 'utf8')
+const wordsBlock = /const OPS_ARG_WORDS = \[([\s\S]*?)\]/.exec(bridgeSrc)
+const argWords = [...(wordsBlock?.[1] ?? '').matchAll(/'([^']+)'/g)].map((match) => match[1])
+const notInCommands = argWords.filter((word) => !(
+  bridgeSrc.includes(`|${word}|`) || bridgeSrc.includes(`|${word})`) || bridgeSrc.includes(`(${word}|`)
+))
+check('OPS_ARG_WORDS 里每个词都真的出现在命令正则的候选里（防漂移）',
+  argWords.length >= 15 && notInCommands.length === 0,
+  notInCommands.join(',') || `${argWords.length} 个词`)
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

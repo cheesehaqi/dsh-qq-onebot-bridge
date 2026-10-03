@@ -870,6 +870,26 @@ function makeBridge(overrides = {}) {
   t.stop()
 }
 {
+  // 真机现场（16:01）：用户发 `/设管理17xxxxxxxx`（**没空格**）→ 命令匹配不上 →
+  // 消息被当成聊天交给模型（白烧一回合，用户以为"设管理失败了"）。
+  // 现在必须回一句用法提示，且**绝不交给模型**。
+  const t = makeBridge({ groupOpsEnabled: true, opsAdminEnabled: true })
+  const out = await t.send(t.message('/设管理10005'))
+  check('J13 命令粘住参数 → 明确提示要留空格', out.includes('空格'), brief(out))
+  check('J14 该轮**没有**交给模型（不烧回合、不让模型去调工具）',
+    t.turns.length === 0, JSON.stringify(t.turns))
+  check('J15 trace 说明"没有交给模型"',
+    t.reasonsOf(t.traceStage('command', false)).includes('没有交给模型'), t.reasonsOf(t.traceStage('command', false)).slice(0, 110))
+  // 正常写法（有空格）不受影响：该走命令就走命令
+  const t2 = makeBridge({ groupOpsEnabled: true, opsAdminEnabled: true })
+  await t2.send(t2.message('/设管理 10005'))
+  check('J16 带空格的正常写法仍然照常执行（没有被这道闸误伤）',
+    t2.server.count('set_group_admin') === 1 && t2.turns.length === 0,
+    `calls=${t2.server.count('set_group_admin')} turns=${t2.turns.length}`)
+  t.stop()
+  t2.stop()
+}
+{
   const t = makeBridge({ groupOpsEnabled: true, opsAdminEnabled: false })
   const out = await t.send(t.message('/设管理 10005'))
   check('J7 opsAdminEnabled=false → 点名开关且零调用',
