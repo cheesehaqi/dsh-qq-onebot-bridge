@@ -1,5 +1,5 @@
 /** 群成员查询纯逻辑（lib/members.js）单元测试：命令解析 + 文案格式化，不碰网络。 */
-import { roleLabel, formatMemberList, formatMemberInfo, parseMemberQuery } from '../lib/members.js'
+import { roleLabel, formatAdminList, formatMemberList, formatMemberInfo, parseMemberQuery } from '../lib/members.js'
 
 let passed = 0
 let failed = 0
@@ -177,6 +177,27 @@ check('/members 不误判', parseMemberQuery('/members') === null)
 check('其它斜杠命令不误判', parseMemberQuery('/投票') === null)
 check('空文本返回 null', parseMemberQuery('') === null && parseMemberQuery(null) === null && parseMemberQuery(undefined) === null)
 check('单个斜杠返回 null', parseMemberQuery('/') === null)
+
+// v0.5.9：/管理员名单（`/设管理` 需要真实的本群成员，这张短名单让人一眼看到该填谁）
+{
+  const list = formatAdminList([
+    { user_id: 5001, nickname: '路人甲', role: 'member' },
+    { user_id: 5002, card: '管理员甲', role: 'admin', level: '5' },
+    { user_id: 5003, nickname: '群主乙', role: 'owner', level: '9' },
+    { user_id: 5004, nickname: '小鲸鱼', role: 'admin', level: '1' },
+  ], { selfId: 5004, groupName: '测试群' })
+  check('管理员名单：只列群主与管理员，并给出各自人数',
+    list.owner === 1 && list.admins === 2 && list.text.includes('群主 1 人、管理员 2 人（共 4 名成员）'), list.text)
+  check('管理员名单：群主排在管理员前面', list.text.indexOf('群主乙') < list.text.indexOf('管理员甲'), list.text)
+  check('管理员名单：同档按等级降序（管理员甲 5 级在 小鲸鱼 1 级之前）',
+    list.text.indexOf('管理员甲') < list.text.indexOf('小鲸鱼'), list.text)
+  check('管理员名单：机器人自己那行标「（我）」', list.text.includes('管理员（我） 小鲸鱼(5004)'), list.text)
+  check('管理员名单：群名加在首行', list.text.startsWith('【测试群】'), list.text.split('\n')[0])
+  check('管理员名单：一个管理员都没有时如实说明',
+    formatAdminList([{ user_id: 1, role: 'member' }]).text.includes('没有查到群主或管理员'))
+  check('管理员名单：空值/非数组安全',
+    formatAdminList(null).text.includes('没有查到') && formatAdminList(undefined).total === 0)
+}
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

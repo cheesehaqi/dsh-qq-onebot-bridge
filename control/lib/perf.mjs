@@ -285,6 +285,25 @@ export function groupsView(runtime, { now = Date.now() } = {}) {
     { key: 'adminWatchEnabled', label: '管理员变动播报' },
   ]
   const switches = switchRows.map((row) => ({ ...row, on: features[row.key] === true }))
+  /**
+   * 机器人在各群的管理员状态（v0.5.9）：唯一来源是 NapCat 的 `group_admin` 通知。
+   * 超过保鲜期（桥侧 10 分钟）就标成"未知"——**不能把过期信息显示成事实**。
+   */
+  const botAdmin = new Map(
+    (Array.isArray(runtime?.botAdmin) ? runtime.botAdmin : []).map((row) => [String(row?.groupId ?? ''), row]),
+  )
+  const botAdminState = (row) => {
+    if (!row) return { known: false, admin: null, stale: false, at: 0, text: '未知（还没收到过这个群的管理员变动通知）' }
+    const at = Number(row.at) || 0
+    if (row.stale === true) return { known: true, admin: row.admin === true, stale: true, at, text: '未知（上次通知已超过保鲜期）' }
+    return {
+      known: true,
+      admin: row.admin === true,
+      stale: false,
+      at,
+      text: row.admin === true ? '是本群管理员' : '不是本群管理员（写命令会被权限自愈拦下）',
+    }
+  }
   const groups = new Map()
   for (const session of sessions) {
     const chatKey = String(session.chatKey ?? '')
@@ -297,6 +316,21 @@ export function groupsView(runtime, { now = Date.now() } = {}) {
       lastTurnText: Number(session.lastTurnAt) > 0 ? new Date(Number(session.lastTurnAt)).toLocaleString('zh-CN', { hour12: false }) : '—',
       allowlisted: allowGroups.length === 0 ? null : allowGroups.includes(chatKey.slice(2)),
       jobs: jobs.filter((job) => String(job.chat ?? '') === chatKey).map((job) => ({ id: String(job.id ?? ''), nextAt: Number(job.nextAt) || 0, enabled: job.enabled === true })),
+      botAdmin: botAdminState(botAdmin.get(chatKey.slice(2))),
+    })
+  }
+  // 只有管理员状态、还没有会话的群也要列出来：否则"机器人在这个群里不是管理员"根本看不到。
+  for (const [groupId, row] of botAdmin) {
+    if (groupId === '' || groups.has(groupId)) continue
+    groups.set(groupId, {
+      groupId,
+      sessionId: '',
+      status: '还没有会话',
+      lastTurnAt: 0,
+      lastTurnText: '—',
+      allowlisted: allowGroups.length === 0 ? null : allowGroups.includes(groupId),
+      jobs: [],
+      botAdmin: botAdminState(row),
     })
   }
   return {

@@ -198,7 +198,10 @@ class MockServer extends EventEmitter {
     return Promise.resolve({})
   }
   getForwardMsg() { return Promise.resolve({ messages: [] }) }
-  getGroupMemberList() { return Promise.resolve([]) }
+  getGroupMemberList(_socket, groupId) {
+    this.#rec('get_group_member_list', { groupId })
+    return Promise.resolve(this.memberList ?? [])
+  }
   getFriendList() { return Promise.resolve([]) }
 }
 
@@ -417,6 +420,33 @@ function makeBridge(overrides = {}) {
   await sleep(120)
   const back = JSON.parse(readFileSync(join(t.cwd, 'qq-runtime.json'), 'utf8'))
   check('S10 bot_online 把状态改回在线', back.botOnline === true, JSON.stringify({ botOnline: back.botOnline }))
+  t.stop()
+}
+
+// ---------------------------------------------------------------------------
+// A0-c. /管理员名单（v0.5.9：`/设管理` 需要真实的本群成员，先把该填谁列出来）
+// ---------------------------------------------------------------------------
+{
+  const t = makeBridge({ groupOpsEnabled: true })
+  t.server.memberList = [
+    { user_id: 1001, card: '管理员小明', role: 'admin', level: '3' },
+    { user_id: 1002, nickname: '群主大人', role: 'owner', level: '9' },
+    { user_id: 999, nickname: '小鲸鱼', role: 'admin', level: '1' },
+    { user_id: 1003, nickname: '路人', role: 'member' },
+  ]
+  const out = await t.send(t.message('/管理员名单'))
+  check('S11 /管理员名单 列出群主与管理员（含各自人数）',
+    out.includes('群主 1 人、管理员 2 人') && out.includes('群主大人(1002)') && !out.includes('路人'), brief(out))
+  check('S12 机器人自己那行标「（我）」', out.includes('（我）'), brief(out))
+  check('S13 只读一次群成员列表', t.server.count('get_group_member_list') === 1, String(t.server.count('get_group_member_list')))
+  check('S14 trace 记下查询完成',
+    t.reasonsOf(t.traceStage('ops', true)).includes('管理员名单 查询完成'), t.reasonsOf(t.traceStage('ops', true)).slice(0, 90))
+  t.server.reset()
+  const inj = await t.send(t.message('/管理员名单', { __injected: true }))
+  check('S15 注入/回放回合不访问 QQ（零调用 + 如实说明）',
+    t.server.count('get_group_member_list') === 0 && inj.includes('未真正访问 QQ'), brief(inj))
+  const priv = await t.send(t.message('/管理员名单', { messageType: 'private', groupId: 0 }))
+  check('S16 私聊里明确说"只能在群里用"', priv.includes('只能在群里用'), brief(priv))
   t.stop()
 }
 

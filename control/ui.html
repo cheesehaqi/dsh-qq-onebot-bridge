@@ -820,7 +820,8 @@ async function loadGroups() {
     if ((r.groups || []).length === 0) lines.push('还没有群会话（桥启动后收到过群消息才会出现）。');
     for (const g of r.groups) {
       const allowed = g.allowlisted === null ? '白名单未知' : (g.allowlisted ? '在白名单' : '⚠️ 不在白名单');
-      lines.push('群 ' + g.groupId + ' · ' + allowed + ' · 会话 ' + (g.sessionId || '—') + ' · 状态 ' + g.status + ' · 最近回合 ' + g.lastTurnText);
+      const admin = g.botAdmin ? ' · 机器人：' + g.botAdmin.text : '';
+      lines.push('群 ' + g.groupId + ' · ' + allowed + ' · 会话 ' + (g.sessionId || '—') + ' · 状态 ' + g.status + ' · 最近回合 ' + g.lastTurnText + admin);
       if ((g.jobs || []).length > 0) lines.push('    定时任务：' + g.jobs.map((j) => j.id + (j.enabled ? '' : '（停用）')).join('、'));
     }
     lines.push('');

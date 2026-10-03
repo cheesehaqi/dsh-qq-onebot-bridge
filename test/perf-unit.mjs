@@ -164,6 +164,26 @@ check('jobsView 不透传自愈命令原文',
   !JSON.stringify(leaky).includes('start-qq.bat') && leaky.autoHeal.command === undefined, JSON.stringify(leaky.autoHeal))
 check('groupsView 元素级畸形不抛错（sessions:[null]、jobs:[null]）',
   (() => { try { const r = groupsView({ sessions: [null, { chatKey: 'g:2002', sessionId: 's', status: 'idle', lastTurnAt: 1 }], jobs: { broadcast: [null] } }); return r.groups.length === 1 } catch { return false } })())
+// v0.5.9：机器人在各群的管理员状态（来源只有 group_admin 通知）
+{
+  const now = 1_000_000
+  const r = groupsView({
+    sessions: [{ chatKey: 'g:2002', sessionId: 's', status: 'idle', lastTurnAt: now - 1000 }],
+    botAdmin: [
+      { groupId: '2002', admin: true, at: now - 1000, stale: false },
+      { groupId: '3003', admin: false, at: now - 1000, stale: false },
+      { groupId: '4004', admin: true, at: now - 999_999, stale: true },
+    ],
+  }, { now })
+  const byId = Object.fromEntries(r.groups.map((g) => [g.groupId, g]))
+  check('群面板：机器人是本群管理员时如实显示', byId['2002']?.botAdmin?.text === '是本群管理员', JSON.stringify(byId['2002']?.botAdmin))
+  check('群面板：没有会话、但知道管理员状态的群也会列出来',
+    byId['3003']?.botAdmin?.text.includes('不是本群管理员'), JSON.stringify(byId['3003']))
+  check('群面板：过期通知显示为"未知"（不把过期信息当事实）',
+    byId['4004']?.botAdmin?.text.includes('未知'), JSON.stringify(byId['4004']?.botAdmin))
+  check('群面板：没收到过通知的群不编造状态',
+    groupsView({ sessions: [{ chatKey: 'g:5005', sessionId: 's', status: 'idle', lastTurnAt: 1 }] }, { now }).groups[0].botAdmin.text.includes('未知'))
+}
 check('jobsView 时间文案：即将触发 / 分钟 / 小时',
   jobsView({ jobs: { broadcast: [
     { id: 'a', enabled: true, nextAt: 9_000 },
