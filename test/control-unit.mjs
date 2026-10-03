@@ -316,6 +316,12 @@ check('重启接口同样要 token', noQr.status === 401, String(noQr.status))
   const noTok = sup.napcatWebui()
   check('webui.json 没有 token 时降级为不带 token 的地址并说明原因',
     noTok.ok === false && noTok.url.endsWith('/webui') && noTok.reason.includes('token'), noTok.reason)
+  // 端口以 webui.json 为准（用户在 NapCat 里改过端口时，config.ports 会过时 → 死链）
+  writeFileSync(join(cfgDir, 'webui.json'), JSON.stringify({ token: 'napcat-fake', port: 7099 }), 'utf8')
+  const moved = sup.napcatWebui()
+  check('webui.json 里改过端口时用文件里的端口（否则给出死链）',
+    moved.ok === true && moved.url.includes(':7099/'), moved.url)
+  rmSync(root, { recursive: true, force: true })
 }
 
 // ---- v0.5.5 三个新面板：性能 / 定时任务 / 群配置 ----

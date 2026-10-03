@@ -49,10 +49,10 @@
 ### 测试
 
 - `onebot-api-unit` 44 → **54**：端口冲突四条（`ok:false`、错误码 `EADDRINUSE`、走 `server-error` 而**不抛 uncaughtException**、冲突之后原实例照常工作）+ "同一个 server 连续两次 start() 结论一致" + **幂等/孤儿化回归四条**（已监听时重复 `start()` 返回 `already:true`、同一 tick 并发复用同一个 Promise、`stop()` 后端口能重新绑定、并发路径同样释放端口）——最后四条在审查发现的旧实现下会直接红。
-- `control-unit` 152 → **160**：新增「NapCat WebUI 带 token 地址」六条（接口要 token、透传 `ok/url`、不支持时如实说明、`napcatWebui()` 的四种分支）。
+- `control-unit` 152 → **161**：新增「NapCat WebUI 带 token 地址」六条（接口要 token、透传 `ok/url`、不支持时如实说明、`napcatWebui()` 的四种分支）。
 - `commands-unit` 72 → **76**：新增 TTS trace 四条（本地打不通时必须有 `ok:false` 的 tts 事件、原因含"语音合成/发送失败"、同原因不重复刷、云端缺 key 时点名 `ttsApiKey`）。
 - `static-unit` 17 → **20**：新增守卫三条——六个 `dsh-*` peer 一个不少、声明了支持的运行时线、**每条声明的线都被 peer 范围覆盖**（以 `package.json` 的 `dsh.supportedRuntimeLines` 为唯一真源）。
-- 全量 **55 套 / 3582 断言全绿**。
+- 全量 **55 套 / 3583 断言全绿**。
 
 ## v0.5.8（2026-09-14）— 群权限补全 · 申请补拉 · 权限自愈 / Admin & requests
 
