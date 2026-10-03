@@ -140,6 +140,8 @@ class MockServer extends EventEmitter {
   // ---- v0.5.8：管理员 / 邀请策略 / 加群方式 / 打卡名册 / 申请拉取 ----
   setGroupAdmin(_socket, groupId, userId, enable) {
     this.#rec('set_group_admin', { groupId, userId, enable })
+    // 真机现场：`/设管理 <不在群里的号>` → NapCat 返回 retcode 1200 get Uid Error
+    if (this.adminError) return Promise.reject(new Error(this.adminError))
     return Promise.resolve(null)
   }
   setGroupMemberInvitePolicy(_socket, groupId, policy) {
@@ -851,6 +853,20 @@ function makeBridge(overrides = {}) {
     brief(injDemote))
   check('J9 两条注入都没有真的发出 set_group_admin',
     t.server.count('set_group_admin') === 0, String(t.server.count('set_group_admin')))
+  t.stop()
+}
+{
+  // 真机现场（15:50）：`/设管理 10009`（号不在群里）→ NapCat 报 retcode 1200 "get Uid Error"，
+  // 而桥的兜底把整段 JSON 贴进了群里。现在必须是看得懂的中文 + 一条 ops 事件。
+  const t = makeBridge({ groupOpsEnabled: true, opsAdminEnabled: true })
+  t.server.adminError = 'OneBot action set_group_admin failed: {"status":"failed","retcode":1200,"data":null,"message":"get Uid Error"}'
+  const out = await t.send(t.message('/设管理 10009'))
+  check('J10 NapCat 的 uid 解析失败被翻译成中文真原因（含"不在这个群里"）',
+    out.includes('uid') && out.includes('不在这个群里'), brief(out))
+  check('J11 回复里不再出现原始 JSON / retcode',
+    !out.includes('retcode') && !out.includes('{') && !out.includes('get Uid Error'), brief(out))
+  check('J12 失败也写了 ops 事件（trace 里查得到）',
+    t.reasonsOf(t.traceStage('ops', false)).includes('uid'), t.reasonsOf(t.traceStage('ops', false)).slice(0, 120))
   t.stop()
 }
 {
