@@ -1,5 +1,23 @@
 # 更新日志 / Changelog
 
+## v0.6.1（2026-10-04）— 开关配色修正 / Switch colours fixed
+
+> 真机反馈：**"关了以后感觉按钮消失了一样"**。查下来是我的 OFF 态做错了——轨道用了跟卡片同色的
+> `--dsw-alias-bg-layer-2`（近白）、圆点用的是白色 `--dsw-alias-label-primary-foreground`，
+> 浅色主题下白底白点，等于隐形。
+
+- **照抄平台自己的开关样式**（`@deepseek-ai/dsh-client-ui-primitives/lib/Switch.module.css`），而不是自己配颜色：
+  轨道 OFF = `--dsw-alias-border-l3`（浅色 `#0000001f` / 深色 `#ffffff29`，可见的灰），
+  轨道 ON = `--dsw-alias-brand-primary`（浅色近黑、深色近白），
+  圆点 OFF = `--dsw-alias-switch-thumb`，圆点 ON = `--dsw-alias-label-primary-foreground`；
+  几何一并对齐官方（36×20、内边距 2、圆点 16、位移 16、120ms）。
+- **语义改用 `role="switch"` + `aria-checked`**（官方就是这么做的：视觉状态挂在无障碍属性上，两者不会打架），
+  不再用自定义 `data-on`。
+- 新增 4 条回归断言：官方的三个 token 必须在用、不许再出现"卡片同色轨道"、`aria-checked` 必须随开关状态映射
+  （浅渲染实测 `false` / `true` 两种）。
+
+全量 **56 套 / 3728 断言全绿**。
+
 ## v0.6.0（2026-10-04）— 轻量化设计 / Lightweight
 
 > 这一版的"轻"落在三处：**能关的东西一眼看得见**（DSH 设置里新增「QQ助手」面板，常用开关点一下就启停）、

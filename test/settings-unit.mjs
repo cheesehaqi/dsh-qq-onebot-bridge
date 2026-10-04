@@ -550,6 +550,16 @@ try {
   check('客户端会把底部链接渲染出来（放在页面最底下）',
     clientText.includes('qqai-footer') && clientText.includes('data.links')
     && clientText.includes("target: '_blank'") && clientText.includes('rel: \'noreferrer\''))
+  // 开关必须照抄平台自己的 Switch.module.css——用户实测过一次"关了以后按钮像消失了"：
+  // OFF 轨道用卡片同色 + 白色圆点，浅色主题下就是隐形。这里把官方的三个 token 钉死。
+  check('开关用的是平台官方 Switch 的 token（OFF 轨道可见、OFF 圆点专用色）',
+    clientText.includes('--dsw-alias-border-l3') && clientText.includes('--dsw-alias-switch-thumb')
+    && clientText.includes('--dsw-alias-brand-primary')
+    && !/\.qqai-switch\{[^}]*--dsw-alias-bg-layer-2/.test(clientText),
+    '轨道/圆点必须用官方 token，别再用卡片同色')
+  check('开关的语义挂在 role=switch + aria-checked（与官方一致，不再用 data-on）',
+    clientText.includes("role: 'switch'") && clientText.includes("'aria-checked'")
+    && !clientText.includes("'data-on'"))
 } catch (error) {
   check('客户端 bundle 能被执行', false, String(error?.message ?? error))
 }
@@ -581,6 +591,7 @@ const shallowText = (element, states) => {
   reactStub.setStates(states)
   const text = []
   const hrefs = []
+  const switches = []
   const walk = (node) => {
     if (node === null || node === undefined || typeof node === 'boolean') return
     if (typeof node === 'string' || typeof node === 'number') { text.push(String(node)); return }
@@ -588,10 +599,12 @@ const shallowText = (element, states) => {
     if (typeof node.type === 'function') { reactStub.resetSlot(); walk(node.type({ ...(node.props ?? {}) })); return }
     // 链接目标在属性上，不在文本里——单独收集，否则断言会"看着渲染出来了其实没验链接"。
     if (typeof node.props?.href === 'string') hrefs.push(node.props.href)
+    // 开关的状态也只在属性上：收集起来验 aria-checked 的映射。
+    if (node.props?.role === 'switch') switches.push({ checked: node.props['aria-checked'], disabled: node.props.disabled === true })
     walk(node.props?.children)
   }
   walk(element)
-  return { text: text.join(' | '), hrefs }
+  return { text: text.join(' | '), hrefs, switches }
 }
 try {
   // 用同一个 React 桩重新执行一遍 bundle，拿到真正的面板组件（组件闭包里的 React 必须就是它）
@@ -652,6 +665,13 @@ try {
   const errorRendered = shallowText(render, [{ status: 'error', data: null, error: '连接失败', flash: '', busyKey: '' }])
   check('浅渲染：错误态把真原因显示出来（不是白屏）',
     errorRendered.text.includes('读取面板失败') && errorRendered.text.includes('连接失败'), errorRendered.text.slice(0, 90))
+  // 开关的"开/关"必须真的映射到 aria-checked（视觉就是靠它上色的）
+  check('浅渲染：开关状态映射到 aria-checked（关=false / 开=true）',
+    ready.switches.length === 1 && ready.switches[0].checked === 'false', JSON.stringify(ready.switches))
+  const onFixture = { ...fixture, data: { ...fixture.data, groups: [{ ...fixture.data.groups[0], rows: [{ ...fixture.data.groups[0].rows[0], value: true, pending: false }] }] } }
+  const onRendered = shallowText(render, [onFixture])
+  check('浅渲染：打开的行渲染成 aria-checked=true',
+    onRendered.switches.length === 1 && onRendered.switches[0].checked === 'true', JSON.stringify(onRendered.switches))
 } catch (error) {
   check('浅渲染冒烟', false, String(error?.message ?? error))
 }

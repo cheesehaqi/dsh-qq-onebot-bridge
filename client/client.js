@@ -42,11 +42,17 @@ window.__ModuleLoader__.load({
 .qqai-hint,.qqai-key{color:var(--dsw-alias-label-secondary,#6b7280);font-size:11px;line-height:1.5}
 .qqai-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .qqai-badge{margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;color:var(--dsw-alias-state-warn-primary,#b45309);border:1px solid currentColor}
-.qqai-switch{position:relative;width:38px;height:22px;flex:none;border-radius:999px;border:1px solid var(--dsw-alias-border-l1,#d1d5db);background:var(--dsw-alias-bg-layer-2,#e5e7eb);cursor:pointer;transition:background .15s,border-color .15s}
-.qqai-switch[data-on="1"]{background:var(--dsw-alias-brand-primary,#2563eb);border-color:transparent}
-.qqai-switch[disabled]{opacity:.55;cursor:default}
-.qqai-knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-primary-foreground,#fff);transition:transform .15s}
-.qqai-switch[data-on="1"] .qqai-knob{transform:translateX(16px)}
+/* 开关**照抄平台自己的 Switch.module.css**（dsh-client-ui-primitives/lib/Switch.module.css）：
+   之前我用的是"卡片同色轨道 + 白圆点"，浅色主题下 OFF 态等于隐形（用户反馈"关了以后感觉按钮消失了一样"）。
+   官方取值（design token 表实测）：轨道 OFF = --dsw-alias-border-l3（浅色 #0000001f / 深色 #ffffff29），
+   轨道 ON = --dsw-alias-brand-primary（浅色近黑 / 深色近白），圆点 OFF = --dsw-alias-switch-thumb，
+   圆点 ON = --dsw-alias-label-primary-foreground；状态一律挂 aria-checked，视觉与无障碍语义不会打架。 */
+.qqai-switch{box-sizing:border-box;position:relative;flex:0 0 auto;width:36px;height:20px;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3,#0000001f);cursor:pointer;transition:background .12s ease}
+.qqai-switch[aria-checked="true"]{background:var(--dsw-alias-brand-primary,#1f2328)}
+.qqai-switch:disabled{cursor:default;opacity:.5}
+.qqai-switch:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4d6bfe));outline-offset:2px}
+.qqai-knob{display:block;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-switch-thumb,#fff);transition:transform .12s ease}
+.qqai-switch[aria-checked="true"] .qqai-knob{background:var(--dsw-alias-label-primary-foreground,#fff);transform:translateX(16px)}
 .qqai-flash{padding:6px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,#f1f5f9);color:var(--dsw-alias-state-success-primary,#15803d)}
 .qqai-err{padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-state-error-primary,#dc2626);color:var(--dsw-alias-state-error-primary,#dc2626);white-space:pre-wrap}
 .qqai-warn{padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-state-warn-primary,#b45309);color:var(--dsw-alias-state-warn-primary,#b45309)}
@@ -84,10 +90,11 @@ window.__ModuleLoader__.load({
           h('span', { className: 'qqai-key' }, row.key)),
         h('button', {
           className: 'qqai-switch',
-          'data-on': on ? '1' : '0',
+          // 与官方 Switch 一致：语义与视觉都挂在 aria-checked 上（不再用自定义 data-on）。
+          role: 'switch',
+          'aria-checked': on ? 'true' : 'false',
           disabled: busy === true,
           title: on ? '点一下关闭' : '点一下开启',
-          'aria-pressed': on ? 'true' : 'false',
           'aria-label': `${row.label}：${on ? '开' : '关'}`,
           onClick: () => onToggle(row.key, !on),
         }, h('span', { className: 'qqai-knob' })))
