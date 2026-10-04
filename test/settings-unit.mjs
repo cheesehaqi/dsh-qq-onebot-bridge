@@ -1127,6 +1127,13 @@ try {
     readyText.includes('快捷操作') && ready.buttons.some((b) => b.text.includes('启动 NapCat'))
     && ready.buttons.some((b) => b.text.includes('重新登录')),
     brief(ready.buttons))
+  // 用户 2026-10-04："把快捷操作拉到相关链接上边"（也顺：没起来时"先把它启动起来"比"点开账号页"更该先看到）。
+  // ⚠️ 注意仍不能用 `indexOf('相关链接')`：CSS 是同一棵树里的文本节点，它的注释里也写着这四个字
+  //    （第一次就是这么红的）→ 用 lastIndexOf 取**渲染出来的那个**标题。
+  check('★顺序：「快捷操作」在「相关链接」上面，两者都在开关分组之前',
+    readyText.indexOf('快捷操作') < readyText.lastIndexOf('相关链接')
+    && readyText.lastIndexOf('相关链接') < readyText.indexOf('对话基础'),
+    `快捷操作@${readyText.indexOf('快捷操作')} 相关链接@${readyText.lastIndexOf('相关链接')} 对话基础@${readyText.indexOf('对话基础')}`)
   check('NapCat 未运行时：启动按钮可点，且写明"未运行"', (() => {
     const start = ready.buttons.find((b) => b.text.includes('启动 NapCat'))
     return start !== undefined && start.disabled === false && readyText.includes('NapCat：未运行')

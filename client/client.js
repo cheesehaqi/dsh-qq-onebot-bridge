@@ -307,10 +307,11 @@ window.__ModuleLoader__.load({
         h('div', { className: 'qqai-head' },
           h('span', { className: 'qqai-title' }, 'QQ助手'),
           h('button', { onClick: () => void load(), disabled: state.busyKey !== '' }, '刷新')),
-        // 「相关链接」整组拉到最上边（第一条就是账号入口）：用户 2026-10-04 定稿的位置。
-        h(Links, { links: data.links }),
-        // 紧接着是快捷操作（启动 NapCat / 重新登录）——都是账号相关，放一起。
+        // 顶部第一块是「快捷操作」（启动 NapCat / 重新登录）——用户 2026-10-04："把快捷操作拉到相关链接上边"。
+        // 理由也顺：没起来的时候，"把它启动起来"比"点开账号页"更该先看到。
         h(Actions, { napcat: data.napcat, busy: state.busyAction, onAction: runAction }),
+        // 紧接着是「相关链接」整组（第一条是账号入口）。
+        h(Links, { links: data.links }),
         h('div', { className: 'qqai-meta' },
           `profile：${data.profile} · 配置文件：${data.patchFile}${data.patchExists === false ? '（不存在）' : ''}`),
         h('div', { className: 'qqai-meta' }, data.notes?.apply ?? ''),
