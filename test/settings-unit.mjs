@@ -15,8 +15,8 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
-  PANEL_GROUPS, PANEL_KEYS, PANEL_NEEDS, normalizeRepoUrl, panelAccountLink, panelFooterLinks,
-  panelFooterLinksWithConsole, panelSnapshot, readPatchValue, upsertPatchValue,
+  PANEL_GROUPS, PANEL_KEYS, PANEL_NEEDS, normalizeRepoUrl, panelFooterLinks, panelFooterLinksWithConsole,
+  panelSnapshot, readPatchValue, upsertPatchValue,
 } from '../lib/panel.js'
 import {
   argvProfile, consoleStartCommand, mountQqAiPanel, napcatWebUiUrl, panelLinkSources, probePort, profileDirOf,
@@ -241,7 +241,7 @@ check('normalizeRepoUrl 把 git+…git 变成能点的 https 地址',
 const links = panelFooterLinks({ version: '9.9.9', repoUrl: 'git+https://github.com/me/repo.git', consolePort: 8801 })
 const changelog = links.find((link) => link.id === 'changelog')
 const consoleLink = links.find((link) => link.id === 'console')
-check('底部有更新日志与调试台，且链接由真实素材拼出',
+check('「相关链接」里有更新日志与调试台，且链接由真实素材拼出',
   changelog?.href === 'https://github.com/me/repo/blob/main/CHANGELOG.md'
   && changelog.label.includes('9.9.9')
   && consoleLink?.href === 'http://127.0.0.1:8801/'
@@ -250,22 +250,22 @@ check('底部有更新日志与调试台，且链接由真实素材拼出',
 check('调试台链接里不含 token（本机密钥不进面板）',
   links.every((link) => !/token=/i.test(link.href)) && consoleLink.href.startsWith('http://127.0.0.1:'))
 const bareLinks = panelFooterLinks({ version: '1.0.0', repoUrl: '', consolePort: 8799 })
-check('没有仓库地址时只给调试台（不编造链接）',
-  bareLinks.length === 1 && bareLinks[0]?.id === 'console',
+check('没有仓库地址时只给账号入口与调试台（不编造链接）',
+  bareLinks.length === 2 && bareLinks.every((link) => ['account', 'console'].includes(link.id)),
   bareLinks.map((link) => link.id).join(','))
 // 「QQ助手账号」= 机器人账号的登录/扫码页（NapCat WebUI）。href 指宿主自己的 /qqai/account：
 // token 由服务端读出后走 302，**不进面板载荷**（同"调试台"入口的规矩）。
-// ⚠️ 它**不是底部"相关链接"里的一条**（用户 2026-10-04 两轮修正："应该把账号登陆调到最上方" →
-// "不对不对应该在QQ助手的下边"）：现在由 `panelAccountLink()` 单独给，客户端渲染在标题正下方。
-const accountLink = panelAccountLink()
-check('账号入口是独立的一项（不在底部链接里），且它自己不带 token',
-  accountLink.href === '/qqai/account' && accountLink.label.includes('QQ助手账号')
-  && !/token=/i.test(accountLink.href)
-  && !links.some((link) => link.id === 'account') && !bareLinks.some((link) => link.id === 'account'),
-  `${brief(accountLink)} · 底部=${links.map((link) => link.id).join(',')}`)
-check('底部链接顺序固定为 更新日志 → 调试文档 → 调试台（账号入口不掺在里面）',
-  links.map((link) => link.id).join(',') === 'changelog,readme-debug,console'
-  && bareLinks.map((link) => link.id).join(',') === 'console',
+// ⚠️ 它**就是「相关链接」这一组里的第一条**（用户 2026-10-04 四条指示的最终口径：
+// "应该把账号登陆调到最上方" → "不对不对应该在QQ助手的下边" →
+//  "还是挪回到之前的位置吧，直接把相关链接整体拉到最上边" → "再把调试台和更新日志换一下位置"）。
+const accountLink = links.find((link) => link.id === 'account')
+check('账号入口在「相关链接」组里、排第一，且它自己不带 token',
+  accountLink?.href === '/qqai/account' && accountLink.label.includes('QQ助手账号')
+  && !/token=/i.test(accountLink.href) && links[0]?.id === 'account' && bareLinks[0]?.id === 'account',
+  `${brief(accountLink)} · 完整=${links.map((link) => link.id).join(',')}`)
+check('顺序固定为 账号 → 调试台 → 更新日志 → 调试文档（调试台在更新日志前面）',
+  links.map((link) => link.id).join(',') === 'account,console,changelog,readme-debug'
+  && bareLinks.map((link) => link.id).join(',') === 'account,console',
   `完整=${links.map((link) => link.id).join(',')} 无仓库=${bareLinks.map((link) => link.id).join(',')}`)
 // 调试台是**独立进程**：面板必须如实标出"运行中/未启动"，并给出可复制的启动命令（否则用户对着"连不上"发懵）。
 const offConsole = panelFooterLinksWithConsole({
@@ -357,15 +357,16 @@ check('GET /qqai/panel 返回分组 + profile + 配置文件路径',
 check('GET 里带上"待重启"信息（生效值 vs 文件值）',
   readBody.groups.flatMap((g) => g.rows).find((row) => row.key === 'ttsEnabled')?.pending === false,
   brief(readBody.groups.flatMap((g) => g.rows).find((row) => row.key === 'ttsEnabled')))
-check('GET 带上底部链接（更新日志 + 调试台）',
+check('GET 带上「相关链接」（账号入口 + 更新日志 + 调试台）',
   Array.isArray(readBody.links) && readBody.links.some((link) => link.id === 'changelog')
   && readBody.links.some((link) => link.id === 'console')
   && readBody.links.every((link) => typeof link.href === 'string' && link.href !== ''),
   brief(readBody.links?.map((link) => link.id)))
-// 载荷形状：账号入口单独一个 `account` 字段（客户端拿它渲染标题正下方那一行），**不在 links 里**。
-check('GET 把账号入口单独给出（account 字段），而不是塞进底部 links',
-  readBody.account?.href === '/qqai/account' && readBody.account.label.includes('QQ助手账号')
-  && !readBody.links.some((link) => link.id === 'account'),
+// 载荷形状：账号入口**就在 links 里**（第一条），没有单独的 account 字段——
+// 客户端把整组渲染在标题正下方（用户 2026-10-04："直接把相关链接整体拉到最上边"）。
+check('GET 的 links 第一条就是账号入口（没有额外的 account 字段）',
+  readBody.links[0]?.id === 'account' && readBody.links[0]?.href === '/qqai/account'
+  && readBody.account === undefined,
   brief({ account: readBody.account, links: readBody.links?.map((link) => link.id) }))
 
 const writeRes = makeResponse()
@@ -696,8 +697,9 @@ try {
   check('客户端 fetch 的路由名与服务端注册的一致（防前后端漂移）',
     clientText.includes('/qqai/panel') && clientText.includes('/qqai/panel/set')
     && registered.some((r) => r.path === '/qqai/panel') && registered.some((r) => r.path === '/qqai/panel/set'))
-  check('客户端会把底部链接渲染出来（放在页面最底下）',
-    clientText.includes('qqai-footer') && clientText.includes('data.links')
+  check('客户端把「相关链接」整组渲染出来（挂 data.links，不再是页脚）',
+    clientText.includes('qqai-links') && clientText.includes('data.links')
+    && !clientText.includes('qqai-footer')
     && clientText.includes("target: '_blank'") && clientText.includes('rel: \'noreferrer\''))
   // 开关必须照抄平台自己的 Switch.module.css——用户实测过一次"关了以后按钮像消失了"：
   // OFF 轨道用卡片同色 + 白色圆点，浅色主题下就是隐形。这里把官方的三个 token 钉死。
@@ -786,16 +788,11 @@ try {
       patchFile: '/srv/dsh/profiles/desktop/cordis.patch.yml',
       patchExists: true,
       notes: { apply: '写入说明', scope: '范围说明' },
-      // 账号入口是**单独一个字段**（客户端渲染在「QQ助手」标题正下方），不在 links 里。
-      account: {
-        id: 'account',
-        label: 'QQ助手账号（登录 / 扫码）',
-        href: '/qqai/account',
-        hint: '机器人账号的登录状态与扫码页；点开就是带 token 的地址，不用手输',
-      },
+      // 「相关链接」整组（第一条是账号入口）——客户端把它渲染在标题正下方、开关分组之前。
       links: [
-        { id: 'changelog', label: '更新日志（v9.9.9）', href: 'https://example.invalid/CHANGELOG.md', hint: '每个版本的改动' },
+        { id: 'account', label: 'QQ助手账号（登录 / 扫码）', href: '/qqai/account', hint: '机器人账号的登录状态与扫码页；点开就是带 token 的地址，不用手输' },
         { id: 'console', label: '调试台（独立控制台）', href: '/qqai/console', running: false, state: '未启动 · 需要单独运行：node x', hint: '调试台是独立进程' },
+        { id: 'changelog', label: '更新日志（v9.9.9）', href: 'https://example.invalid/CHANGELOG.md', hint: '每个版本的改动' },
       ],
       groups: [{
         id: 'chat',
@@ -820,18 +817,23 @@ try {
   check('浅渲染：标题/分组/开关标签与键名都出现',
     readyText.includes('QQ助手') && readyText.includes('对话基础') && readyText.includes('语音回复')
     && readyText.includes('ttsEnabled'), readyText.slice(0, 120))
-  // 用户 2026-10-04 两轮修正的最终口径：账号入口在**「QQ助手」标题的下边**（不在底部"相关链接"里）。
-  // 浅渲染按树的顺序收集文本，所以"先后"就是界面上的上下：标题 → 账号入口 → 第一个分组 → 底部链接。
-  check('账号入口渲染在「QQ助手」标题正下方（在第一个分组之前）',
-    readyText.includes('QQ助手账号（登录 / 扫码）') && readyText.includes('不用手输')
-    && readyText.indexOf('QQ助手账号') > readyText.indexOf('QQ助手')
-    && readyText.indexOf('QQ助手账号') < readyText.indexOf('对话基础'),
-    readyText.slice(0, 160))
-  check('账号入口的链接目标真的挂上了（/qqai/account）', ready.hrefs.includes('/qqai/account'), ready.hrefs.join(' | '))
-  check('底部"相关链接"里不再重复一条账号入口（只有更新日志与调试台）',
-    readyText.lastIndexOf('QQ助手账号') === readyText.indexOf('QQ助手账号')
-    && readyText.includes('相关链接') && readyText.includes('更新日志（v9.9.9）'),
-    readyText.slice(-160))
+  // 用户 2026-10-04 四条指示的最终口径：**「相关链接」整组**在标题正下方（账号入口是组里第一条），
+  // 开关分组在它下面。浅渲染按树的顺序收集文本，所以"先后"就是界面上的上下。
+  // 注意：不能拿「QQ助手」当下界锚点——CSS 是同一棵树里的文本节点，注释里就写着「QQ助手」，
+  // 那个下标在最前面（我第一次就是这么红的）。锚点用「对话基础」（确定在链接组后面）。
+  check('「相关链接」整组渲染在开关分组之前（贴着头部的第一块）',
+    readyText.includes('相关链接') && readyText.includes('QQ助手账号（登录 / 扫码）')
+    && readyText.includes('不用手输')
+    && readyText.indexOf('相关链接') < readyText.indexOf('对话基础'),
+    readyText.slice(readyText.indexOf('相关链接') - 40, readyText.indexOf('相关链接') + 120))
+  check('账号入口是组里第一条（在调试台/更新日志之前），链接目标挂上了 /qqai/account',
+    readyText.indexOf('QQ助手账号') < readyText.indexOf('调试台')
+    && readyText.indexOf('调试台') < readyText.indexOf('更新日志')
+    && ready.hrefs.includes('/qqai/account') && ready.hrefs.includes('/qqai/console'),
+    ready.hrefs.join(' | '))
+  check('账号入口在整份页面里只出现一次（不会组里 + 别处各来一条）',
+    readyText.lastIndexOf('QQ助手账号') === readyText.indexOf('QQ助手账号'),
+    String(readyText.split('QQ助手账号').length - 1))
   check('浅渲染：直接显示出厂默认值（默认：开/关），不再出现"非默认"字样',
     readyText.includes('默认：关') && !readyText.includes('非默认'))
   const flipped = shallowText(render, [{
@@ -849,11 +851,11 @@ try {
   check('浅渲染：依赖标记与说明都渲染出来（** 被解析成加粗而不是原样显示）',
     readyText.includes('需外部服务') && readyText.includes('需要额外的语音服务')
     && !readyText.includes('**'), readyText.slice(-160))
-  check('浅渲染：底部链接与调试台状态都渲染出来（链接目标查 href 属性）',
+  check('浅渲染：「相关链接」与调试台状态都渲染出来（链接目标查 href 属性）',
     readyText.includes('更新日志（v9.9.9）') && readyText.includes('调试台（独立控制台）')
     && ready.hrefs.includes('/qqai/console') && ready.hrefs.some((href) => href.includes('CHANGELOG.md'))
     && readyText.includes('未启动 · 需要单独运行：node x'),
-    `${readyText.slice(-100)}  hrefs=${JSON.stringify(ready.hrefs)}`)
+    `${readyText.slice(0, 100)}  hrefs=${JSON.stringify(ready.hrefs)}`)
 
   const errorRendered = shallowText(render, [{ status: 'error', data: null, error: '连接失败', flash: '', busyKey: '' }])
   check('浅渲染：错误态把真原因显示出来（不是白屏）',

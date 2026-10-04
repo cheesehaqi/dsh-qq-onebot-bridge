@@ -60,14 +60,12 @@ window.__ModuleLoader__.load({
 .qqai-warn{padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-state-warn-primary,#b45309);color:var(--dsw-alias-state-warn-primary,#b45309)}
 .qqai-note{padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,#eef0f3);background:var(--dsw-alias-bg-layer-2,#f8fafc);color:var(--dsw-alias-label-secondary,#6b7280);font-size:11px;line-height:1.6}
 .qqai-note b{font-weight:600;color:var(--dsw-alias-label-primary,#111)}
-.qqai-footer{margin-top:2px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1,#e5e7eb);display:flex;flex-direction:column;gap:8px}
+/* 「相关链接」整组在页面的最上边（标题正下方、开关分组之前）：账号入口是组里第一条。
+   用户 2026-10-04 定稿："还是挪回到之前的位置吧，直接把相关链接整体拉到最上边"。 */
+.qqai-links{display:flex;flex-direction:column;gap:8px;padding-bottom:12px;border-bottom:1px solid var(--dsw-alias-border-l1,#e5e7eb)}
 .qqai-link-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .qqai-link{color:var(--dsw-alias-brand-primary,#2563eb);text-decoration:none;font-weight:600}
 .qqai-link:hover{text-decoration:underline}
-/* 「QQ助手」标题正下方那一行 = 机器人账号入口（用户 2026-10-04："应该在QQ助手的下边"）：
-   它属于「头部」，不是底部"相关链接"里的一条，所以单独给样式。 */
-.qqai-account{margin:-4px 0 2px}
-.qqai-account .qqai-link{font-weight:700}
 .qqai-state{font-size:11px}
 .qqai-state.on{color:var(--dsw-alias-state-success-primary,#15803d)}
 .qqai-state.off{color:var(--dsw-alias-state-warn-primary,#b45309)}
@@ -127,27 +125,16 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 「QQ助手」标题的正下方那一行：机器人账号（登录 / 扫码）。
-     * 为什么在这里而不是底部"相关链接"里：没登录时下面的开关都没意义，
-     * 所以它跟着标题走、第一眼就能看见（用户 2026-10-04："应该在QQ助手的下边"）。
-     * href 指宿主自己的 `/qqai/account`（服务端读 token 后 302，token 不进面板载荷）。
+     * 「相关链接」一组：账号入口（第一条，机器人账号登录 / 扫码）+ 更新日志 / 调试文档 / 调试台。
+     *
+     * 位置是用户 2026-10-04 连着三条指示定稿的："应该把账号登陆调到最上方" →
+     * "不对不对应该在QQ助手的下边" → "**还是挪回到之前的位置吧，直接把相关链接整体拉到最上边**"。
+     * ⇒ 现在这**整组**渲染在标题正下方、开关分组之前，账号入口就是组里第一条。
+     * 顺序由服务端 `links` 数组决定（数组顺序＝界面顺序），别再拆成两处渲染。
      */
-    function AccountRow({ account }) {
-      if (!account || !account.href) return null
-      return h('div', { className: 'qqai-account qqai-link-row' },
-        h('a', {
-          className: 'qqai-link',
-          href: account.href,
-          target: '_blank',
-          rel: 'noreferrer',
-          title: account.hint ?? '',
-        }, account.label ?? 'QQ助手账号（登录 / 扫码）'),
-        account.hint ? h('span', { className: 'qqai-hint' }, account.hint) : null)
-    }
-
-    function Footer({ links }) {
+    function Links({ links }) {
       if (!Array.isArray(links) || links.length === 0) return null
-      return h('div', { className: 'qqai-footer' },
+      return h('div', { className: 'qqai-links' },
         h('div', { className: 'qqai-meta' }, '相关链接'),
         links.map((link) => h('div', { key: link.id, className: 'qqai-link-row' },
           h('a', {
@@ -218,8 +205,8 @@ window.__ModuleLoader__.load({
         h('div', { className: 'qqai-head' },
           h('span', { className: 'qqai-title' }, 'QQ助手'),
           h('button', { onClick: () => void load(), disabled: state.busyKey !== '' }, '刷新')),
-        // 标题正下方就是账号入口（最常用：没登录时下面的开关都没意义）。
-        h(AccountRow, { account: data.account }),
+        // 「相关链接」整组拉到最上边（第一条就是账号入口）：用户 2026-10-04 定稿的位置。
+        h(Links, { links: data.links }),
         h('div', { className: 'qqai-meta' },
           `profile：${data.profile} · 配置文件：${data.patchFile}${data.patchExists === false ? '（不存在）' : ''}`),
         h('div', { className: 'qqai-meta' }, data.notes?.apply ?? ''),
@@ -228,7 +215,6 @@ window.__ModuleLoader__.load({
         state.error ? h('div', { className: 'qqai-err' }, state.error) : null,
         (Array.isArray(data.warnings) ? data.warnings : []).map((text, index) => h('div', { key: `warn-${index}`, className: 'qqai-warn' }, `⚠️ ${text}`)),
         data.groups.map((group) => h(Group, { key: group.id, group, busy: state.busyKey !== '', onToggle: toggle })),
-        h(Footer, { links: data.links }),
       )
     }
 
