@@ -22,7 +22,7 @@ export const PORT_LABELS = {
   control: '控制台',
   host: 'DSH 宿主（机器人控制台）',
   onebot: 'OneBot 反向 WS（桥监听）',
-  napcat: 'NapCat WebUI（扫码）',
+  napcat: 'NapCat WebUI（QQ助手账号 / 扫码）',
   tts: 'GPT-SoVITS 本地语音',
 }
 

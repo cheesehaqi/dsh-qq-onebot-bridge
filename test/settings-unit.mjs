@@ -19,7 +19,8 @@ import {
   readPatchValue, upsertPatchValue,
 } from '../lib/panel.js'
 import {
-  argvProfile, consoleStartCommand, mountQqAiPanel, panelLinkSources, probePort, profileDirOf, resolveProfile,
+  argvProfile, consoleStartCommand, mountQqAiPanel, napcatWebUiUrl, panelLinkSources, probePort, profileDirOf,
+  resolveProfile,
 } from '../lib/settings-routes.js'
 import { Config } from '../lib/index.js'
 
@@ -248,8 +249,17 @@ check('底部有更新日志与调试台，且链接由真实素材拼出',
   links.map((link) => `${link.id}=${link.href}`).join(' | '))
 check('调试台链接里不含 token（本机密钥不进面板）',
   links.every((link) => !/token=/i.test(link.href)) && consoleLink.href.startsWith('http://127.0.0.1:'))
-check('没有仓库地址时只给调试台（不编造链接）',
-  panelFooterLinks({ version: '1.0.0', repoUrl: '', consolePort: 8799 }).length === 1)
+const bareLinks = panelFooterLinks({ version: '1.0.0', repoUrl: '', consolePort: 8799 })
+check('没有仓库地址时只给调试台与账号入口（不编造链接）',
+  bareLinks.length === 2 && bareLinks.every((link) => ['console', 'account'].includes(link.id)),
+  bareLinks.map((link) => link.id).join(','))
+// 「QQ助手账号」= 机器人账号的登录/扫码页（NapCat WebUI）。href 指宿主自己的 /qqai/account：
+// token 由服务端读出后走 302，**不进面板载荷**（同"调试台"入口的规矩）。
+const accountLink = links.find((link) => link.id === 'account')
+check('底部有「QQ助手账号」入口，且它自己不带 token',
+  accountLink?.href === '/qqai/account' && accountLink.label.includes('QQ助手账号')
+  && !/token=/i.test(accountLink.href),
+  brief(accountLink))
 // 调试台是**独立进程**：面板必须如实标出"运行中/未启动"，并给出可复制的启动命令（否则用户对着"连不上"发懵）。
 const offConsole = panelFooterLinksWithConsole({
   version: '1.0.0', repoUrl: '', consolePort: 8799, consoleRunning: false, startCommand: 'node x.mjs',
@@ -322,9 +332,10 @@ const fakeRequest = (method, body, headers = {}) => ({
   async *[Symbol.asyncIterator]() { if (body !== undefined) yield Buffer.from(JSON.stringify(body)) },
 })
 
-check('挂载了三条路由（读面板 + 写开关 + 调试台入口）',
-  registered.length === 3 && registered.some((r) => r.path === '/qqai/panel')
-  && registered.some((r) => r.path === '/qqai/panel/set') && registered.some((r) => r.path === '/qqai/console'),
+check('挂载了四条路由（读面板 + 写开关 + 调试台入口 + 账号入口）',
+  registered.length === 4 && registered.some((r) => r.path === '/qqai/panel')
+  && registered.some((r) => r.path === '/qqai/panel/set') && registered.some((r) => r.path === '/qqai/console')
+  && registered.some((r) => r.path === '/qqai/account'),
   registered.map((r) => r.path).join(','))
 
 const getHandler = registered.find((r) => r.path === '/qqai/panel').handler
@@ -552,13 +563,70 @@ check('启动命令指向控制台入口脚本',
   consoleStartCommand({ root: fakeRoot }).includes(join('control', 'bin', 'qq-control.mjs')),
   consoleStartCommand({ root: fakeRoot }))
 
+// ---- 「QQ助手账号」入口（NapCat WebUI 的免密钥跳转）----
+// 落点与参数写法照 NapCat 4.18.28 前端实测：`/webui/?token=<明文 token>`（前端自己算 hash 再登录）。
+const napcatRoot = join(dir, 'napcat-root')
+mkdirSync(join(napcatRoot, 'bootmain', 'config'), { recursive: true })
+const NAPCAT_TOKEN = 'nap-token-not-a-real-secret-9876'
+writeFileSync(join(napcatRoot, 'qq-control.json'), JSON.stringify({
+  ports: { control: 8799, napcat: 6099 },
+  napcatBat: join(napcatRoot, 'bootmain', 'napcat.bat'),
+}), 'utf8')
+writeFileSync(join(napcatRoot, 'bootmain', 'config', 'webui.json'), JSON.stringify({ token: NAPCAT_TOKEN }), 'utf8')
+writeFileSync(join(napcatRoot, 'bootmain', 'config', 'webui-notoken.json'), JSON.stringify({ token: '' }), 'utf8')
+const accountUrl = napcatWebUiUrl({ pluginRoot: napcatRoot })
+check('账号入口的落点是 NapCat 的 /webui/?token=（实测过的形状：带尾斜杠、明文 token）',
+  accountUrl === `http://127.0.0.1:6099/webui/?token=${NAPCAT_TOKEN}`, accountUrl.replace(NAPCAT_TOKEN, '<token>'))
+const badControlRoot = join(dir, 'napcat-bad')
+mkdirSync(badControlRoot, { recursive: true })
+writeFileSync(join(badControlRoot, 'qq-control.json'), '{ 这不是 JSON', 'utf8')
+check('读不到控制台配置时：账号入口退回裸 /webui/（不抛、也不编 token）',
+  napcatWebUiUrl({ pluginRoot: badControlRoot }) === 'http://127.0.0.1:6099/webui/'
+  && napcatWebUiUrl({ pluginRoot: join(dir, 'definitely-missing') }) === 'http://127.0.0.1:6099/webui/',
+  napcatWebUiUrl({ pluginRoot: badControlRoot }))
+const noTokenRoot = join(dir, 'napcat-notoken')
+mkdirSync(join(noTokenRoot, 'bootmain', 'config'), { recursive: true })
+writeFileSync(join(noTokenRoot, 'qq-control.json'), JSON.stringify({
+  ports: { napcat: 6201 }, napcatBat: join(noTokenRoot, 'bootmain', 'napcat.bat'),
+}), 'utf8')
+writeFileSync(join(noTokenRoot, 'bootmain', 'config', 'webui.json'), JSON.stringify({ token: '' }), 'utf8')
+check('webui.json 里没有 token 时：只给裸地址，端口仍按 qq-control.json 走',
+  napcatWebUiUrl({ pluginRoot: noTokenRoot }) === 'http://127.0.0.1:6201/webui/',
+  napcatWebUiUrl({ pluginRoot: noTokenRoot }))
+
+const accountRoutes = []
+mountQqAiPanel({
+  webServer: {
+    register(route) { accountRoutes.push(route); return () => { const at = accountRoutes.indexOf(route); if (at >= 0) accountRoutes.splice(at, 1) } },
+  },
+}, {
+  profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
+  linkSources: { root: napcatRoot }, probe: async () => false,
+})
+const accountEntryRoute = accountRoutes.find((r) => r.path === '/qqai/account')
+const accountRes = makeResponse()
+await accountEntryRoute.handler(fakeRequest('GET'), accountRes)
+check('GET /qqai/account → 302 到带 token 的 NapCat 页面（免手抄密钥）',
+  accountRes.out.status === 302 && accountRes.out.headers.location === accountUrl
+  && accountRes.out.headers['cache-control'] === 'no-store',
+  String(accountRes.out.headers.location).replace(NAPCAT_TOKEN, '<token>'))
+const accountCross = makeResponse()
+await accountEntryRoute.handler(fakeRequest('GET', undefined, { origin: 'https://evil.example' }), accountCross)
+check('账号入口拒绝跨站（它会把带 token 的地址交出去）',
+  accountCross.out.status === 403, String(accountCross.out.status))
+// 面板载荷里绝不能出现 NapCat 的 token（同"调试台 token 不进载荷"的规矩）。
+const accountPanel = makeResponse()
+await accountRoutes.find((r) => r.path === '/qqai/panel').handler(fakeRequest('GET'), accountPanel)
+check('面板载荷里**没有** NapCat token（密钥只走 302）',
+  !accountPanel.out.body.includes(NAPCAT_TOKEN))
+
 dispose()
 check('dispose 注销了全部路由（配置热重载后能重新挂载，不会撞 duplicate route）',
-  registered.length === 0 && disposed.length === 3, `left=${registered.length}`)
+  registered.length === 0 && disposed.length === 4, `left=${registered.length}`)
 mountQqAiPanel(fakeHost, {
   profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
 })
-check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 3, String(registered.length))
+check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 4, String(registered.length))
 
 // ------------------------------------------------- 3. 客户端 bundle 冒烟 ---- ----
 const clientText = readFileSync(join(import.meta.dirname, '..', 'client', 'client.js'), 'utf8')

@@ -200,7 +200,7 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
         json(response, 200, await api.qr())
         return
       }
-      // NapCat WebUI 的带 token 地址：避免「打开扫码页」点进去只看到「token 无效」
+      // NapCat WebUI 的带 token 地址：避免「QQ助手账号」点进去只看到「token 无效」
       // （NapCat 的 WebUI 有自己的 token，存在 bootmain/config/webui.json）。
       if (request.method === 'GET' && path === '/api/napcat/webui') {
         if (typeof api.napcatWebui !== 'function') {

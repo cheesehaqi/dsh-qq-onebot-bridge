@@ -879,7 +879,7 @@ export function createSupervisor(config, deps = {}) {
   /**
    * NapCat WebUI 的**带 token** 地址（v0.5.9）。
    *
-   * 为什么需要它：控制台「打开扫码页」原来指向 `http://127.0.0.1:6099`，而 NapCat 的 WebUI
+   * 为什么需要它：控制台「QQ助手账号」原来指向 `http://127.0.0.1:6099`，而 NapCat 的 WebUI
    * 自己也要 token（存在 `bootmain/config/webui.json`）——不带 token 点进去只会看到
    * 「token 无效」。这里按 `napcatQr` 推出同一份配置目录去读它。
    *
@@ -906,8 +906,11 @@ export function createSupervisor(config, deps = {}) {
     const token = String(parsed?.token ?? '').trim()
     // 端口以 webui.json 里的为准（用户在 NapCat 里改过端口时 config.ports 会过时）。
     const port = Number(parsed?.port) || Number(config.ports?.napcat) || 6099
-    if (token === '') return { ok: false, url: `http://127.0.0.1:${port}/webui`, reason: 'webui.json 里没有 token（可能未启用鉴权）' }
-    return { ok: true, url: `http://127.0.0.1:${port}/webui?token=${encodeURIComponent(token)}`, reason: '' }
+    // `/webui/` **带尾斜杠**、token 走 `?token=`：这是 NapCat 4.18.28 前端实测的形状
+    // （`static/assets/web_login-iVdMgBJV.js` 读 `location.search` 的 token 后自动登录）。
+    // 不写尾斜杠会先吃一个 301 才到同一处；`/webui/?token=` 是插件面板与这里共用的写法。
+    if (token === '') return { ok: false, url: `http://127.0.0.1:${port}/webui/`, reason: 'webui.json 里没有 token（可能未启用鉴权）' }
+    return { ok: true, url: `http://127.0.0.1:${port}/webui/?token=${encodeURIComponent(token)}`, reason: '' }
   }
 
   return {

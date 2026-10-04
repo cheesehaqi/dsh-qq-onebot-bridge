@@ -1,5 +1,37 @@
 # 更新日志 / Changelog
 
+## v0.6.3（2026-10-04）— 账号入口 / The account entry
+
+> 承接 v0.6.2 之后真机追问："控制台那个「打开扫码页」到底在哪、DSH 设置页里怎么没有账号登录？"
+> ——面板底部原来只有「更新日志 / 调试文档 / 调试台」三个入口，**机器人账号本身反倒没有入口**，
+> 而 NapCat 的 WebUI 又因为自带 token，直接甩一个 `127.0.0.1:6099` 过去只会看到「token 无效」。
+
+- **DSH 设置页 · 「QQ助手」面板底部新增「QQ助手账号（登录 / 扫码）」**，与「更新日志」「调试台」并列；
+  它指向宿主自己的 **`GET /qqai/account`**：服务端读 `bootmain/config/webui.json` 里的 token 后
+  **302 到 `http://127.0.0.1:<port>/webui/?token=<token>`**，点开就是已登录的 NapCat 页面，
+  **不用手抄密钥**。token 仍然**不进面板载荷**（与调试台入口同一条规矩：密钥只在 302 的 Location 里出现，
+  面板 JSON 里断言不含 token）。
+- **这个落点不是猜的**：读 NapCat 4.18.28 的前端 bundle（`static/assets/web_login-iVdMgBJV.js`）确认流程是
+  「`location.search` 取 `token` → 有就自动登录 → `SHA256(token + ".napcat")` → `POST /api/auth/login`
+  `{hash, totpCode}` → 存 `localStorage["token"]` → 之后 `Authorization: Bearer …`」；
+  再对本机 6099 实测：`/webui/?token=` 直接 200 出 SPA、`POST /api/auth/login {hash}` 返回
+  `{code:0,data:{Credential}}`、带该凭据调 `/api/auth/check` 返回 `success`。
+  因此**不需要**我们先算 hash，前端自己会算；落点必须**带尾斜杠**（`/webui` 会先吃一个 301）。
+  控制台侧的 `napcatWebui()` 也一并改成同一个形状（`/webui/?token=`），两边不再各写一种。
+- **账号入口有两道闸**（它会**把带 token 的地址交出去**，不能只靠"本机端口"）：① 只允许回环来源；
+  ② 同源守卫（`sameSiteGuard`）——否则任意第三方页面拿 `<a href>` 指过来就能把 token 读走。
+  面板里点这个链接属于**同源导航**（`Sec-Fetch-Site: same-origin`），不会被误伤；跨站实测 403。
+- **控制台按钮改名**：`control/` 里「打开 NapCat 扫码页」→「**QQ助手账号**」
+  （禁用态文案同步成「QQ助手账号不可用（NapCat 未运行）」），与设置页面板入口同名；
+  端口标签也从「NapCat WebUI（扫码）」改成「NapCat WebUI（QQ助手账号 / 扫码）」。
+- **顺手修掉一个测试卫生问题**：账号入口原来漏传调用方解析出来的插件根，于是单测里读到了**真机的**
+  `qq-control.json`（断言输出里带出了本机 NapCat token）。现在 `pluginRoot` 与 `readFile` 都由调用方注入，
+  单测全在临时目录里跑。
+- 新增 7 条断言（`settings-unit` 86 → **93**）：落点形状（`/webui/?token=` + 明文 token）、
+  读不到配置时退回裸 `/webui/`、`webui.json` 没有 token 时只给裸地址但端口仍按 `qq-control.json`、
+  `GET /qqai/account` → 302、跨站 403、面板载荷不含 token；`control-unit` 里两条把地址写死的断言
+  （supervisor 侧与控制台接口侧）跟着新形状更新。全量 **57 套 / 3778 断言全绿**。
+
 ## v0.6.2（2026-10-04）— 功能说明补全 / Every switch explains itself
 
 > 真机反馈：**"有些功能说明不是很全啊，就比如 AI 生图，就写了串英文，都没写需要额外的软件或模型"**。

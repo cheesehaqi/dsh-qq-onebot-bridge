@@ -95,7 +95,7 @@
     <div class="row">
       <button class="danger" onclick="act('/api/all/stop')">全部停止</button>
       <a id="hostLink" href="#" target="_blank" style="display:none"><button>打开机器人控制台（3080）</button></a>
-      <a id="napcatLink" href="#" target="_blank"><button>打开 NapCat 扫码页</button></a>
+      <a id="napcatLink" href="#" target="_blank"><button>QQ助手账号</button></a>
     </div>
     <div class="grid2" style="margin-top:10px">
       <label class="meta">宿主工作目录<input id="cfgCwd" /></label>
@@ -477,19 +477,22 @@ function render(status) {
   const bridgeAlive = (status.runtime?.ageSeconds ?? 9999) < 900;
   bridgePill.textContent = '桥：' + (bridgeAlive ? '活跃' : '无快照');
   bridgePill.className = 'pill ' + (bridgeAlive ? 'on' : 'off');
-  // 扫码页按钮：6099 没在监听时给的是死链，这里直接禁用并说明原因。
+  // 「QQ助手账号」按钮（= NapCat 的 WebUI：登录状态 / 扫码）：6099 没在监听时给的是死链，
+  // 这里直接禁用并说明原因。
   // v0.5.9：链接必须是**带 token 的**——NapCat 的 WebUI 自己有 token（webui.json），
   // 不带 token 点进去只会看到「token 无效」，这正是用户报的那个坑。
+  // v0.6.3：按钮统一叫「QQ助手账号」（与 DSH 设置页的面板入口同名），落点与插件面板一致
+  // 用 `/webui/?token=`（带尾斜杠的实测形状，见 lib/settings-routes.js 的 napcatWebUiUrl）。
   const link = document.getElementById('napcatLink');
   if (link) {
     const napcatPort = (status.ports || []).find((item) => item.name === 'napcat');
     const up = napcatPort?.listening === true;
     const btn = link.querySelector('button');
-    link.href = up ? 'http://127.0.0.1:' + napcatPort.port + '/' : '#';
+    link.href = up ? 'http://127.0.0.1:' + napcatPort.port + '/webui/' : '#';
     link.removeAttribute('title');
     if (btn) {
       btn.disabled = !up;
-      btn.textContent = up ? '打开 NapCat 扫码页' : '扫码页不可用（NapCat 未运行）';
+      btn.textContent = up ? 'QQ助手账号' : 'QQ助手账号不可用（NapCat 未运行）';
     }
     if (up) {
       // 异步补上 token；拿不到就保留不带 token 的地址，并把原因写在 title 里
@@ -517,7 +520,7 @@ function render(status) {
   const hostLink = document.getElementById('hostLink');
   if (status.hostUrl && host?.listening) { hostLink.href = status.hostUrl; hostLink.style.display = ''; }
   else hostLink.style.display = 'none';
-  // 注意：napcatLink 的 href 由上面「扫码页按钮」那段统一负责（含带 token 的升级），
+  // 注意：napcatLink 的 href 由上面「QQ助手账号按钮」那段统一负责（含带 token 的升级），
   // 这里**不要**再写一遍不带 token 的地址——那样每 4 秒就会把带 token 的链接覆盖掉，
   // 用户点到的永远是「token 无效」那个（v0.5.9 全面检测发现）。
   document.getElementById('stamp').textContent = '刷新于 ' + new Date(status.scannedAt || Date.now()).toLocaleTimeString('zh-CN', { hour12: false });

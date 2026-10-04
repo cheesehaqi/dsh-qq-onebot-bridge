@@ -282,10 +282,10 @@ check('重启接口同样要 token', noQr.status === 401, String(noQr.status))
 {
   const noTokenRoute = await fetch(base + '/api/napcat/webui')
   check('GET /api/napcat/webui 无 token 返回 401', noTokenRoute.status === 401, String(noTokenRoute.status))
-  stubApi.napcatWebui = async () => ({ ok: true, url: 'http://127.0.0.1:6099/webui?token=napcat-t', reason: '' })
+  stubApi.napcatWebui = async () => ({ ok: true, url: 'http://127.0.0.1:6099/webui/?token=napcat-t', reason: '' })
   const withToken = await (await fetch(base + '/api/napcat/webui?token=' + token)).json()
   check('带上 token 时返回的就是可直接打开的地址',
-    withToken.ok === true && withToken.url.includes('6099/webui?token='), JSON.stringify(withToken))
+    withToken.ok === true && withToken.url.includes('6099/webui/?token='), JSON.stringify(withToken))
   delete stubApi.napcatWebui
   const unsupported = await (await fetch(base + '/api/napcat/webui?token=' + token)).json()
   check('控制台不支持该接口时如实说明（而不是 500）',
@@ -304,7 +304,7 @@ check('重启接口同样要 token', noQr.status === 401, String(noQr.status))
   const sup = createSupervisor({ ...config, napcatQr: qrFile }, {})
   const info = sup.napcatWebui()
   check('napcatWebui 给出带 token 的 6099 地址',
-    info.ok === true && info.url === 'http://127.0.0.1:6099/webui?token=napcat-fake', info.url)
+    info.ok === true && info.url === 'http://127.0.0.1:6099/webui/?token=napcat-fake', info.url)
   check('napcatWebui 只回 ok/url/reason 三个字段（不外泄别的配置）',
     Object.keys(info).sort().join(',') === 'ok,reason,url', Object.keys(info).join(','))
   const none = createSupervisor({ ...config, napcatQr: '' }, {}).napcatWebui()
@@ -315,7 +315,7 @@ check('重启接口同样要 token', noQr.status === 401, String(noQr.status))
   writeFileSync(join(cfgDir, 'webui.json'), JSON.stringify({ port: 6099 }), 'utf8')
   const noTok = sup.napcatWebui()
   check('webui.json 没有 token 时降级为不带 token 的地址并说明原因',
-    noTok.ok === false && noTok.url.endsWith('/webui') && noTok.reason.includes('token'), noTok.reason)
+    noTok.ok === false && noTok.url.endsWith('/webui/') && noTok.reason.includes('token'), noTok.reason)
   // 端口以 webui.json 为准（用户在 NapCat 里改过端口时，config.ports 会过时 → 死链）
   writeFileSync(join(cfgDir, 'webui.json'), JSON.stringify({ token: 'napcat-fake', port: 7099 }), 'utf8')
   const moved = sup.napcatWebui()
