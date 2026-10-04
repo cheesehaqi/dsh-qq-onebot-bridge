@@ -1,0 +1,190 @@
+/**
+ * v0.6「轻量化设计」：DSH 设置 → QQ助手。
+ *
+ * 这是**客户端 bundle**：DSH 的模块加载器按 `package.json` 的
+ * `dsh.client`（`platform: web`）+ `exports["./client"]` 把它喂给浏览器，
+ * 入口形态与官方/第三方插件一致：
+ *
+ *     window.__ModuleLoader__.load({ id, factory: (require) => { ...; return module.exports } })
+ *
+ * 面板只做两件事：`GET /qqai/panel` 读当前生效值，`POST /qqai/panel/set` 写回
+ * profile 的 cordis.patch.yml（服务端路由见 lib/settings-routes.js）。
+ * 不引第三方 UI 库（只用 react），样式全走 DSH 主题变量，所以深浅色都跟原生一致。
+ */
+window.__ModuleLoader__.load({
+  id: 'dsh-qq-onebot-bridge',
+  factory: (require) => {
+    // ⚠️ 平台契约（v0.6 真机事故的教训）：客户端 bundle 是用**经典 <script>** 注入的，
+    // 页面里没有 `exports` / `module`——每个 bundle 都得像平台自己的 bundle 那样自带这两行
+    // CJS 垫片；而加载器只把 `factory(require)` 的**返回值**当作模块导出
+    // （见 dsh-client-modules/lib/client.js:683）。少了这两行，宿主启动就会
+    // 直接报 `dsh-qq-onebot-bridge: import failed: exports is not defined` 而整个起不来。
+    var module = { exports: {} }
+    var exports = module.exports
+
+    const React = require('react')
+    const h = React.createElement
+    const { useCallback, useEffect, useState } = React
+
+    const CSS = `
+.qqai-wrap{display:flex;flex-direction:column;gap:14px;font-size:13px;color:var(--dsw-alias-label-primary,#111)}
+.qqai-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.qqai-title{font-size:15px;font-weight:600}
+.qqai-meta{color:var(--dsw-alias-label-secondary,#6b7280);font-size:12px;line-height:1.6}
+.qqai-group{border:1px solid var(--dsw-alias-border-l1,#e5e7eb);border-radius:10px;background:var(--dsw-alias-bg-layer-1,#fff);overflow:hidden}
+.qqai-group>summary{cursor:pointer;padding:10px 12px;font-weight:600;list-style:none;background:var(--dsw-alias-bg-layer-2,#f6f7f9)}
+.qqai-group>summary::-webkit-details-marker{display:none}
+.qqai-row{display:flex;align-items:center;gap:12px;padding:9px 12px;border-top:1px solid var(--dsw-alias-border-l1,#eef0f3)}
+.qqai-row:first-of-type{border-top:none}
+.qqai-row:hover{background:var(--dsw-alias-bg-layer-2,#f8fafc)}
+.qqai-text{flex:1;min-width:0}
+.qqai-label{display:block}
+.qqai-hint,.qqai-key{color:var(--dsw-alias-label-secondary,#6b7280);font-size:11px;line-height:1.5}
+.qqai-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.qqai-badge{margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;color:var(--dsw-alias-state-warn-primary,#b45309);border:1px solid currentColor}
+.qqai-switch{position:relative;width:38px;height:22px;flex:none;border-radius:999px;border:1px solid var(--dsw-alias-border-l1,#d1d5db);background:var(--dsw-alias-bg-layer-2,#e5e7eb);cursor:pointer;transition:background .15s,border-color .15s}
+.qqai-switch[data-on="1"]{background:var(--dsw-alias-brand-primary,#2563eb);border-color:transparent}
+.qqai-switch[disabled]{opacity:.55;cursor:default}
+.qqai-knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-primary-foreground,#fff);transition:transform .15s}
+.qqai-switch[data-on="1"] .qqai-knob{transform:translateX(16px)}
+.qqai-flash{padding:6px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,#f1f5f9);color:var(--dsw-alias-state-success-primary,#15803d)}
+.qqai-err{padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-state-error-primary,#dc2626);color:var(--dsw-alias-state-error-primary,#dc2626);white-space:pre-wrap}
+.qqai-warn{padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-state-warn-primary,#b45309);color:var(--dsw-alias-state-warn-primary,#b45309)}
+.qqai-footer{margin-top:2px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1,#e5e7eb);display:flex;flex-direction:column;gap:8px}
+.qqai-link-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.qqai-link{color:var(--dsw-alias-brand-primary,#2563eb);text-decoration:none;font-weight:600}
+.qqai-link:hover{text-decoration:underline}
+.qqai-state{font-size:11px}
+.qqai-state.on{color:var(--dsw-alias-state-success-primary,#15803d)}
+.qqai-state.off{color:var(--dsw-alias-state-warn-primary,#b45309)}
+`
+
+    async function callJson(path, options) {
+      const response = await fetch(path, {
+        cache: 'no-store',
+        ...options,
+        headers: { 'content-type': 'application/json', ...(options && options.headers) },
+      })
+      let payload = null
+      try { payload = await response.json() } catch { /* 非 JSON 时下面按状态码报错 */ }
+      if (!response.ok || payload?.ok !== true) {
+        throw new Error(payload?.reason || `HTTP ${response.status}`)
+      }
+      return payload
+    }
+
+    function Row({ row, busy, onToggle }) {
+      const on = row.value === true
+      return h('div', { className: 'qqai-row' },
+        h('div', { className: 'qqai-text' },
+          h('label', { className: 'qqai-label' }, row.label,
+            row.pending === true ? h('span', { className: 'qqai-badge', title: '配置文件里的值与当前生效值不一致' }, '待重启') : null,
+            row.nonDefault === true ? h('span', { className: 'qqai-badge', title: '与这个开关的默认值不同' }, '非默认') : null),
+          row.hint ? h('span', { className: 'qqai-hint' }, row.hint) : null,
+          h('span', { className: 'qqai-key' }, row.key)),
+        h('button', {
+          className: 'qqai-switch',
+          'data-on': on ? '1' : '0',
+          disabled: busy === true,
+          title: on ? '点一下关闭' : '点一下开启',
+          'aria-pressed': on ? 'true' : 'false',
+          'aria-label': `${row.label}：${on ? '开' : '关'}`,
+          onClick: () => onToggle(row.key, !on),
+        }, h('span', { className: 'qqai-knob' })))
+    }
+
+    function Footer({ links }) {
+      if (!Array.isArray(links) || links.length === 0) return null
+      return h('div', { className: 'qqai-footer' },
+        h('div', { className: 'qqai-meta' }, '相关链接'),
+        links.map((link) => h('div', { key: link.id, className: 'qqai-link-row' },
+          h('a', {
+            className: 'qqai-link',
+            href: link.href,
+            target: '_blank',
+            rel: 'noreferrer',
+            title: link.hint ?? '',
+          }, link.label),
+          link.state ? h('span', { className: `qqai-state ${link.running === true ? 'on' : 'off'}` }, link.state) : null,
+          link.hint ? h('span', { className: 'qqai-hint' }, link.hint) : null)))
+    }
+
+    function Group({ group, busy, onToggle }) {
+      const body = h('div', null, group.rows.map((row) => h(Row, { key: row.key, row, busy, onToggle })))
+      if (group.advanced !== true) {
+        return h('div', { className: 'qqai-group' },
+          h('div', { className: 'qqai-group-head', style: { padding: '10px 12px', fontWeight: 600, background: 'var(--dsw-alias-bg-layer-2,#f6f7f9)' } }, group.title),
+          body)
+      }
+      return h('details', { className: 'qqai-group' },
+        h('summary', null, `${group.title}（进阶）`),
+        body)
+    }
+
+    function QqAiPanel() {
+      const [state, setState] = useState({ status: 'loading', data: null, error: '', flash: '', busyKey: '' })
+
+      const load = useCallback(async () => {
+        try {
+          const data = await callJson('/qqai/panel')
+          setState({ status: 'ready', data, error: '', flash: '', busyKey: '' })
+        } catch (error) {
+          setState({ status: 'error', data: null, error: String(error?.message ?? error), flash: '', busyKey: '' })
+        }
+      }, [])
+
+      useEffect(() => { void load() }, [load])
+
+      const toggle = useCallback(async (key, value) => {
+        setState((prev) => ({ ...prev, busyKey: key, error: '', flash: '' }))
+        try {
+          const result = await callJson('/qqai/panel/set', { method: 'POST', body: JSON.stringify({ key, value }) })
+          setState({
+            status: 'ready',
+            data: result.panel ?? state.data,
+            busyKey: '',
+            error: '',
+            flash: `${key} → ${value ? '开' : '关'}${result.changed === true ? '（已写入配置）' : '（无需改动）'}${result.note ? ' · ' + result.note : ''}`,
+          })
+        } catch (error) {
+          setState((prev) => ({ ...prev, busyKey: '', error: `写入失败：${String(error?.message ?? error)}` }))
+        }
+      }, [state.data])
+
+      if (state.status === 'loading') return h('div', { className: 'qqai-wrap' }, h('style', null, CSS), h('div', { className: 'qqai-meta' }, '读取中…'))
+      if (state.status === 'error') {
+        return h('div', { className: 'qqai-wrap' },
+          h('style', null, CSS),
+          h('div', { className: 'qqai-err' }, `读取面板失败：${state.error}`, h('div', null, '如果是刚装好插件，先重启一次 DSH 让路由挂上。')),
+          h('button', { className: 'qqai-retry', onClick: () => { setState({ status: 'loading', data: null, error: '', flash: '', busyKey: '' }); void load() } }, '重试'))
+      }
+
+      const data = state.data
+      return h('div', { className: 'qqai-wrap' },
+        h('style', null, CSS),
+        h('div', { className: 'qqai-head' },
+          h('span', { className: 'qqai-title' }, 'QQ助手'),
+          h('button', { onClick: () => void load(), disabled: state.busyKey !== '' }, '刷新')),
+        h('div', { className: 'qqai-meta' },
+          `profile：${data.profile} · 配置文件：${data.patchFile}${data.patchExists === false ? '（不存在）' : ''}`),
+        h('div', { className: 'qqai-meta' }, data.notes?.apply ?? ''),
+        h('div', { className: 'qqai-meta' }, data.notes?.scope ?? ''),
+        state.flash ? h('div', { className: 'qqai-flash' }, state.flash) : null,
+        state.error ? h('div', { className: 'qqai-err' }, state.error) : null,
+        (Array.isArray(data.warnings) ? data.warnings : []).map((text, index) => h('div', { key: `warn-${index}`, className: 'qqai-warn' }, `⚠️ ${text}`)),
+        data.groups.map((group) => h(Group, { key: group.id, group, busy: state.busyKey !== '', onToggle: toggle })),
+        h(Footer, { links: data.links }),
+      )
+    }
+
+    exports.inject = ['slots']
+    exports.apply = function apply(ctx) {
+      ctx.slots.inject('settings.section', () => ctx.slots.register(
+        { name: 'settings.section', id: 'qqai', order: 45, label: () => 'QQ助手' },
+        () => h(QqAiPanel, null),
+      ))
+    }
+
+    return module.exports
+  },
+})

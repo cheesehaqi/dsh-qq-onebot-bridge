@@ -6,7 +6,7 @@
  *   - every named import exists as an export in the target module
  *   - all sources are valid UTF-8 (no mojibake from a bad editor round-trip)
  */
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Config } from '../lib/index.js'
@@ -197,6 +197,29 @@ const notInCommands = argWords.filter((word) => !(
 check('OPS_ARG_WORDS 里每个词都真的出现在命令正则的候选里（防漂移）',
   argWords.length >= 15 && notInCommands.length === 0,
   notInCommands.join(',') || `${argWords.length} 个词`)
+
+// ---- v0.6：DSH 设置面板的结构守卫 ----
+// 这些字段写错的后果都很隐蔽：`dsh.client` 少了 platform 就**不会被加载**；
+// `inject` 里的包名拼错会**静默跳过**；bundle 少了 __ModuleLoader__ 包裹则整块不执行。
+const pkgNow = JSON.parse(readFileSync(join(libDir, '..', 'package.json'), 'utf8'))
+const clientRel = pkgNow.exports?.['./client']
+check('package.json 声明 ./client 导出（客户端 bundle 入口）', typeof clientRel === 'string', String(clientRel))
+const clientDecl = pkgNow.dsh?.client
+check('dsh.client 声明 platform=web 且注入了设置界面所需的客户端包',
+  clientDecl?.platform === 'web' && Array.isArray(clientDecl?.inject)
+  && clientDecl.inject.includes('@deepseek-ai/dsh-client-ui-settings'),
+  JSON.stringify(clientDecl))
+check('dsh.client.inject 的包名形状正确（写错会静默失效）',
+  (clientDecl?.inject ?? []).length > 0
+  && (clientDecl?.inject ?? []).every((name) => /^@deepseek-ai\/dsh-client-[a-z0-9-]+$/.test(name))
+  // 光是"形状对"不够：拼错一个字母同样被静默跳过，所以把真正要注入的那个包钉死。
+  && (clientDecl?.inject ?? []).includes('@deepseek-ai/dsh-client-ui-settings'),
+  (clientDecl?.inject ?? []).join(','))
+const clientFile = join(libDir, '..', typeof clientRel === 'string' ? clientRel : 'client/client.js')
+const clientOk = existsSync(clientFile) && readFileSync(clientFile, 'utf8').includes('window.__ModuleLoader__.load')
+check('客户端 bundle 存在且被 __ModuleLoader__.load 包裹', clientOk, clientFile)
+check('插件入口把面板挂到宿主 webServer 上（否则设置里没有那一页）',
+  /ctx\.inject\(\['webServer'\]/.test(readFileSync(join(libDir, 'index.js'), 'utf8')))
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)
