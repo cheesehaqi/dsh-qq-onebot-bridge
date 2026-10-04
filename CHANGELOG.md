@@ -53,30 +53,46 @@
   以前只能自己去右键"以管理员身份运行 launcher.bat"，而这台机器上**双击自提权是静默失败的**。
   现在面板「相关链接」下面多一行：**`启动 NapCat`** 与 **`重新登录（扫码）`**，外加实时状态
   `NapCat：运行中（127.0.0.1:6099）/ 未运行`（面板载荷新增 `napcat: { running, port }`，客户端据此禁用按钮）。
-  点一下 POST 到 `/qqai/napcat/start`（或 `/qqai/napcat/relogin`），服务端**提权拉起**、弹一次 UAC、点「是」即可。
-  三条硬规矩全部复用控制台那套（新增 `lib/napcat-launch.js`，控制台与面板**共用一份**，`panelHeaderLinks` 之外的坑不再各踩一次）：
+  点一下 POST 到 `/qqai/napcat/start`（或 `/qqai/napcat/relogin`），服务端拉起提权进程。
+  三条硬规矩全部复用控制台那套（新增 `lib/napcat-launch.js`，控制台与面板**共用一份**，坑不再各踩一次）：
   ① 必须提权（非提权的 launcher.bat 实测秒退）；② **启动脚本优先挑同目录的 `launcher.bat`**——
   配置里这台机器写的是 `napcat.bat`，它只是 `NapCatWinBootMain.exe` + `pause`（不设 `NAPCAT_*`、不解析 QQ 路径），
   实测秒退什么都不做，**控制台的「启动 NapCat」也一并跟着修好了**；
   ③ 重新登录**只按加载器 PID** `/T /F`（拿不到 PID 就拒绝），绝不按镜像名杀——那会连用户自己的 QQ 一起杀掉。
   安全口径：这是特权动作，三道门都要过（POST + `application/json`、同源守卫、只允许回环来源），
   且 `ok:false` 的回执（"已经在运行了""没找到加载器"）当**解释**原样显示，不当异常抛掉。
+- 🔴 **真机事故二：「点了按钮，没有 UAC 弹窗，也没反应」**——两个原因，都修了：
+  ① **提权命令写死了 `-Verb RunAs`，但没考虑"宿主本来就是管理员"**：这台机器上宿主是从管理员终端起的
+     （真机实测 `am I admin: True`），管理员进程里 `Start-Process -Verb RunAs` **根本不弹 UAC**、直接执行——
+     用户看不到弹窗，以为没反应（其实 NapCat 已经起来了，实测 6099 立刻在听、`QQ.exe` 的父进程正是
+     `NapCatWinBootMain.exe`，即"NapCat 自己拉起 QQ"的正确形态）。
+     现在命令先 `IsInRole(Administrator)` 判断：**已是管理员 → 直接起（不打搅你）；不是 → 才补 `Verb='RunAs'`**，
+     两条分支各打一个标记（`QAI-ELEVATED` / `QAI-RUNAS`），接口把这个事实一并回给界面。
+  ② **旧实现把子进程输出丢了（`stdio: 'ignore'`），于是"提权被静默拒绝"时还显示"已请求启动"——假成功。**
+     真机现场：从资源管理器双击开的**桌面端不是管理员**，它发 `-Verb RunAs` 被这台机器静默拒绝，
+     powershell 立刻非零退出、什么都没发生，而面板照样说"已请求提权启动"。
+     现在 `spawnDetachedProcess` **抓 stdout/stderr、等它退出**，非零退出码/失败一律 `ok:false` 并把
+     powershell 的原话（如"此操作需要提升权限"）带给用户；成功时还会**等最多 8 秒去看 6099 到底起没起来**，
+     如实回"已经起来了"或"还没起来（多半是 QQ 没登录/已有别的 QQ 在跑）"——不再有静默分支。
 - **控制台按钮改名**：`control/` 里「打开 NapCat 扫码页」→「**QQ助手账号**」
   （禁用态文案同步成「QQ助手账号不可用（NapCat 未运行）」），与设置页面板入口同名；
   端口标签也从「NapCat WebUI（扫码）」改成「NapCat WebUI（QQ助手账号 / 扫码）」。
 - **顺手修掉一个测试卫生问题**：账号入口原来漏传调用方解析出来的插件根，于是单测里读到了**真机的**
   `qq-control.json`（断言输出里带出了本机 NapCat token）。现在 `pluginRoot` 与 `readFile` 都由调用方注入，
   单测全在临时目录里跑。
-- 新增 57 条断言（`settings-unit` 86 → **143**）：落点形状（`/webui/?token=` + 明文 token）、
+- 新增 61 条断言（`settings-unit` 86 → **147**）：落点形状（`/webui/?token=` + 明文 token）、
   读不到配置时退回裸 `/webui/`、`webui.json` 没有 token 时只给裸地址但端口仍按 `qq-control.json`、
   `GET /qqai/account` → 302、跨站 403、面板载荷不含 token，**「相关链接」的位置与顺序**四条
   （整组在第一个分组之前、账号入口是 `links[0]`、组内顺序 账号→更新日志→调试文档→调试台、账号入口整页只出现一次）、
   "载荷里没有多余的 `account` 字段"一条，**真实浏览器请求头形状**五条、**整行可点**两条
-  （见上面那条事故），以及**快捷操作**十五条（纯决策：`planNapcatAction` 的启动/已运行/切换 launcher.bat/
-  只按 PID 清理/没有 PID 就拒绝/没配脚本就拒绝；路由：真的拉起进程、GET 405、text/plain 与跨站 403、
-  已在运行不重复拉、载荷 `napcat.running` 跟着探测走；浅渲染：两个按钮 + 禁用态）；
-  `control-unit` 里两条把地址写死的断言
-  （supervisor 侧与控制台接口侧）跟着新形状更新。全量 **57 套 / 3811 断言全绿**。
+  （见上面那条事故），以及**快捷操作**十九条（纯决策：`planNapcatAction` 的启动/已运行/切换 launcher.bat/
+  只按 PID 清理/没有 PID 就拒绝/没配脚本就拒绝/提权命令带管理员判断与分支标记；路由：真的拉起进程、
+  GET 405、text/plain 与跨站 403、已在运行不重复拉、载荷 `napcat.running` 跟着探测走、
+  **提权被拒时把 powershell 原话带回来**、**非零退出码也算失败**、启动后确认 6099 起没起来；
+  浅渲染：两个按钮 + 禁用态）；
+  `control-unit` 里几条把命令形状写死的断言
+  （supervisor 侧与控制台接口侧）跟着新的 splatting 写法更新（仍然只有一次 `Start-Process`）。
+  全量 **57 套 / 3815 断言全绿**。
 
 ## v0.6.2（2026-10-04）— 功能说明补全 / Every switch explains itself
 

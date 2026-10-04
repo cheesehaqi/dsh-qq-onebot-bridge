@@ -454,12 +454,17 @@ check('openPanel 启动失败安全返回', openThrows.ok === false && openThrow
 // ---- v0.5.6：提权启动 / 登录流程重启 / 二维码（纯函数 + 护栏） ----
 const launch = napcatLaunchCommand('C:\\NapCat\\bootmain\\launcher.bat')
 check('napcatLaunchCommand 用 PowerShell 提权启动', launch.ok === true && launch.command === 'powershell.exe' && launch.args.includes('-Command'), JSON.stringify(launch))
-check('napcatLaunchCommand 带 -Verb RunAs（launcher.bat 需要管理员）', launch.args.join(' ').includes('-Verb RunAs'), launch.args.join(' '))
+// 2026-10-04 起：命令先判断自己是不是管理员——已经是就直起（RunAs 在管理员进程里不会弹 UAC），
+// 不是才补 Verb='RunAs'。所以这里断言"确实会提权 + 两条分支各有标记"，而不是字面量 `-Verb RunAs`。
+check('napcatLaunchCommand 会提权（非管理员分支补 Verb=RunAs），并标出分支',
+  launch.args.join(' ').includes("$p.Verb = 'RunAs'") && launch.args.join(' ').includes('QAI-RUNAS')
+  && launch.args.join(' ').includes('QAI-ELEVATED') && launch.args.join(' ').includes('IsInRole'),
+  launch.args.join(' ').slice(-180))
 check('napcatLaunchCommand 目标脚本用 call + 引号包住（括号路径不会被 cmd 剥引号）',
   launch.args.join(' ').includes('call \\"C:\\\\NapCat\\\\bootmain\\\\launcher.bat\\"') || launch.args.join(' ').includes('call "C:\\NapCat\\bootmain\\launcher.bat"'),
   launch.args.join(' ').slice(0, 220))
 check('napcatLaunchCommand 指定工作目录为脚本所在目录',
-  launch.args.join(' ').includes("WorkingDirectory 'C:\\NapCat\\bootmain'"), launch.args.join(' ').slice(0, 220))
+  launch.args.join(' ').includes("WorkingDirectory = 'C:\\NapCat\\bootmain'"), launch.args.join(' ').slice(-200))
 check('napcatLaunchCommand 用 @() 数组传参（不走裸 /c,\'"path"\' 那条会被剥引号的写法）',
   launch.args.join(' ').includes("@('/c',") && !launch.args.join(' ').includes("-ArgumentList '/c'"),
   launch.args.join(' ').slice(0, 220))
@@ -483,7 +488,7 @@ check('napcatRestartCommand 清理后仍会启动 launcher.bat', restart.args.jo
 // 回归：清理与启动必须在**同一个提权进程**里，否则非提权的 taskkill 杀不掉由提权 launcher 拉起的 QQ
 const restartScript = restart.args.join(' ')
 check('清理与启动在同一个提权命令里（不是只把启动提权）',
-  restartScript.includes("Start-Process -FilePath 'cmd.exe'") && restartScript.includes("'/c'")
+  restartScript.includes("$p = @{ FilePath = 'cmd.exe'") && restartScript.includes("'/c'")
   && restartScript.indexOf('taskkill') < restartScript.indexOf('launcher.bat'),
   restartScript.slice(0, 240))
 check('提权命令里只有一次 Start-Process（不会"没杀掉又拉一个"）',

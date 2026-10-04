@@ -190,7 +190,7 @@ window.__ModuleLoader__.load({
             title: '只结束 NapCat 加载器（不会碰你自己开的 QQ），然后重新走一遍登录流程',
             onClick: () => onAction('/qqai/napcat/relogin', '重新登录'),
           }, busy === '/qqai/napcat/relogin' ? '请求中…' : '重新登录（扫码）'),
-          h('span', { className: 'qqai-hint' }, `NapCat：${running === true ? `运行中（127.0.0.1:${port}）` : '未运行'} · 启动/重启都要点一次 UAC`)))
+          h('span', { className: 'qqai-hint' }, `NapCat：${running === true ? `运行中（127.0.0.1:${port}）` : '未运行'} · 宿主不是管理员时会弹一次 UAC`)))
     }
 
     function Group({ group, busy, onToggle }) {

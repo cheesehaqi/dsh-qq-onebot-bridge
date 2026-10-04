@@ -689,10 +689,10 @@ check('面板载荷里**没有** NapCat token（密钥只走 302）',
  * 决策逻辑是纯函数（`planNapcatAction`），执行走注入的 spawnDetached —— 测试**绝不真的拉进程**。
  */
 const planStart = planNapcatAction('start', { bat: 'C:\\NapCat\\bootmain\\launcher.bat', running: false, loaders: [], exists: () => true })
-check('快捷启动：没在跑时给出提权启动命令（带 -Verb RunAs）',
-  planStart.ok === true && planStart.args.join(' ').includes('-Verb RunAs')
+check('快捷启动：没在跑时给出提权启动命令（非管理员分支补 Verb=RunAs）',
+  planStart.ok === true && planStart.args.join(' ').includes("$p.Verb = 'RunAs'")
   && planStart.args.join(' ').includes('launcher.bat'),
-  planStart.args.join(' ').slice(-120))
+  planStart.args.join(' ').slice(-140))
 check('快捷启动：已经在跑时不去重复拉一个，并指路「重新登录」',
   planNapcatAction('start', { bat: 'C:\\x\\launcher.bat', running: true, exists: () => true }).ok === false
   && planNapcatAction('start', { bat: 'C:\\x\\launcher.bat', running: true, exists: () => true }).focus === 'relogin')
@@ -722,6 +722,12 @@ check('载荷里带上 NapCat 的运行状态（按钮据此禁用）',
   typeof JSON.parse(accountPanel.out.body).napcat?.running === 'boolean'
   && JSON.parse(accountPanel.out.body).napcat?.port > 0,
   brief(JSON.parse(accountPanel.out.body).napcat))
+// 提权命令必须**先判断自己是不是管理员**：宿主已经是管理员时 RunAs 不会弹 UAC（真机实测），
+// 非管理员时这台机器上 RunAs 会被静默拒绝 —— 两条分支都要写清楚，且各打一个标记给调用方。
+check('提权命令里有"是否管理员"判断 + 两条分支标记（QAI-ELEVATED / QAI-RUNAS）',
+  planStart.args.join(' ').includes('IsInRole') && planStart.args.join(' ').includes('QAI-ELEVATED')
+  && planStart.args.join(' ').includes('QAI-RUNAS') && planStart.args.join(' ').includes("'RunAs'"),
+  planStart.args.join(' ').slice(-150))
 
 // ---- 快捷操作路由：真的会拉起进程，所以 spawn / exec 全部注入（测试绝不动真机）----
 {
@@ -736,7 +742,8 @@ check('载荷里带上 NapCat 的运行状态（按钮据此禁用）',
     linkSources: { root: napcatRoot },
     probe: async () => false,                                  // 6099 没在听
     exists: (file) => /launcher\.bat$/i.test(file),             // 同目录只有 launcher.bat
-    spawnDetached: ({ command, args }) => { spawned.push({ command, args }); return { pid: 4242 } },
+    napcatWaitMs: 0,                                            // 单测别真等 8 秒
+    spawnDetached: async ({ command, args }) => { spawned.push({ command, args }); return { pid: 4242, failed: false, code: 0, stdout: 'QAI-ELEVATED', stderr: '' } },
     exec: (command, args, options, callback) => {
       const done = typeof options === 'function' ? options : callback
       // 假 tasklist：一个 NapCat 加载器 + 一个个人 QQ（后者绝不能被写进命令）
@@ -755,6 +762,10 @@ check('载荷里带上 NapCat 的运行状态（按钮据此禁用）',
     brief({ status: startRes.out.status, spawned: spawned.length, reason: startBody.reason?.slice(0, 60) }))
   check('启动接口回的是人话（含"UAC"与扫码提示），并带回最新面板',
     startBody.reason.includes('UAC') && startBody.panel?.links?.length > 0, brief(startBody.reason))
+  check('★启动之后会去确认结果：8 秒内 6099 没起来就如实说"还没起来"（不再盲报成功）',
+    startBody.elevated === true && startBody.started === false
+    && startBody.reason.includes('还没起来') && startBody.reason.includes('当前宿主已是管理员'),
+    brief({ elevated: startBody.elevated, started: startBody.started, reason: startBody.reason.slice(0, 80) }))
   check('启动接口拒绝 GET（这是个会拉进程的动作）',
     await (async () => { const r = makeResponse(); await startRoute.handler(fakeRequest('GET'), r); return r.out.status })() === 405)
   const startPlain = makeResponse()
@@ -792,6 +803,46 @@ check('载荷里带上 NapCat 的运行状态（按钮据此禁用）',
   await runningRoutes.find((r) => r.path === '/qqai/panel').handler(fakeRequest('GET'), runningPanel)
   check('载荷里的 napcat.running 跟着探测结果走（true）',
     JSON.parse(runningPanel.out.body).napcat.running === true, brief(JSON.parse(runningPanel.out.body).napcat))
+
+  /**
+   * ★ 2026-10-04 真机事故的回归：**提权失败必须如实报，不许盲报"已请求启动"**。
+   * 现场：桌面端（非管理员）点按钮 → powershell 的 `-Verb RunAs` 被静默拒绝 → 什么都没发生，
+   * 而旧实现把子进程输出丢了（stdio: 'ignore'），面板照样显示"已请求启动" ⇒ 用户"点了没反应"。
+   * 现在：抓到 exitCode / stderr 就必须回给用户。
+   */
+  const failRoutes = []
+  mountQqAiPanel({
+    webServer: { register(route) { failRoutes.push(route); return () => { const at = failRoutes.indexOf(route); if (at >= 0) failRoutes.splice(at, 1) } } },
+  }, {
+    profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
+    linkSources: { root: napcatRoot }, probe: async () => false, exists: () => true, napcatWaitMs: 0,
+    spawnDetached: async () => ({
+      pid: 0, failed: true, code: -1, stdout: '',
+      stderr: 'Start-Process : 此操作需要提升权限。/ This operation requires elevation.',
+    }),
+    exec: (command, args, options, callback) => (typeof options === 'function' ? options : callback)(null, '', ''),
+  })
+  const denied = makeResponse()
+  await failRoutes.find((r) => r.path === '/qqai/napcat/start').handler(fakeRequest('POST', {}, JSON_HEADERS), denied)
+  const deniedBody = JSON.parse(denied.out.body)
+  check('★提权被拒时：ok=false 且把 powershell 的原话带出来（不再显示假成功）',
+    deniedBody.ok === false && deniedBody.started === false
+    && deniedBody.reason.includes('提权失败') && deniedBody.reason.includes('elevation'),
+    brief(deniedBody.reason))
+  const nonzero = []
+  mountQqAiPanel({
+    webServer: { register(route) { nonzero.push(route); return () => { const at = nonzero.indexOf(route); if (at >= 0) nonzero.splice(at, 1) } } },
+  }, {
+    profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
+    linkSources: { root: napcatRoot }, probe: async () => false, exists: () => true, napcatWaitMs: 0,
+    spawnDetached: async () => ({ pid: 9, failed: false, code: 1, stdout: '', stderr: 'Access is denied' }),
+    exec: (command, args, options, callback) => (typeof options === 'function' ? options : callback)(null, '', ''),
+  })
+  const nzRes = makeResponse()
+  await nonzero.find((r) => r.path === '/qqai/napcat/start').handler(fakeRequest('POST', {}, JSON_HEADERS), nzRes)
+  check('★非零退出码也算失败：如实报"Access is denied"',
+    JSON.parse(nzRes.out.body).ok === false && JSON.parse(nzRes.out.body).reason.includes('Access is denied'),
+    brief(JSON.parse(nzRes.out.body).reason))
 }
 
 dispose()
