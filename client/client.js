@@ -64,6 +64,10 @@ window.__ModuleLoader__.load({
 .qqai-link-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .qqai-link{color:var(--dsw-alias-brand-primary,#2563eb);text-decoration:none;font-weight:600}
 .qqai-link:hover{text-decoration:underline}
+/* 「QQ助手」标题正下方那一行 = 机器人账号入口（用户 2026-10-04："应该在QQ助手的下边"）：
+   它属于「头部」，不是底部"相关链接"里的一条，所以单独给样式。 */
+.qqai-account{margin:-4px 0 2px}
+.qqai-account .qqai-link{font-weight:700}
 .qqai-state{font-size:11px}
 .qqai-state.on{color:var(--dsw-alias-state-success-primary,#15803d)}
 .qqai-state.off{color:var(--dsw-alias-state-warn-primary,#b45309)}
@@ -120,6 +124,25 @@ window.__ModuleLoader__.load({
           'aria-label': `${row.label}：${on ? '开' : '关'}`,
           onClick: () => onToggle(row.key, !on),
         }, h('span', { className: 'qqai-knob' })))
+    }
+
+    /**
+     * 「QQ助手」标题的正下方那一行：机器人账号（登录 / 扫码）。
+     * 为什么在这里而不是底部"相关链接"里：没登录时下面的开关都没意义，
+     * 所以它跟着标题走、第一眼就能看见（用户 2026-10-04："应该在QQ助手的下边"）。
+     * href 指宿主自己的 `/qqai/account`（服务端读 token 后 302，token 不进面板载荷）。
+     */
+    function AccountRow({ account }) {
+      if (!account || !account.href) return null
+      return h('div', { className: 'qqai-account qqai-link-row' },
+        h('a', {
+          className: 'qqai-link',
+          href: account.href,
+          target: '_blank',
+          rel: 'noreferrer',
+          title: account.hint ?? '',
+        }, account.label ?? 'QQ助手账号（登录 / 扫码）'),
+        account.hint ? h('span', { className: 'qqai-hint' }, account.hint) : null)
     }
 
     function Footer({ links }) {
@@ -195,6 +218,8 @@ window.__ModuleLoader__.load({
         h('div', { className: 'qqai-head' },
           h('span', { className: 'qqai-title' }, 'QQ助手'),
           h('button', { onClick: () => void load(), disabled: state.busyKey !== '' }, '刷新')),
+        // 标题正下方就是账号入口（最常用：没登录时下面的开关都没意义）。
+        h(AccountRow, { account: data.account }),
         h('div', { className: 'qqai-meta' },
           `profile：${data.profile} · 配置文件：${data.patchFile}${data.patchExists === false ? '（不存在）' : ''}`),
         h('div', { className: 'qqai-meta' }, data.notes?.apply ?? ''),
