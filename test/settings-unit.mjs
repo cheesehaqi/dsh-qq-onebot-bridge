@@ -258,13 +258,17 @@ check('没有仓库地址时只给账号入口与调试台（不编造链接）'
 // ⚠️ 它**就是「相关链接」这一组里的第一条**（用户 2026-10-04 四条指示的最终口径：
 // "应该把账号登陆调到最上方" → "不对不对应该在QQ助手的下边" →
 //  "还是挪回到之前的位置吧，直接把相关链接整体拉到最上边" → "再把调试台和更新日志换一下位置"）。
+// ⚠️ 它**就是「相关链接」这一组里的第一条**（用户 2026-10-04 **七条**指示的最终口径：
+// "应该把账号登陆调到最上方" → "不对不对应该在QQ助手的下边" →
+//  "还是挪回到之前的位置吧，直接把相关链接整体拉到最上边" → "再把调试台和更新日志换一下位置" →
+//  "更新日志改到相关链接的最底下" → "嗯，还是把更新日志位置改回去吧" → "调试台改到调试文档下方"）。
 const accountLink = links.find((link) => link.id === 'account')
 check('账号入口在「相关链接」组里、排第一，且它自己不带 token',
   accountLink?.href === '/qqai/account' && accountLink.label.includes('QQ助手账号')
   && !/token=/i.test(accountLink.href) && links[0]?.id === 'account' && bareLinks[0]?.id === 'account',
   `${brief(accountLink)} · 完整=${links.map((link) => link.id).join(',')}`)
-check('顺序固定为 账号 → 调试台 → 更新日志 → 调试文档',
-  links.map((link) => link.id).join(',') === 'account,console,changelog,readme-debug'
+check('顺序固定为 账号 → 更新日志 → 调试文档 → 调试台（调试台压在最底下）',
+  links.map((link) => link.id).join(',') === 'account,changelog,readme-debug,console'
   && bareLinks.map((link) => link.id).join(',') === 'account,console',
   `完整=${links.map((link) => link.id).join(',')} 无仓库=${bareLinks.map((link) => link.id).join(',')}`)
 // 调试台是**独立进程**：面板必须如实标出"运行中/未启动"，并给出可复制的启动命令（否则用户对着"连不上"发懵）。
@@ -788,12 +792,12 @@ try {
       patchFile: '/srv/dsh/profiles/desktop/cordis.patch.yml',
       patchExists: true,
       notes: { apply: '写入说明', scope: '范围说明' },
-      // 「相关链接」整组（账号入口第一、更新日志在调试文档前）——渲染在标题正下方、开关分组之前。
+      // 「相关链接」整组（账号第一、调试台压最底下）——渲染在标题正下方、开关分组之前。
       links: [
         { id: 'account', label: 'QQ助手账号（登录 / 扫码）', href: '/qqai/account', hint: '机器人账号的登录状态与扫码页；点开就是带 token 的地址，不用手输' },
-        { id: 'console', label: '调试台（独立控制台）', href: '/qqai/console', running: false, state: '未启动 · 需要单独运行：node x', hint: '调试台是独立进程' },
         { id: 'changelog', label: '更新日志（v9.9.9）', href: 'https://example.invalid/CHANGELOG.md', hint: '每个版本的改动' },
         { id: 'readme-debug', label: '调试文档', href: 'https://example.invalid/README.md#调试v04一切皆可调试', hint: 'trace / 回放 / 体检 / 注入的用法' },
+        { id: 'console', label: '调试台（独立控制台）', href: '/qqai/console', running: false, state: '未启动 · 需要单独运行：node x', hint: '调试台是独立进程' },
       ],
       groups: [{
         id: 'chat',
@@ -818,8 +822,8 @@ try {
   check('浅渲染：标题/分组/开关标签与键名都出现',
     readyText.includes('QQ助手') && readyText.includes('对话基础') && readyText.includes('语音回复')
     && readyText.includes('ttsEnabled'), readyText.slice(0, 120))
-  // 用户 2026-10-04 **六条**指示的最终口径（最后一条把上一条改回去了）：**「相关链接」整组**在标题正下方
-  // （账号入口是组里第一条、调试台第二、更新日志在调试文档前面），开关分组在它下面。
+  // 用户 2026-10-04 **七条**指示的最终口径（其中两条是"改回去 / 再挪"）：**「相关链接」整组**在标题正下方
+  // （账号入口第一、更新日志、调试文档、**调试台最底下**），开关分组在它下面。
   // 浅渲染按树的顺序收集文本，所以"先后"就是界面上的上下。
   // 注意：不能拿「QQ助手」当下界锚点——CSS 是同一棵树里的文本节点，注释里就写着「QQ助手」，
   // 那个下标在最前面（我第一次就是这么红的）。锚点用「对话基础」（确定在链接组后面）。
@@ -828,10 +832,10 @@ try {
     && readyText.includes('不用手输')
     && readyText.indexOf('相关链接') < readyText.indexOf('对话基础'),
     readyText.slice(readyText.indexOf('相关链接') - 40, readyText.indexOf('相关链接') + 120))
-  check('组内顺序：账号入口第一、调试台第二、更新日志在调试文档之前，链接目标都挂上了',
-    readyText.indexOf('QQ助手账号') < readyText.indexOf('调试台')
-    && readyText.indexOf('调试台') < readyText.indexOf('更新日志')
+  check('组内顺序：账号第一 → 更新日志 → 调试文档 → 调试台压最底下，链接目标都挂上了',
+    readyText.indexOf('QQ助手账号') < readyText.indexOf('更新日志')
     && readyText.indexOf('更新日志') < readyText.indexOf('调试文档')
+    && readyText.indexOf('调试文档') < readyText.indexOf('调试台')
     && ready.hrefs.includes('/qqai/account') && ready.hrefs.includes('/qqai/console'),
     ready.hrefs.join(' | '))
   check('账号入口在整份页面里只出现一次（不会组里 + 别处各来一条）',
