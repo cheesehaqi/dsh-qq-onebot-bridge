@@ -15,7 +15,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
-  PANEL_GROUPS, PANEL_KEYS, normalizeRepoUrl, panelFooterLinks, panelFooterLinksWithConsole, panelSnapshot,
+  PANEL_GROUPS, PANEL_KEYS, PANEL_NEEDS, normalizeRepoUrl, panelFooterLinks, panelFooterLinksWithConsole, panelSnapshot,
   readPatchValue, upsertPatchValue,
 } from '../lib/panel.js'
 import {
@@ -68,6 +68,40 @@ check('面板分组都有 id/title 且开关不重复',
   PANEL_GROUPS.every((group) => group.id && group.title && group.rows.length > 0)
   && new Set(PANEL_KEYS).size === PANEL_KEYS.length,
   `${PANEL_GROUPS.length} 组 / ${PANEL_KEYS.length} 开关`)
+
+// ---- 说明必须"写全"（用户反馈：有些开关只写了标签，没说需要额外软件/模型）----
+const needsVocabulary = new Set(Object.values(PANEL_NEEDS))
+const allRows = PANEL_GROUPS.flatMap((group) => group.rows)
+const shortHints = allRows.filter((entry) => !entry.hint || entry.hint.trim().length < 20)
+check('每个开关都有像样的说明（≥20 字，不许空着或一句带过）',
+  shortHints.length === 0, shortHints.map((entry) => entry.key).join(','))
+const badNeeds = allRows.filter((entry) => entry.needs !== '' && !needsVocabulary.has(entry.needs))
+check('依赖标记只用词表里的值（界面按它渲染小标签）',
+  badNeeds.length === 0, badNeeds.map((entry) => `${entry.key}=${entry.needs}`).join(','))
+// 证据型守卫：schema 里同族存在"外部服务/密钥"类配置键的开关，面板**必须**标出依赖，
+// 否则"AI 生图只写一行英文、没说需要额外服务"这类漏写会再次发生。
+const externalHintKeys = ['apiKey', 'baseUrl', 'provider', 'model', 'region']
+const needMarkers = new Set(Object.values(PANEL_NEEDS))
+const missed = PANEL_KEYS.filter((key) => {
+  const stem = key.replace(/(Enabled|Local|InGroup|Only)$/, '').toLowerCase().slice(0, 4)
+  const family = Object.keys(dict).filter((other) => other !== key && other.toLowerCase().startsWith(stem))
+  const needsExternal = family.some((other) => externalHintKeys.some((marker) => other.toLowerCase().includes(marker.toLowerCase())))
+  if (!needsExternal) return false
+  const entry = allRows.find((row) => row.key === key)
+  return !entry || entry.needs === '' || !needMarkers.has(entry.needs)
+})
+check('凡 schema 里带 apiKey/baseUrl/provider/model 的开关都标了依赖',
+  missed.length === 0, missed.join(','))
+check('依赖分布合理（既有"开箱即用"也有需要准备的，且总数为 59）',
+  allRows.filter((entry) => entry.needs === '').length >= 5
+  && allRows.filter((entry) => entry.needs !== '').length >= 20
+  && allRows.length === 59,
+  `开箱即用 ${allRows.filter((entry) => entry.needs === '').length} / 需准备 ${allRows.filter((entry) => entry.needs !== '').length}`)
+check('生图/语音这些"要装东西"的功能，说明里点明了需要什么',
+  ['imageGenEnabled', 'ttsEnabled', 'sttEnabled'].every((key) => {
+    const entry = allRows.find((row) => row.key === key)
+    return entry && entry.needs !== '' && /需要|依赖|填/.test(entry.hint)
+  }))
 
 const snapshot = panelSnapshot({ ttsEnabled: true, groupOpsEnabled: false }, { defaults: { ttsEnabled: false, groupOpsEnabled: false } })
 const flat = snapshot.groups.flatMap((group) => group.rows)
@@ -645,7 +679,16 @@ try {
         id: 'chat',
         title: '对话基础',
         advanced: false,
-        rows: [{ key: 'ttsEnabled', label: '语音回复', hint: '需要 TTS 可用', value: false, nonDefault: true, fileValue: true, pending: true }],
+        rows: [{
+          key: 'ttsEnabled',
+          label: '语音回复',
+          hint: '**需要额外的语音服务**：本地 GPT-SoVITS 或云端 TTS。',
+          needs: '需外部服务',
+          value: false,
+          nonDefault: true,
+          fileValue: true,
+          pending: true,
+        }],
       }],
     },
   }
@@ -656,6 +699,9 @@ try {
     && readyText.includes('ttsEnabled'), readyText.slice(0, 120))
   check('浅渲染：「非默认」与「待重启」两个徽标真的渲染出来（此前文档承诺、代码没做）',
     readyText.includes('非默认') && readyText.includes('待重启'))
+  check('浅渲染：依赖标记与说明都渲染出来（** 被解析成加粗而不是原样显示）',
+    readyText.includes('需外部服务') && readyText.includes('需要额外的语音服务')
+    && !readyText.includes('**'), readyText.slice(-160))
   check('浅渲染：底部链接与调试台状态都渲染出来（链接目标查 href 属性）',
     readyText.includes('更新日志（v9.9.9）') && readyText.includes('调试台（独立控制台）')
     && ready.hrefs.includes('/qqai/console') && ready.hrefs.some((href) => href.includes('CHANGELOG.md'))

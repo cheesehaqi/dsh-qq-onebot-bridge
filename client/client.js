@@ -42,7 +42,9 @@ window.__ModuleLoader__.load({
 .qqai-hint,.qqai-key{color:var(--dsw-alias-label-secondary,#6b7280);font-size:11px;line-height:1.5}
 .qqai-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .qqai-badge{margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;color:var(--dsw-alias-state-warn-primary,#b45309);border:1px solid currentColor}
-/* 开关**照抄平台自己的 Switch.module.css**（dsh-client-ui-primitives/lib/Switch.module.css）：
+.qqai-need{margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#6b7280);background:var(--dsw-alias-bg-layer-2,#f1f5f9);border:1px solid var(--dsw-alias-border-l1,#e5e7eb)}
+.qqai-hint b{font-weight:600;color:var(--dsw-alias-label-primary,#111)}
+/* 开关照抄平台自己的 Switch.module.css（dsh-client-ui-primitives/lib/Switch.module.css）：
    之前我用的是"卡片同色轨道 + 白圆点"，浅色主题下 OFF 态等于隐形（用户反馈"关了以后感觉按钮消失了一样"）。
    官方取值（design token 表实测）：轨道 OFF = --dsw-alias-border-l3（浅色 #0000001f / 深色 #ffffff29），
    轨道 ON = --dsw-alias-brand-primary（浅色近黑 / 深色近白），圆点 OFF = --dsw-alias-switch-thumb，
@@ -79,14 +81,24 @@ window.__ModuleLoader__.load({
       return payload
     }
 
+    /**
+     * 极简富文本：只认 `**加粗**`（说明里用它点出"需要什么"），其余原样输出。
+     * 不引 markdown 库——面板要的是轻量；也绝不把文本塞进 innerHTML。
+     */
+    function richText(text) {
+      const parts = String(text ?? '').split('**')
+      return parts.map((part, index) => (index % 2 === 1 ? h('b', { key: index }, part) : part))
+    }
+
     function Row({ row, busy, onToggle }) {
       const on = row.value === true
       return h('div', { className: 'qqai-row' },
         h('div', { className: 'qqai-text' },
           h('label', { className: 'qqai-label' }, row.label,
             row.pending === true ? h('span', { className: 'qqai-badge', title: '配置文件里的值与当前生效值不一致' }, '待重启') : null,
-            row.nonDefault === true ? h('span', { className: 'qqai-badge', title: '与这个开关的默认值不同' }, '非默认') : null),
-          row.hint ? h('span', { className: 'qqai-hint' }, row.hint) : null,
+            row.nonDefault === true ? h('span', { className: 'qqai-badge', title: '与这个开关的默认值不同' }, '非默认') : null,
+            row.needs ? h('span', { className: 'qqai-need', title: '这个功能要额外准备的东西' }, row.needs) : null),
+          row.hint ? h('span', { className: 'qqai-hint', title: row.hint }, richText(row.hint)) : null,
           h('span', { className: 'qqai-key' }, row.key)),
         h('button', {
           className: 'qqai-switch',
