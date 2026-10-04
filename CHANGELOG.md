@@ -77,22 +77,38 @@
 - **控制台按钮改名**：`control/` 里「打开 NapCat 扫码页」→「**QQ助手账号**」
   （禁用态文案同步成「QQ助手账号不可用（NapCat 未运行）」），与设置页面板入口同名；
   端口标签也从「NapCat WebUI（扫码）」改成「NapCat WebUI（QQ助手账号 / 扫码）」。
+- 🔴 **真机事故三：桌面端点「QQ助手账号」没反应（读 `app.asar` 定的案）。**
+  桌面端主窗口对"开新窗口"是这么处理的：
+  `setWindowOpenHandler(({url}) => { if (["http:","https:"].includes(protocol)) shell.openExternal(url); return { action: "deny" } })`
+  ——**只有 http(s) 外链会被丢给系统浏览器，其余一律拒绝**。而面板里的账号/调试台入口是**相对地址**
+  （`/qqai/account`），在桌面端（渲染基址 `dsh-app://app/`）解析出来是 `dsh-app://app/qqai/account`：
+  协议不是 http(s)、又不许开 Electron 窗口 ⇒ **什么都没发生**（平台自己的链接都是绝对 http(s)，所以它们能开）。
+  修法：两个入口都支持 **`?format=json`**——回一个 `{ ok, url }`（账号）或 `{ ok, running, url, command }`（调试台），
+  客户端**只在桌面宿主里**（`location.protocol === 'dsh-app:'`）改走"取 JSON → `window.open(绝对 http 地址)`"，
+  那个地址是 http，桌面端便会交给系统浏览器；网页版保持原来的 302 导航不动。
+  守卫不变：`?format=json` 与 302 走同一套回环 + 同源检查（跨站仍 403）。
+  顺带**核对并保留**了同源守卫里 `sec-fetch-site: same-origin` 单独放行那一条：我一度想收紧成"以 Origin 为准"，
+  核对后没有改——真实浏览器发不出"Origin=站点外 + same-origin 标记"这种自相矛盾的请求
+  （`Sec-Fetch-Site` 是按发起方 URL 算的、页面改不了），而那条正是**反向代理部署**（Host 被改写、Origin 是公网域名）
+  需要的口子；测试里把这条语义显式钉了一条断言。
 - **顺手修掉一个测试卫生问题**：账号入口原来漏传调用方解析出来的插件根，于是单测里读到了**真机的**
   `qq-control.json`（断言输出里带出了本机 NapCat token）。现在 `pluginRoot` 与 `readFile` 都由调用方注入，
   单测全在临时目录里跑。
-- 新增 61 条断言（`settings-unit` 86 → **147**）：落点形状（`/webui/?token=` + 明文 token）、
+- 新增 66 条断言（`settings-unit` 86 → **152**）：落点形状（`/webui/?token=` + 明文 token）、
   读不到配置时退回裸 `/webui/`、`webui.json` 没有 token 时只给裸地址但端口仍按 `qq-control.json`、
   `GET /qqai/account` → 302、跨站 403、面板载荷不含 token，**「相关链接」的位置与顺序**四条
   （整组在第一个分组之前、账号入口是 `links[0]`、组内顺序 账号→更新日志→调试文档→调试台、账号入口整页只出现一次）、
-  "载荷里没有多余的 `account` 字段"一条，**真实浏览器请求头形状**五条、**整行可点**两条
-  （见上面那条事故），以及**快捷操作**十九条（纯决策：`planNapcatAction` 的启动/已运行/切换 launcher.bat/
+  "载荷里没有多余的 `account` 字段"一条，**真实浏览器请求头形状**五条、**整行可点**两条、
+  **桌面端 `?format=json`** 三条（账号入口回绝对地址 / 调试台入口回 `{ok,running,command}` / 跨站仍 403）
+  与**客户端桌面分支**一条（认得出 `dsh-app:`、对相对入口改用 JSON + `window.open`），
+  以及**快捷操作**十九条（纯决策：`planNapcatAction` 的启动/已运行/切换 launcher.bat/
   只按 PID 清理/没有 PID 就拒绝/没配脚本就拒绝/提权命令带管理员判断与分支标记；路由：真的拉起进程、
   GET 405、text/plain 与跨站 403、已在运行不重复拉、载荷 `napcat.running` 跟着探测走、
   **提权被拒时把 powershell 原话带回来**、**非零退出码也算失败**、启动后确认 6099 起没起来；
   浅渲染：两个按钮 + 禁用态）；
   `control-unit` 里几条把命令形状写死的断言
   （supervisor 侧与控制台接口侧）跟着新的 splatting 写法更新（仍然只有一次 `Start-Process`）。
-  全量 **57 套 / 3815 断言全绿**。
+  全量 **57 套 / 3820 断言全绿**。
 
 ## v0.6.2（2026-10-04）— 功能说明补全 / Every switch explains itself
 

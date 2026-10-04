@@ -142,7 +142,28 @@ window.__ModuleLoader__.load({
      * ⚠️ **整行都要能点**（2026-10-04 真机"点击账号没反应"之后改的）：原来只有那行蓝色标签是 `<a>`，
      * 右边那段灰色说明文字是普通 `<span>`——点在说明上什么都不会发生，看着就是"点了没反应"。
      * 现在整行是一个 `<a>`（label + 状态 + 说明都在里面），点哪儿都能进。
+     *
+     * ⚠️ **桌面端里"相对地址 = 点了没反应"**（2026-10-04 真机，读 `app.asar` 定的案）：桌面端主窗口
+     *   `setWindowOpenHandler(({url}) => { http(s) 才 shell.openExternal(url); 一律 deny 开新窗口 })`。
+     * 面板里的账号/调试台入口是**相对地址**（`/qqai/account`），在桌面端（渲染基址 `dsh-app://app/`）
+     * 会解析成 `dsh-app://app/qqai/account` ⇒ 协议不是 http(s)、又不许开窗口 ⇒ **什么都不发生**。
+     * 所以在这类宿主里改成：先向宿主取 `?format=json` 拿到**绝对 http 地址**，再 `window.open(url)` ——
+     * 那个地址是 http，桌面端会交给系统浏览器打开（和平台自己的外链同一个待遇）。
+     * 网页版（http 宿主）保持原来的默认导航，别多此一举。
      */
+    const isDesktopShell = () => typeof location !== 'undefined' && String(location.protocol ?? '') === 'dsh-app:'
+
+    /** 桌面端专用：把相对入口解析成绝对 http 地址再开（取不到就退回默认导航）。 */
+    async function openViaHost(href) {
+      const url = await fetch(`${href}${href.includes('?') ? '&' : '?'}format=json`, { cache: 'no-store' })
+        .then((r) => r.json())
+        .then((payload) => (payload?.url ? String(payload.url) : ''))
+        .catch(() => '')
+      if (url === '') return false
+      window.open(url, '_blank', 'noopener,noreferrer')
+      return true
+    }
+
     function Links({ links }) {
       if (!Array.isArray(links) || links.length === 0) return null
       return h('div', { className: 'qqai-links' },
@@ -154,6 +175,14 @@ window.__ModuleLoader__.load({
           target: '_blank',
           rel: 'noreferrer',
           title: link.hint ?? '',
+          // 只有**同源相对**入口在桌面端会被卡住（外链是绝对 http(s)，平台自己会交给浏览器）。
+          onClick: isDesktopShell() && String(link.href).startsWith('/')
+            ? (event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+              event.preventDefault()
+              void openViaHost(link.href)
+            }
+            : undefined,
         },
         h('span', { className: 'qqai-link' }, link.label),
         link.state ? h('span', { className: `qqai-state ${link.running === true ? 'on' : 'off'}` }, link.state) : null,

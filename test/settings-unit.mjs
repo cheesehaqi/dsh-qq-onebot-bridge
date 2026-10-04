@@ -21,7 +21,7 @@ import {
 import { planNapcatAction } from '../lib/napcat-launch.js'
 import {
   argvProfile, consoleStartCommand, mountQqAiPanel, napcatWebUiUrl, panelLinkSources, probePort, profileDirOf,
-  resolveProfile,
+  resolveProfile, sameSiteGuard,
 } from '../lib/settings-routes.js'
 import { Config } from '../lib/index.js'
 
@@ -563,6 +563,16 @@ await consoleEntryOff.handler(fakeRequest('GET', undefined, {
 check('★浏览器点「调试台」（导航：same-origin、无 Origin）也放行 —— 同样的坑，这个从 v0.6.0 起就是坏的',
   consoleNav.out.status === 200 && consoleNav.out.headers['content-type'].includes('text/html'),
   String(consoleNav.out.status))
+// 桌面端同样拿不到相对地址：`?format=json` 要如实说"没在跑 + 启动命令"
+const consoleJson = makeResponse()
+await consoleEntryOff.handler(
+  { method: 'GET', url: '/qqai/console?format=json', headers: {}, socket: null, async *[Symbol.asyncIterator]() {} },
+  consoleJson)
+const consoleJsonBody = JSON.parse(consoleJson.out.body)
+check('调试台入口的 `?format=json` 回 `{ok:false, running:false, command}`（桌面端据此提示）',
+  consoleJson.out.status === 200 && consoleJsonBody.ok === false && consoleJsonBody.running === false
+  && String(consoleJsonBody.command).includes('qq-control.mjs'),
+  brief(consoleJsonBody))
 const consoleSameSite = makeResponse()
 await consoleEntryOff.handler(fakeRequest('GET', undefined, { 'sec-fetch-site': 'same-site', 'sec-fetch-mode': 'navigate' }), consoleSameSite)
 check('调试台入口仍然拒绝"同站不同端口"（same-site）', consoleSameSite.out.status === 403, String(consoleSameSite.out.status))
@@ -665,6 +675,28 @@ await accountEntryRoute.handler(fakeRequest('GET', undefined, navHeaders('same-o
 check('★浏览器点链接（导航：same-origin、无 Origin）必须 302 —— 这次"点了没反应"的根因',
   accountNav.out.status === 302 && accountNav.out.headers.location === accountUrl,
   `${accountNav.out.status} ${String(accountNav.out.headers.location ?? accountNav.out.body).slice(0, 80)}`)
+/**
+ * ★ 桌面端（渲染基址 `dsh-app://app/`）点不动账号入口：桌面主窗口只放行 http(s) 外链到系统浏览器，
+ * 相对地址 `dsh-app://app/qqai/account` 会被直接 deny。所以给客户端一条 `?format=json` 的路：
+ * 它拿到**绝对 http 地址**再自己开。这里把两种形状都钉住。
+ */
+const accountJson = makeResponse()
+await accountEntryRoute.handler({ method: 'GET', url: '/qqai/account?format=json', headers: {}, socket: null, async *[Symbol.asyncIterator]() {} }, accountJson)
+check('★`?format=json` 回的是绝对地址（桌面端拿它自己开），不是 302',
+  accountJson.out.status === 200 && JSON.parse(accountJson.out.body).url === accountUrl,
+  String(accountJson.out.body).replace(NAPCAT_TOKEN, '<token>'))
+const accountJsonCross = makeResponse()
+await accountEntryRoute.handler(
+  { method: 'GET', url: '/qqai/account?format=json', headers: { origin: 'https://evil.example' }, socket: null, async *[Symbol.asyncIterator]() {} },
+  accountJsonCross)
+check('`?format=json` 同样受守卫保护（跨站拿不到带 token 的地址）', accountJsonCross.out.status === 403, String(accountJsonCross.out.status))
+// 上面那条测试用的是**真实浏览器发不出来的**组合（Origin=evil + same-origin 标记）。
+// 这里显式记录服务端的语义：`sec-fetch-site: same-origin` 单独就够（浏览器按发起方 URL 算的，
+// 页面改不了；代理场景下 Origin 与 Host 本来就可能不等）。改动这条守卫前先看 lib 里的注释。
+check('记录：same-origin 标记被单独信任（不是漏洞，是为代理场景有意留的）',
+  sameSiteGuard({ headers: { origin: 'https://evil.example', 'sec-fetch-site': 'same-origin' } }, { requireJson: false }).ok === true
+  && sameSiteGuard({ headers: { origin: 'https://evil.example' } }, { requireJson: false }).ok === false,
+  '前者浏览器发不出来；后者才是真实跨站请求的形状 → 必须拒')
 const accountAddressBar = makeResponse()
 await accountEntryRoute.handler(fakeRequest('GET', undefined, navHeaders('none')), accountAddressBar)
 check('地址栏直达（sec-fetch-site: none）也 302', accountAddressBar.out.status === 302, String(accountAddressBar.out.status))
@@ -912,6 +944,15 @@ try {
     && registered.some((r) => r.path === '/qqai/panel') && registered.some((r) => r.path === '/qqai/panel/set'))
   check('快捷操作把 ok:false 当"解释"显示（不当异常抛掉）——按钮点不动时用户要看到原因',
     clientText.includes('payload.ok === true') && clientText.includes('busyAction'))
+  /**
+   * ★ 桌面端（`dsh-app://app/`）的链接：主窗口只把 http(s) 外链丢给系统浏览器，相对地址会被 deny。
+   * 客户端必须：认得出桌面宿主、对**相对入口**改走 `?format=json` + `window.open(绝对地址)`，
+   * 而**网页版保持默认导航**（别把本来就好的路径改坏）。
+   */
+  check('★客户端认得出桌面宿主，并对相对入口改走 `?format=json` + window.open(绝对地址)',
+    clientText.includes("=== 'dsh-app:'") && clientText.includes('format=json')
+    && clientText.includes('window.open(url') && clientText.includes("String(link.href).startsWith('/')"),
+    '桌面端开不了 dsh-app:// 新窗口，必须让系统浏览器去开 http 地址')
   check('客户端把「相关链接」整组渲染出来（挂 data.links，不再是页脚）',
     clientText.includes('qqai-links') && clientText.includes('data.links')
     && !clientText.includes('qqai-footer')
