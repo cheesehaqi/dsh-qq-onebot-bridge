@@ -250,7 +250,7 @@ check('底部有更新日志与调试台，且链接由真实素材拼出',
 check('调试台链接里不含 token（本机密钥不进面板）',
   links.every((link) => !/token=/i.test(link.href)) && consoleLink.href.startsWith('http://127.0.0.1:'))
 const bareLinks = panelFooterLinks({ version: '1.0.0', repoUrl: '', consolePort: 8799 })
-check('没有仓库地址时只给调试台与账号入口（不编造链接）',
+check('没有仓库地址时只给账号入口与调试台（不编造链接）',
   bareLinks.length === 2 && bareLinks.every((link) => ['console', 'account'].includes(link.id)),
   bareLinks.map((link) => link.id).join(','))
 // 「QQ助手账号」= 机器人账号的登录/扫码页（NapCat WebUI）。href 指宿主自己的 /qqai/account：
@@ -260,6 +260,15 @@ check('底部有「QQ助手账号」入口，且它自己不带 token',
   accountLink?.href === '/qqai/account' && accountLink.label.includes('QQ助手账号')
   && !/token=/i.test(accountLink.href),
   brief(accountLink))
+// 顺序即心智优先级（用户 2026-10-04："应该把账号登陆调到最上方"）：账号入口永远排第一，
+// 调试台永远排最后；客户端是按数组顺序自上而下渲染的（client.js 的 Footer），所以数组顺序＝界面顺序。
+check('账号入口排在最上方（客户端按数组顺序渲染，顺序即界面顺序）',
+  links[0]?.id === 'account' && links[links.length - 1]?.id === 'console'
+  && bareLinks[0]?.id === 'account' && bareLinks[bareLinks.length - 1]?.id === 'console',
+  `完整=${links.map((link) => link.id).join(',')} 无仓库=${bareLinks.map((link) => link.id).join(',')}`)
+check('只有调试台在账号入口后面（更新日志/调试文档夹在中间）',
+  links.map((link) => link.id).join(',') === 'account,changelog,readme-debug,console',
+  links.map((link) => link.id).join(','))
 // 调试台是**独立进程**：面板必须如实标出"运行中/未启动"，并给出可复制的启动命令（否则用户对着"连不上"发懵）。
 const offConsole = panelFooterLinksWithConsole({
   version: '1.0.0', repoUrl: '', consolePort: 8799, consoleRunning: false, startCommand: 'node x.mjs',
