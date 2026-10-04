@@ -57,7 +57,24 @@
   断言相应拆成三条：TTS/生图说"不自带"、STT 说"DSH 自带 + 需启用"、schema 描述口径一致（含一条防串词的检查：
   生图描述里不许再出现 "no TTS service"）。
 
-全量 **56 套 / 3741 断言全绿**。
+- **语音转文字改成默认走 DSH 自带的本地识别**（承接上一条：用户指出"是不是可以更改语音转文字的方式，
+  因为现在 DSH 自带这个功能了，但是需要自行开启"）：新增 **`sttProvider: 'dsh' | 'cloud'`，默认 `dsh`** ——
+  用宿主服务 `speechToText`（`dsh-experimental-voice-input-bundle` 里的本地 SenseVoice），
+  **音频不出本机、不需要任何密钥**；只有显式设成 `cloud` 时才会走原来的 `sttBaseUrl`/`sttApiKey` 云端接口。
+  实现要点（新建 `lib/stt.js`，纯逻辑、可注入，方便单测）：
+  - QQ/NapCat 给的语音格式五花八门（silk / amr / 各种采样率的 wav），统一用 ffmpeg 转成
+    **16 kHz 单声道 PCM16 WAV**（DSH 那边用 `validateWave` 校验），并在本地先做一次同样的体检，
+    产物不合规就**拒绝**而不是硬发过去；
+  - 调用形状按平台契约：`resolve({ audio: Uint8Array, language })` → `transcribe(spec, signal)` → `{ text }`，
+    带 120 秒超时；`sttLanguage` 默认 `auto`（中英混说也稳）；
+  - 失败一律翻译成人话：没启用 bundle → "请把 …voice-input-bundle 加进 profile 的 bundles 并重启"；
+    首次使用要下载模型 → "首次使用要下载本地语音模型…"；没有可用提供方 / 语言不支持也各有提示。
+  - 云端的 API Key 预检改成只在 `sttProvider: 'cloud'` 时才要求，否则本地识别会被一个空 key 拦下来。
+  新增单测 `test/stt-unit.mjs`（24 条）：默认值、WAV 体检（采样率/声道/位深/非 WAV/太短）、
+  ffmpeg 参数与产物校验、临时文件清理、服务调用形状（Uint8Array + signal）、没启用时的中文原因、
+  空结果报错、四类错误翻译。
+
+全量 **57 套 / 3765 断言全绿**。
 
 ## v0.6.1（2026-10-04）— 开关配色修正 / Switch colours fixed
 
