@@ -56,18 +56,7 @@ export function portOf(address) {
   return match ? Number(match[1]) : 0
 }
 
-/** Parse `tasklist /FO CSV /NH` output into a pid → image-name map. */
-export function parseTasklist(text) {
-  const map = new Map()
-  for (const line of String(text ?? '').split(/\r?\n/)) {
-    const cells = line.match(/"([^"]*)"/g)
-    if (!cells || cells.length < 2) continue
-    const name = cells[0].replace(/"/g, '')
-    const pid = Number(cells[1].replace(/"/g, ''))
-    if (Number.isFinite(pid)) map.set(pid, name)
-  }
-  return map
-}
+/** `tasklist /FO CSV /NH` 的解析在 lib/napcat-launch.js（那里也做加载器挑选）。 */
 
 /** Combine netstat + tasklist into one row per watched port. */
 export function summarizePorts(netstatRows, taskMap, ports, labels = {}) {
@@ -131,62 +120,20 @@ export function qrStatus(file, now = Date.now(), { stat = statSync } = {}) {
 export const QR_STALE_SECONDS = 300
 
 /**
- * NapCat 加载器进程名（重启时**只允许**结束这些，以及它们 /T 带出来的子进程）。
- *
- * 为什么不再有 `QQ.exe`：按镜像名杀 QQ 会连**用户自己的 QQ 客户端**一起杀掉
- * （真机上就有一个非提权的个人 QQ 客户端在跑）。加载器的子进程用 `taskkill /PID … /T`
- * 连带结束即可，不需要、也不允许按名字杀 QQ。
+ * NapCat 的启动 / 加载器判定逻辑**住在 `lib/napcat-launch.js`**（DSH 设置页的「快捷操作」也用同一份）。
+ * 这里既 import（本模块自己要用）又 re-export（`test/control-unit.mjs` 等原有 import 不变）——
+ * 注意 `export … from` 不会在本地作用域建绑定，所以两件事都得写。
  */
-export const NAPCAT_LOADER_NAMES = ['napcatwinbootmain.exe', 'napcat.exe', 'napcatshell.exe']
+import {
+  NAPCAT_LOADER_NAMES, NAPCAT_LOADER_RE, QQ_CLIENT_RE, napcatLaunchCommand, napcatRestartCommand,
+  parseTasklist, pickNapcatLoaders, resolveNapcatLauncher,
+} from '../../lib/napcat-launch.js'
 
-/** PowerShell 单引号字符串转义（路径里有 `'` 时脚本会解析失败，必须成对写）。 */
-function psQuote(value) {
-  return `'${String(value ?? '').replace(/'/g, "''")}'`
+export {
+  NAPCAT_LOADER_NAMES, NAPCAT_LOADER_RE, QQ_CLIENT_RE, napcatLaunchCommand, napcatRestartCommand,
+  parseTasklist, pickNapcatLoaders, resolveNapcatLauncher,
 }
 
-/**
- * 组装「提权启动 NapCat」的命令（纯函数，不执行，便于单测）。
- *
- * 为什么必须提权：NapCat 的 launcher.bat 自己会检查管理员权限，非管理员时它靠
- * `wt.exe` 自提权重启；实测这台机器上那条路会静默失败（启动器秒退、什么都不做），
- * 所以由控制台主动 `-Verb RunAs` 拉起，代价只是用户要点一次 UAC。
- *
- * 为什么用 `call "<path>"` 而不是 `"<path>"`：cmd 有一条众所周知的引号剥离规则——
- * 命令行里恰好两个引号、且引号内不是"存在的可执行文件"时会把首尾引号去掉。
- * 真机验证过：`cmd /c "C:\Program Files (x86)\NapCat\bootmain\napcat.bat"` 会因路径里的
- * 括号被判成「不是可执行文件」而**静默不执行**（而 startDetached 丢弃了输出，界面照样显示成功）。
- * 加 `call` 后引号不会再被剥离。
- */
-export function napcatLaunchCommand(bat, { powershell = 'powershell.exe' } = {}) {
-  const path = String(bat ?? '').trim()
-  if (path === '') return { ok: false, command: '', args: [], reason: '未配置 NapCat 启动脚本（napcatBat）' }
-  const inner = `call "${path.replace(/"/g, '')}"`
-  const script = `Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c',${psQuote(inner)}) -WorkingDirectory ${psQuote(dirname(path))} -Verb RunAs`
-  return { ok: true, command: powershell, args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], reason: '' }
-}
-
-/**
- * 组装「重启登录流程」的命令：先结束 NapCat 加载器（连同它的子进程），再重新走启动脚本。
- *
- * 三条硬规则（每条都对应一次真机/审查结论）：
- * 1. **按 PID 杀，不按镜像名杀**：`taskkill /IM QQ.exe` 会连用户自己的 QQ 一起杀
- *    （真机上就有非提权的个人 QQ 在跑）；只对加载器 PID 用 `/T /F`，子进程连带结束。
- * 2. **必须拿到加载器 PID**：拿不到就拒绝执行（在 supervisor 那层拦），绝不退回"按名杀"。
- * 3. **清理与启动在同一个提权进程里**：QQ 是提权拉起的，非提权 taskkill 会被拒绝访问，
- *    结果就是"旧的没杀掉又拉一个新的"。
- */
-export function napcatRestartCommand(bat, pids, { powershell = 'powershell.exe' } = {}) {
-  const path = String(bat ?? '').trim()
-  if (path === '') return { ok: false, command: '', args: [], reason: '未配置 NapCat 启动脚本（napcatBat）' }
-  const list = (Array.isArray(pids) ? pids : [pids]).map((pid) => Number(pid)).filter((pid) => Number.isFinite(pid) && pid > 0)
-  if (list.length === 0) {
-    return { ok: false, command: '', args: [], reason: '没有拿到 NapCat 加载器的 PID，拒绝执行（按进程名杀会把你自己开的 QQ 也杀掉）' }
-  }
-  const kills = list.map((pid) => `taskkill /PID ${pid} /T /F`).join(' & ')
-  const inner = `${kills} & timeout /t 3 >nul & call "${path.replace(/"/g, '')}"`
-  const script = `Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c',${psQuote(inner)}) -WorkingDirectory ${psQuote(dirname(path))} -Verb RunAs`
-  return { ok: true, command: powershell, args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], reason: '', pids: list }
-}
 // ---------------------------------------------------------------- actions ----
 
 /** Default execFile wrapper (promise, never throws). */
@@ -233,10 +180,7 @@ export async function inspect({ ports, labels = {}, exec } = {}) {
   }
 }
 
-/** NapCat's own loader/launcher executables (never the personal QQ client). */
-export const NAPCAT_LOADER_RE = /napcat/i
-/** The QQ client executables (managed only when a NapCat loader is present). */
-export const QQ_CLIENT_RE = /^qq(ex)?\.exe$/i
+/** NapCat's own loader/launcher executables (never the personal QQ client) —— 定义在 lib/napcat-launch.js。 */
 
 /** Launch a detached process with its stdout/stderr appended to log files. */
 export function startDetached({ command, args = [], cwd, outFile, errFile, spawnImpl = spawn }) {
@@ -376,14 +320,21 @@ export function createSupervisor(config, deps = {}) {
   }
 
   async function startNapcat() {
-    if (!config.napcatBat) return { ok: false, reason: '未配置 NapCat 启动脚本（napcatBat）' }
-    if (!fileExists(config.napcatBat, deps)) return { ok: false, reason: `NapCat 启动脚本不存在：${config.napcatBat}` }
-    const plan = napcatLaunchCommand(config.napcatBat)
+    // 先用共享的挑选逻辑：配置里常常写的是 napcat.bat（这版只是拉起加载器 + pause，实测秒退），
+    // 同目录的 launcher.bat 才是真正干活的（设 NAPCAT_* 环境变量、从注册表找 QQ.exe）。
+    const chosen = resolveNapcatLauncher(config.napcatBat, { exists: (file) => fileExists(file, deps) })
+    if (chosen.ok !== true) return { ok: false, reason: chosen.reason }
+    const plan = napcatLaunchCommand(chosen.path)
     if (plan.ok !== true) return { ok: false, reason: plan.reason }
     try {
       const { pid } = startDetached({ command: plan.command, args: plan.args, cwd: config.cwd || undefined, spawnImpl })
       // 旧实现跑的是 napcat.bat（无参数、不提权），实测秒退什么都不做；提示里把该做的事说清楚。
-      return { ok: true, pid, reason: '已请求提权启动 NapCat：请在 UAC 弹窗点「是」，二维码刷新后 2 分钟内扫掉' }
+      return {
+        ok: true,
+        pid,
+        reason: `已请求提权启动 NapCat（${chosen.path.split(/[\\/]/).pop()}）：请在 UAC 弹窗点「是」，二维码刷新后 2 分钟内扫掉`
+          + (chosen.switched ? `。注意：${chosen.reason}` : ''),
+      }
     } catch (error) {
       return { ok: false, reason: `启动失败：${error.message}` }
     }
@@ -399,8 +350,10 @@ export function createSupervisor(config, deps = {}) {
    * 4. 只对这些 PID 用 taskkill /T，个人 QQ 客户端不在名单里、也不会被按名杀掉。
    */
   async function restartNapcatLogin() {
-    if (!config.napcatBat) return { ok: false, reason: '未配置 NapCat 启动脚本（napcatBat）' }
-    if (!fileExists(config.napcatBat, deps)) return { ok: false, reason: `NapCat 启动脚本不存在：${config.napcatBat}（先杀后启会什么都起不来，已拒绝）` }
+    const chosen = resolveNapcatLauncher(config.napcatBat, { exists: (file) => fileExists(file, deps) })
+    if (chosen.ok !== true) {
+      return { ok: false, reason: chosen.reason.includes('不存在') ? `${chosen.reason}（先杀后启会什么都起不来，已拒绝）` : chosen.reason }
+    }
     let loaders = []
     try {
       const snapshot = await status()
@@ -414,7 +367,7 @@ export function createSupervisor(config, deps = {}) {
         reason: `没有检测到 NapCat 加载器进程（${NAPCAT_LOADER_NAMES.join(' / ')}），拒绝执行：按进程名杀 QQ 会连你自己开的 QQ 一起杀掉。请改用「启动 NapCat」，或在任务管理器里结束 NapCatWinBootMain.exe 后再启动`,
       }
     }
-    const plan = napcatRestartCommand(config.napcatBat, loaders.map((entry) => entry.pid))
+    const plan = napcatRestartCommand(chosen.path, loaders.map((entry) => entry.pid))
     if (plan.ok !== true) return { ok: false, reason: plan.reason }
     try {
       const { pid } = startDetached({ command: plan.command, args: plan.args, cwd: config.cwd || undefined, spawnImpl })

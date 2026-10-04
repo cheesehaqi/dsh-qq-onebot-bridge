@@ -67,6 +67,12 @@ window.__ModuleLoader__.load({
 .qqai-link-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;text-decoration:none;cursor:pointer}
 .qqai-link{color:var(--dsw-alias-brand-primary,#2563eb);font-weight:600}
 .qqai-link-row:hover .qqai-link{text-decoration:underline}
+/* 快捷操作：启动 NapCat / 重新登录。按钮照平台的做法：细边框 + 主题 token，不自己配色。 */
+.qqai-actions{display:flex;flex-direction:column;gap:8px;padding-bottom:12px;border-bottom:1px solid var(--dsw-alias-border-l1,#e5e7eb)}
+.qqai-action-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.qqai-action{border:1px solid var(--dsw-alias-border-l3,#0000001f);background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);border-radius:8px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}
+.qqai-action:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2,#f6f7f9)}
+.qqai-action:disabled{cursor:default;opacity:.5}
 .qqai-state{font-size:11px}
 .qqai-state.on{color:var(--dsw-alias-state-success-primary,#15803d)}
 .qqai-state.off{color:var(--dsw-alias-state-warn-primary,#b45309)}
@@ -154,6 +160,39 @@ window.__ModuleLoader__.load({
         link.hint ? h('span', { className: 'qqai-hint' }, link.hint) : null)))
     }
 
+    /**
+     * 快捷操作：**启动 NapCat** / **重新登录**。
+     *
+     * 为什么要有（用户 2026-10-04："不能自己快捷启动吗？比如加到哪个控制选项中"）：
+     * 以前只能让用户自己去右键"以管理员身份运行 launcher.bat"，而这台机器上双击自提权是**静默失败**的。
+     * 现在点一下就行——代价是弹一次 UAC，点「是」即可。
+     *
+     * 这两条会 POST 到宿主的 `/qqai/napcat/start` 与 `/qqai/napcat/relogin`；
+     * 服务端只按**加载器 PID** 清理，绝不会按镜像名杀 QQ（那会连用户自己的 QQ 一起杀掉）。
+     */
+    function Actions({ napcat, busy, onAction }) {
+      const running = napcat?.running === true
+      const port = napcat?.port ?? 6099
+      // busy 没传 / 不是字符串时都按"没有请求在跑"处理（曾经把 undefined 当成"忙"，按钮一直灰着）。
+      const pending = typeof busy === 'string' && busy !== ''
+      return h('div', { className: 'qqai-actions' },
+        h('div', { className: 'qqai-meta' }, '快捷操作'),
+        h('div', { className: 'qqai-action-row' },
+          h('button', {
+            className: 'qqai-action',
+            disabled: running === true || pending,
+            title: running === true ? 'NapCat 已经在运行了' : '以管理员身份启动 NapCat（会弹 UAC，点「是」）',
+            onClick: () => onAction('/qqai/napcat/start', '启动 NapCat'),
+          }, running === true ? 'NapCat 运行中' : (busy === '/qqai/napcat/start' ? '请求中…' : '启动 NapCat')),
+          h('button', {
+            className: 'qqai-action',
+            disabled: pending,
+            title: '只结束 NapCat 加载器（不会碰你自己开的 QQ），然后重新走一遍登录流程',
+            onClick: () => onAction('/qqai/napcat/relogin', '重新登录'),
+          }, busy === '/qqai/napcat/relogin' ? '请求中…' : '重新登录（扫码）'),
+          h('span', { className: 'qqai-hint' }, `NapCat：${running === true ? `运行中（127.0.0.1:${port}）` : '未运行'} · 启动/重启都要点一次 UAC`)))
+    }
+
     function Group({ group, busy, onToggle }) {
       const note = group.note ? h('div', { className: 'qqai-note' }, richText(group.note)) : null
       const body = h('div', null, note, group.rows.map((row) => h(Row, { key: row.key, row, busy, onToggle })))
@@ -168,7 +207,7 @@ window.__ModuleLoader__.load({
     }
 
     function QqAiPanel() {
-      const [state, setState] = useState({ status: 'loading', data: null, error: '', flash: '', busyKey: '' })
+      const [state, setState] = useState({ status: 'loading', data: null, error: '', flash: '', busyKey: '', busyAction: '' })
 
       const load = useCallback(async () => {
         try {
@@ -189,11 +228,39 @@ window.__ModuleLoader__.load({
             status: 'ready',
             data: result.panel ?? state.data,
             busyKey: '',
+            busyAction: '',
             error: '',
             flash: `${key} → ${value ? '开' : '关'}${result.changed === true ? '（已写入配置）' : '（无需改动）'}${result.note ? ' · ' + result.note : ''}`,
           })
         } catch (error) {
           setState((prev) => ({ ...prev, busyKey: '', error: `写入失败：${String(error?.message ?? error)}` }))
+        }
+      }, [state.data])
+
+      /**
+       * 快捷操作（启动 NapCat / 重新登录）。
+       * 这里故意**不用** callJson：`ok:false` 的那些回执（比如"已经在运行了""没找到加载器"）
+       * 是**解释**不是错误，得原样显示给用户，不能因为 ok!==true 就抛成异常。
+       */
+      const runAction = useCallback(async (path, label) => {
+        setState((prev) => ({ ...prev, busyAction: path, error: '', flash: '' }))
+        try {
+          const response = await fetch(path, {
+            method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: '{}',
+          })
+          let payload = null
+          try { payload = await response.json() } catch { /* 下面按状态码报错 */ }
+          if (payload === null) throw new Error(`HTTP ${response.status}`)
+          setState({
+            status: 'ready',
+            data: payload.panel ?? state.data,
+            busyKey: '',
+            busyAction: '',
+            error: payload.ok === true ? '' : `${label}：${payload.reason}`,
+            flash: payload.ok === true ? `${label}：${payload.reason}${payload.note ? `（${payload.note}）` : ''}` : '',
+          })
+        } catch (error) {
+          setState((prev) => ({ ...prev, busyAction: '', error: `${label}失败：${String(error?.message ?? error)}` }))
         }
       }, [state.data])
 
@@ -213,6 +280,8 @@ window.__ModuleLoader__.load({
           h('button', { onClick: () => void load(), disabled: state.busyKey !== '' }, '刷新')),
         // 「相关链接」整组拉到最上边（第一条就是账号入口）：用户 2026-10-04 定稿的位置。
         h(Links, { links: data.links }),
+        // 紧接着是快捷操作（启动 NapCat / 重新登录）——都是账号相关，放一起。
+        h(Actions, { napcat: data.napcat, busy: state.busyAction, onAction: runAction }),
         h('div', { className: 'qqai-meta' },
           `profile：${data.profile} · 配置文件：${data.patchFile}${data.patchExists === false ? '（不存在）' : ''}`),
         h('div', { className: 'qqai-meta' }, data.notes?.apply ?? ''),

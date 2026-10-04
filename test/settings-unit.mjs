@@ -18,6 +18,7 @@ import {
   PANEL_GROUPS, PANEL_KEYS, PANEL_NEEDS, normalizeRepoUrl, panelFooterLinks, panelFooterLinksWithConsole,
   panelSnapshot, readPatchValue, upsertPatchValue,
 } from '../lib/panel.js'
+import { planNapcatAction } from '../lib/napcat-launch.js'
 import {
   argvProfile, consoleStartCommand, mountQqAiPanel, napcatWebUiUrl, panelLinkSources, probePort, profileDirOf,
   resolveProfile,
@@ -343,10 +344,11 @@ const fakeRequest = (method, body, headers = {}) => ({
   async *[Symbol.asyncIterator]() { if (body !== undefined) yield Buffer.from(JSON.stringify(body)) },
 })
 
-check('挂载了四条路由（读面板 + 写开关 + 调试台入口 + 账号入口）',
-  registered.length === 4 && registered.some((r) => r.path === '/qqai/panel')
+check('挂载了六条路由（读面板 + 写开关 + 调试台 + 账号 + 启动 NapCat + 重启登录）',
+  registered.length === 6 && registered.some((r) => r.path === '/qqai/panel')
   && registered.some((r) => r.path === '/qqai/panel/set') && registered.some((r) => r.path === '/qqai/console')
-  && registered.some((r) => r.path === '/qqai/account'),
+  && registered.some((r) => r.path === '/qqai/account') && registered.some((r) => r.path === '/qqai/napcat/start')
+  && registered.some((r) => r.path === '/qqai/napcat/relogin'),
   registered.map((r) => r.path).join(','))
 
 const getHandler = registered.find((r) => r.path === '/qqai/panel').handler
@@ -682,13 +684,123 @@ await accountRoutes.find((r) => r.path === '/qqai/panel').handler(fakeRequest('G
 check('面板载荷里**没有** NapCat token（密钥只走 302）',
   !accountPanel.out.body.includes(NAPCAT_TOKEN))
 
+/**
+ * ---- 快捷操作：启动 NapCat / 重新登录（用户："不能自己快捷启动吗？比如加到哪个控制选项中"）----
+ * 决策逻辑是纯函数（`planNapcatAction`），执行走注入的 spawnDetached —— 测试**绝不真的拉进程**。
+ */
+const planStart = planNapcatAction('start', { bat: 'C:\\NapCat\\bootmain\\launcher.bat', running: false, loaders: [], exists: () => true })
+check('快捷启动：没在跑时给出提权启动命令（带 -Verb RunAs）',
+  planStart.ok === true && planStart.args.join(' ').includes('-Verb RunAs')
+  && planStart.args.join(' ').includes('launcher.bat'),
+  planStart.args.join(' ').slice(-120))
+check('快捷启动：已经在跑时不去重复拉一个，并指路「重新登录」',
+  planNapcatAction('start', { bat: 'C:\\x\\launcher.bat', running: true, exists: () => true }).ok === false
+  && planNapcatAction('start', { bat: 'C:\\x\\launcher.bat', running: true, exists: () => true }).focus === 'relogin')
+const planSwitched = planNapcatAction('start', {
+  bat: 'C:\\NapCat\\bootmain\\napcat.bat', running: false, exists: (file) => /launcher\.bat$/i.test(file),
+})
+check('快捷启动：配置里写的是 napcat.bat 时自动改用同目录 launcher.bat（并说明原因）',
+  planSwitched.ok === true && planSwitched.args.join(' ').includes('launcher.bat')
+  && planSwitched.note.includes('launcher.bat'),
+  planSwitched.note)
+const planRelogin = planNapcatAction('relogin', {
+  bat: 'C:\\NapCat\\bootmain\\launcher.bat',
+  loaders: [{ pid: 4100, name: 'NapCatWinBootMain.exe' }, { pid: 4200, name: 'QQ.exe' }],
+  exists: () => true,
+})
+check('重新登录：只按加载器 PID 杀（QQ.exe 那个 PID 不在命令里）',
+  planRelogin.ok === true && planRelogin.args.join(' ').includes('taskkill /PID 4100 /T /F')
+  && !planRelogin.args.join(' ').includes('4200'),
+  planRelogin.args.join(' ').slice(-160))
+check('重新登录：拿不到加载器 PID 就拒绝（绝不退回按名杀 QQ）',
+  planNapcatAction('relogin', { bat: 'C:\\x\\launcher.bat', loaders: [], exists: () => true }).ok === false
+  && planNapcatAction('relogin', { bat: 'C:\\x\\launcher.bat', loaders: [], exists: () => true }).reason.includes('QQ'),
+  planNapcatAction('relogin', { bat: 'C:\\x\\launcher.bat', loaders: [], exists: () => true }).reason.slice(0, 60))
+check('快捷操作：没配启动脚本时明确拒绝', planNapcatAction('start', { bat: '', exists: () => true }).ok === false
+  && planNapcatAction('start', { bat: '', exists: () => true }).reason.includes('napcatBat'))
+check('载荷里带上 NapCat 的运行状态（按钮据此禁用）',
+  typeof JSON.parse(accountPanel.out.body).napcat?.running === 'boolean'
+  && JSON.parse(accountPanel.out.body).napcat?.port > 0,
+  brief(JSON.parse(accountPanel.out.body).napcat))
+
+// ---- 快捷操作路由：真的会拉起进程，所以 spawn / exec 全部注入（测试绝不动真机）----
+{
+  const spawned = []
+  const actionRoutes = []
+  mountQqAiPanel({
+    webServer: {
+      register(route) { actionRoutes.push(route); return () => { const at = actionRoutes.indexOf(route); if (at >= 0) actionRoutes.splice(at, 1) } },
+    },
+  }, {
+    profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
+    linkSources: { root: napcatRoot },
+    probe: async () => false,                                  // 6099 没在听
+    exists: (file) => /launcher\.bat$/i.test(file),             // 同目录只有 launcher.bat
+    spawnDetached: ({ command, args }) => { spawned.push({ command, args }); return { pid: 4242 } },
+    exec: (command, args, options, callback) => {
+      const done = typeof options === 'function' ? options : callback
+      // 假 tasklist：一个 NapCat 加载器 + 一个个人 QQ（后者绝不能被写进命令）
+      done(null, '"NapCatWinBootMain.exe","4100","Console","1","1 K"\n"QQ.exe","4200","Console","1","1 K"\n', '')
+    },
+  })
+  const startRoute = actionRoutes.find((r) => r.path === '/qqai/napcat/start')
+  const reloginRoute = actionRoutes.find((r) => r.path === '/qqai/napcat/relogin')
+
+  const startRes = makeResponse()
+  await startRoute.handler(fakeRequest('POST', {}, JSON_HEADERS), startRes)
+  const startBody = JSON.parse(startRes.out.body)
+  check('POST /qqai/napcat/start 真的拉起了提权进程（用的是 launcher.bat）',
+    startRes.out.status === 200 && startBody.ok === true && startBody.pid === 4242
+    && spawned.length === 1 && spawned[0].args.join(' ').includes('launcher.bat'),
+    brief({ status: startRes.out.status, spawned: spawned.length, reason: startBody.reason?.slice(0, 60) }))
+  check('启动接口回的是人话（含"UAC"与扫码提示），并带回最新面板',
+    startBody.reason.includes('UAC') && startBody.panel?.links?.length > 0, brief(startBody.reason))
+  check('启动接口拒绝 GET（这是个会拉进程的动作）',
+    await (async () => { const r = makeResponse(); await startRoute.handler(fakeRequest('GET'), r); return r.out.status })() === 405)
+  const startPlain = makeResponse()
+  await startRoute.handler(fakeRequest('POST', {}, { 'content-type': 'text/plain' }), startPlain)
+  check('启动接口拒绝非 JSON（CORS 简单请求挡在门外）', startPlain.out.status === 403, String(startPlain.out.status))
+  const startCross = makeResponse()
+  await startRoute.handler(fakeRequest('POST', {}, { ...JSON_HEADERS, origin: 'https://evil.example' }), startCross)
+  check('启动接口拒绝跨站', startCross.out.status === 403, String(startCross.out.status))
+
+  const reloginRes = makeResponse()
+  await reloginRoute.handler(fakeRequest('POST', {}, JSON_HEADERS), reloginRes)
+  const reloginBody = JSON.parse(reloginRes.out.body)
+  check('POST /qqai/napcat/relogin 只按加载器 PID 清理（假 tasklist 里的 QQ.exe 4200 没被写进命令）',
+    reloginRes.out.status === 200 && reloginBody.ok === true
+    && spawned[1]?.args.join(' ').includes('taskkill /PID 4100')
+    && !spawned[1]?.args.join(' ').includes('4200'),
+    brief({ status: reloginRes.out.status, cmd: String(spawned[1]?.args.join(' ')).slice(-90) }))
+
+  // 已经在跑时：不重复拉，指路"重新登录"
+  const runningRoutes = []
+  mountQqAiPanel({
+    webServer: { register(route) { runningRoutes.push(route); return () => { const at = runningRoutes.indexOf(route); if (at >= 0) runningRoutes.splice(at, 1) } } },
+  }, {
+    profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
+    linkSources: { root: napcatRoot }, probe: async () => true, exists: () => true,
+    spawnDetached: () => { throw new Error('不该被调用') },
+    exec: (command, args, options, callback) => (typeof options === 'function' ? options : callback)(null, '', ''),
+  })
+  const runningStart = makeResponse()
+  await runningRoutes.find((r) => r.path === '/qqai/napcat/start').handler(fakeRequest('POST', {}, JSON_HEADERS), runningStart)
+  const runningBody = JSON.parse(runningStart.out.body)
+  check('NapCat 已在运行时：启动接口不重复拉进程，改为提示用「重新登录」',
+    runningBody.ok === false && runningBody.reason.includes('重新登录'), brief(runningBody.reason))
+  const runningPanel = makeResponse()
+  await runningRoutes.find((r) => r.path === '/qqai/panel').handler(fakeRequest('GET'), runningPanel)
+  check('载荷里的 napcat.running 跟着探测结果走（true）',
+    JSON.parse(runningPanel.out.body).napcat.running === true, brief(JSON.parse(runningPanel.out.body).napcat))
+}
+
 dispose()
 check('dispose 注销了全部路由（配置热重载后能重新挂载，不会撞 duplicate route）',
-  registered.length === 0 && disposed.length === 4, `left=${registered.length}`)
+  registered.length === 0 && disposed.length === 6, `left=${registered.length}`)
 mountQqAiPanel(fakeHost, {
   profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
 })
-check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 4, String(registered.length))
+check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 6, String(registered.length))
 
 // ------------------------------------------------- 3. 客户端 bundle 冒烟 ---- ----
 const clientText = readFileSync(join(import.meta.dirname, '..', 'client', 'client.js'), 'utf8')
@@ -745,7 +857,10 @@ try {
     && !/QQai/.test(clientText), registered2?.options?.label?.())
   check('客户端 fetch 的路由名与服务端注册的一致（防前后端漂移）',
     clientText.includes('/qqai/panel') && clientText.includes('/qqai/panel/set')
+    && clientText.includes('/qqai/napcat/start') && clientText.includes('/qqai/napcat/relogin')
     && registered.some((r) => r.path === '/qqai/panel') && registered.some((r) => r.path === '/qqai/panel/set'))
+  check('快捷操作把 ok:false 当"解释"显示（不当异常抛掉）——按钮点不动时用户要看到原因',
+    clientText.includes('payload.ok === true') && clientText.includes('busyAction'))
   check('客户端把「相关链接」整组渲染出来（挂 data.links，不再是页脚）',
     clientText.includes('qqai-links') && clientText.includes('data.links')
     && !clientText.includes('qqai-footer')
@@ -793,6 +908,7 @@ const shallowText = (element, states) => {
   const hrefs = []
   const switches = []
   const linkRows = []   // 每个 <a> 自己的文本：用来验"整行是不是都能点"
+  const buttons = []    // 按钮：文案 + 是否禁用（快捷操作的禁用态靠它验）
   /** 收集某个子树里的纯文本（组件的孩子都是已经 createElement 出来的节点，够用）。 */
   const textOf = (node) => {
     if (node === null || node === undefined || typeof node === 'boolean') return ''
@@ -812,10 +928,11 @@ const shallowText = (element, states) => {
     }
     // 开关的状态也只在属性上：收集起来验 aria-checked 的映射。
     if (node.props?.role === 'switch') switches.push({ checked: node.props['aria-checked'], disabled: node.props.disabled === true })
+    if (node.type === 'button') buttons.push({ text: textOf(node.props?.children), disabled: node.props?.disabled === true })
     walk(node.props?.children)
   }
   walk(element)
-  return { text: text.join(' | '), hrefs, switches, linkRows }
+  return { text: text.join(' | '), hrefs, switches, linkRows, buttons }
 }
 try {
   // 用同一个 React 桩重新执行一遍 bundle，拿到真正的面板组件（组件闭包里的 React 必须就是它）
@@ -843,11 +960,14 @@ try {
     error: '',
     flash: 'ttsEnabled → 关（已写入配置）',
     busyKey: '',
+    busyAction: '',
     data: {
       profile: 'desktop',
       patchFile: '/srv/dsh/profiles/desktop/cordis.patch.yml',
       patchExists: true,
       notes: { apply: '写入说明', scope: '范围说明' },
+      // NapCat 的实时状态（快捷操作按钮据此禁用）
+      napcat: { running: false, port: 6099 },
       // 「相关链接」整组（账号第一、调试台压最底下）——渲染在标题正下方、开关分组之前。
       links: [
         { id: 'account', label: 'QQ助手账号（登录 / 扫码）', href: '/qqai/account', hint: '机器人账号的登录状态与扫码页；点开就是带 token 的地址，不用手输' },
@@ -910,6 +1030,20 @@ try {
     consoleRow !== undefined && consoleRow.text.includes('调试台（独立控制台）')
     && consoleRow.text.includes('未启动') && consoleRow.target === '_blank',
     brief(consoleRow))
+  // 快捷操作（用户："不能自己快捷启动吗？比如加到哪个控制选项中"）：两个按钮，且状态跟着 napcat.running 走。
+  check('浅渲染：「快捷操作」区有「启动 NapCat」与「重新登录（扫码）」两个按钮',
+    readyText.includes('快捷操作') && ready.buttons.some((b) => b.text.includes('启动 NapCat'))
+    && ready.buttons.some((b) => b.text.includes('重新登录')),
+    brief(ready.buttons))
+  check('NapCat 未运行时：启动按钮可点，且写明"未运行"', (() => {
+    const start = ready.buttons.find((b) => b.text.includes('启动 NapCat'))
+    return start !== undefined && start.disabled === false && readyText.includes('NapCat：未运行')
+  })(), brief(ready.buttons.find((b) => b.text.includes('启动 NapCat'))))
+  const napcatOn = shallowText(render, [{ ...fixture, data: { ...fixture.data, napcat: { running: true, port: 6099 } } }])
+  check('NapCat 已在运行时：启动按钮变禁用、文案变「NapCat 运行中」（不让人重复点）',
+    napcatOn.buttons.some((b) => b.text.includes('NapCat 运行中') && b.disabled === true)
+    && napcatOn.text.includes('运行中（127.0.0.1:6099）'),
+    brief(napcatOn.buttons))
   check('浅渲染：直接显示出厂默认值（默认：开/关），不再出现"非默认"字样',
     readyText.includes('默认：关') && !readyText.includes('非默认'))
   const flipped = shallowText(render, [{
