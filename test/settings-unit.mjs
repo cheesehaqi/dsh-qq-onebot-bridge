@@ -552,6 +552,18 @@ const consoleCross = makeResponse()
 await consoleEntryOff.handler(fakeRequest('GET', undefined, { origin: 'https://evil.example' }), consoleCross)
 check('调试台入口也拒绝跨站（它会把带 token 的地址交出去）',
   consoleCross.out.status === 403, String(consoleCross.out.status))
+// ★ 同一个"点了没反应"的坑：浏览器点「调试台」是导航请求（same-origin、无 Origin），必须放行。
+const consoleNav = makeResponse()
+await consoleEntryOff.handler(fakeRequest('GET', undefined, {
+  'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document',
+  accept: 'text/html,*/*',
+}), consoleNav)
+check('★浏览器点「调试台」（导航：same-origin、无 Origin）也放行 —— 同样的坑，这个从 v0.6.0 起就是坏的',
+  consoleNav.out.status === 200 && consoleNav.out.headers['content-type'].includes('text/html'),
+  String(consoleNav.out.status))
+const consoleSameSite = makeResponse()
+await consoleEntryOff.handler(fakeRequest('GET', undefined, { 'sec-fetch-site': 'same-site', 'sec-fetch-mode': 'navigate' }), consoleSameSite)
+check('调试台入口仍然拒绝"同站不同端口"（same-site）', consoleSameSite.out.status === 403, String(consoleSameSite.out.status))
 
 const runningRoutes = mountConsole(true)
 const consoleEntryOn = runningRoutes.find((r) => r.path === '/qqai/console')
@@ -631,6 +643,39 @@ const accountCross = makeResponse()
 await accountEntryRoute.handler(fakeRequest('GET', undefined, { origin: 'https://evil.example' }), accountCross)
 check('账号入口拒绝跨站（它会把带 token 的地址交出去）',
   accountCross.out.status === 403, String(accountCross.out.status))
+/**
+ * ✋ 2026-10-04 真机事故回归：**浏览器点链接的请求头形状**。
+ * 当时面板里「QQ助手账号」「调试台」点了完全没反应 —— 因为浏览器发导航请求时是
+ * `Sec-Fetch-Site: same-origin` + **不带 Origin**，而守卫的"没有 Origin"分支只放行 `''`/`none`，
+ * 于是正常点击被判成"来源不明的请求" → 403。我当时的 smoke 手动补了 `Origin`，正好走另一分支，
+ * 所以没测出来。下面把这四种真实形状**逐个钉死**（这才是测试该覆盖的东西，不是我自己编的头）。
+ */
+const navHeaders = (site) => ({
+  'sec-fetch-site': site,
+  'sec-fetch-mode': 'navigate',
+  'sec-fetch-dest': 'document',
+  'sec-fetch-user': '?1',
+  accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141.0.0.0 Safari/537.36',
+})
+const accountNav = makeResponse()
+await accountEntryRoute.handler(fakeRequest('GET', undefined, navHeaders('same-origin')), accountNav)
+check('★浏览器点链接（导航：same-origin、无 Origin）必须 302 —— 这次"点了没反应"的根因',
+  accountNav.out.status === 302 && accountNav.out.headers.location === accountUrl,
+  `${accountNav.out.status} ${String(accountNav.out.headers.location ?? accountNav.out.body).slice(0, 80)}`)
+const accountAddressBar = makeResponse()
+await accountEntryRoute.handler(fakeRequest('GET', undefined, navHeaders('none')), accountAddressBar)
+check('地址栏直达（sec-fetch-site: none）也 302', accountAddressBar.out.status === 302, String(accountAddressBar.out.status))
+const accountScript = makeResponse()
+await accountEntryRoute.handler(fakeRequest('GET'), accountScript)
+check('本机脚本 / curl（没有任何 Sec-Fetch 标记）仍 302', accountScript.out.status === 302, String(accountScript.out.status))
+const accountSameSite = makeResponse()
+await accountEntryRoute.handler(fakeRequest('GET', undefined, navHeaders('same-site')), accountSameSite)
+check('同站不同端口（sec-fetch-site: same-site）仍然拒 —— 本机别的服务不得拿走 token',
+  accountSameSite.out.status === 403, String(accountSameSite.out.status))
+const accountCrossNav = makeResponse()
+await accountEntryRoute.handler(fakeRequest('GET', undefined, navHeaders('cross-site')), accountCrossNav)
+check('跨站导航（别的网站上的 <a href> 指过来）仍然 403', accountCrossNav.out.status === 403, String(accountCrossNav.out.status))
 // 面板载荷里绝不能出现 NapCat 的 token（同"调试台 token 不进载荷"的规矩）。
 const accountPanel = makeResponse()
 await accountRoutes.find((r) => r.path === '/qqai/panel').handler(fakeRequest('GET'), accountPanel)
@@ -747,19 +792,30 @@ const shallowText = (element, states) => {
   const text = []
   const hrefs = []
   const switches = []
+  const linkRows = []   // 每个 <a> 自己的文本：用来验"整行是不是都能点"
+  /** 收集某个子树里的纯文本（组件的孩子都是已经 createElement 出来的节点，够用）。 */
+  const textOf = (node) => {
+    if (node === null || node === undefined || typeof node === 'boolean') return ''
+    if (typeof node === 'string' || typeof node === 'number') return String(node)
+    if (Array.isArray(node)) return node.map(textOf).join(' ')
+    return textOf(node.props?.children)
+  }
   const walk = (node) => {
     if (node === null || node === undefined || typeof node === 'boolean') return
     if (typeof node === 'string' || typeof node === 'number') { text.push(String(node)); return }
     if (Array.isArray(node)) { for (const child of node) walk(child); return }
     if (typeof node.type === 'function') { reactStub.resetSlot(); walk(node.type({ ...(node.props ?? {}) })); return }
     // 链接目标在属性上，不在文本里——单独收集，否则断言会"看着渲染出来了其实没验链接"。
-    if (typeof node.props?.href === 'string') hrefs.push(node.props.href)
+    if (typeof node.props?.href === 'string') {
+      hrefs.push(node.props.href)
+      linkRows.push({ href: node.props.href, target: node.props.target, text: textOf(node.props.children) })
+    }
     // 开关的状态也只在属性上：收集起来验 aria-checked 的映射。
     if (node.props?.role === 'switch') switches.push({ checked: node.props['aria-checked'], disabled: node.props.disabled === true })
     walk(node.props?.children)
   }
   walk(element)
-  return { text: text.join(' | '), hrefs, switches }
+  return { text: text.join(' | '), hrefs, switches, linkRows }
 }
 try {
   // 用同一个 React 桩重新执行一遍 bundle，拿到真正的面板组件（组件闭包里的 React 必须就是它）
@@ -841,6 +897,19 @@ try {
   check('账号入口在整份页面里只出现一次（不会组里 + 别处各来一条）',
     readyText.lastIndexOf('QQ助手账号') === readyText.indexOf('QQ助手账号'),
     String(readyText.split('QQ助手账号').length - 1))
+  // ★ 2026-10-04 真机："点击账号没反应" —— 除了守卫那个 403，还有一半原因是**只有那行蓝字是链接**，
+  //   右边那段灰色说明是普通 span，点在说明上什么都不会发生。现在整行是一个 <a>，点哪儿都能进。
+  const accountRow = ready.linkRows.find((row) => row.href === '/qqai/account')
+  check('★账号入口整行都可点（说明文字也在 <a> 里），且是新标签页打开',
+    accountRow !== undefined
+    && accountRow.text.includes('QQ助手账号（登录 / 扫码）') && accountRow.text.includes('不用手输')
+    && accountRow.target === '_blank',
+    brief(accountRow))
+  const consoleRow = ready.linkRows.find((row) => row.href === '/qqai/console')
+  check('调试台那一行同样整行可点（含"未启动 · 需要单独运行…"那段）',
+    consoleRow !== undefined && consoleRow.text.includes('调试台（独立控制台）')
+    && consoleRow.text.includes('未启动') && consoleRow.target === '_blank',
+    brief(consoleRow))
   check('浅渲染：直接显示出厂默认值（默认：开/关），不再出现"非默认"字样',
     readyText.includes('默认：关') && !readyText.includes('非默认'))
   const flipped = shallowText(render, [{

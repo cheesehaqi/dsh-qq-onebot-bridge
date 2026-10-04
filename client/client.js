@@ -61,11 +61,12 @@ window.__ModuleLoader__.load({
 .qqai-note{padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,#eef0f3);background:var(--dsw-alias-bg-layer-2,#f8fafc);color:var(--dsw-alias-label-secondary,#6b7280);font-size:11px;line-height:1.6}
 .qqai-note b{font-weight:600;color:var(--dsw-alias-label-primary,#111)}
 /* 「相关链接」整组在页面的最上边（标题正下方、开关分组之前）：账号入口是组里第一条。
-   用户 2026-10-04 定稿："还是挪回到之前的位置吧，直接把相关链接整体拉到最上边"。 */
+   2026-10-04 定稿："还是挪回到之前的位置吧，直接把相关链接整体拉到最上边"。
+   注意：整行就是一个链接（含右边那段灰色说明），所以行本身要 cursor:pointer、且不要默认下划线。 */
 .qqai-links{display:flex;flex-direction:column;gap:8px;padding-bottom:12px;border-bottom:1px solid var(--dsw-alias-border-l1,#e5e7eb)}
-.qqai-link-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
-.qqai-link{color:var(--dsw-alias-brand-primary,#2563eb);text-decoration:none;font-weight:600}
-.qqai-link:hover{text-decoration:underline}
+.qqai-link-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;text-decoration:none;cursor:pointer}
+.qqai-link{color:var(--dsw-alias-brand-primary,#2563eb);font-weight:600}
+.qqai-link-row:hover .qqai-link{text-decoration:underline}
 .qqai-state{font-size:11px}
 .qqai-state.on{color:var(--dsw-alias-state-success-primary,#15803d)}
 .qqai-state.off{color:var(--dsw-alias-state-warn-primary,#b45309)}
@@ -127,25 +128,30 @@ window.__ModuleLoader__.load({
     /**
      * 「相关链接」一组：账号入口（第一条，机器人账号登录 / 扫码）+ 更新日志 / 调试文档 / 调试台。
      *
-     * 位置是用户 2026-10-04 连着三条指示定稿的："应该把账号登陆调到最上方" →
-     * "不对不对应该在QQ助手的下边" → "**还是挪回到之前的位置吧，直接把相关链接整体拉到最上边**"。
-     * ⇒ 现在这**整组**渲染在标题正下方、开关分组之前，账号入口就是组里第一条。
-     * 顺序由服务端 `links` 数组决定（数组顺序＝界面顺序），别再拆成两处渲染。
+     * 位置是用户 2026-10-04 连着几条指示定稿的："应该把账号登陆调到最上方" →
+     * "不对不对应该在QQ助手的下边" → "还是挪回到之前的位置吧，直接把相关链接整体拉到最上边" →
+     * "调试台改到调试文档下方"。
+     * ⇒ 现在这**整组**渲染在标题正下方、开关分组之前，顺序由服务端 `links` 数组决定（数组顺序＝界面顺序）。
+     *
+     * ⚠️ **整行都要能点**（2026-10-04 真机"点击账号没反应"之后改的）：原来只有那行蓝色标签是 `<a>`，
+     * 右边那段灰色说明文字是普通 `<span>`——点在说明上什么都不会发生，看着就是"点了没反应"。
+     * 现在整行是一个 `<a>`（label + 状态 + 说明都在里面），点哪儿都能进。
      */
     function Links({ links }) {
       if (!Array.isArray(links) || links.length === 0) return null
       return h('div', { className: 'qqai-links' },
         h('div', { className: 'qqai-meta' }, '相关链接'),
-        links.map((link) => h('div', { key: link.id, className: 'qqai-link-row' },
-          h('a', {
-            className: 'qqai-link',
-            href: link.href,
-            target: '_blank',
-            rel: 'noreferrer',
-            title: link.hint ?? '',
-          }, link.label),
-          link.state ? h('span', { className: `qqai-state ${link.running === true ? 'on' : 'off'}` }, link.state) : null,
-          link.hint ? h('span', { className: 'qqai-hint' }, link.hint) : null)))
+        links.map((link) => h('a', {
+          key: link.id,
+          className: 'qqai-link-row',
+          href: link.href,
+          target: '_blank',
+          rel: 'noreferrer',
+          title: link.hint ?? '',
+        },
+        h('span', { className: 'qqai-link' }, link.label),
+        link.state ? h('span', { className: `qqai-state ${link.running === true ? 'on' : 'off'}` }, link.state) : null,
+        link.hint ? h('span', { className: 'qqai-hint' }, link.hint) : null)))
     }
 
     function Group({ group, busy, onToggle }) {
