@@ -98,17 +98,52 @@ check('依赖分布合理（既有"开箱即用"也有需要准备的，且总�
   && allRows.length === 59,
   `开箱即用 ${allRows.filter((entry) => entry.needs === '').length} / 需准备 ${allRows.filter((entry) => entry.needs !== '').length}`)
 check('生图/语音这些"要装东西"的功能，说明里点明了需要什么',
-  ['imageGenEnabled', 'ttsEnabled', 'sttEnabled'].every((key) => {
+  ['imageGenEnabled', 'ttsEnabled'].every((key) => {
     const entry = allRows.find((row) => row.key === key)
-    return entry && entry.needs !== '' && /需要|依赖|填/.test(entry.hint)
+    return entry && entry.needs !== '' && /不自带|自己准备|自己装/.test(entry.hint)
   }))
+// 用户要求：**TTS/生图 DSH 不自带**必须说清楚；但**语音转文字 DSH 自带**（实验性，需自行启用）——
+// 这两件事口径不同，都要如实写，别一杆子打成"都不自带"（我自己就写错过一次）。
+const notBundledRows = ['ttsEnabled', 'imageGenEnabled', 'voiceReadingEnabled']
+check('TTS / 生图这几行说明里点明"DSH 与本插件都不自带"',
+  notBundledRows.every((key) => {
+    const entry = allRows.find((row) => row.key === key)
+    return entry && /不自带/.test(entry.hint)
+  }), notBundledRows.map((key) => `${key}:${/不自带/.test(allRows.find((row) => row.key === key)?.hint ?? '')}`).join(' '))
+const sttRow = allRows.find((row) => row.key === 'sttEnabled')
+check('语音转文字的说明写的是"DSH 自带（实验性，需自行启用）"，不是"不自带"',
+  /DSH 自带/.test(sttRow?.hint ?? '') && /启用/.test(sttRow?.hint ?? '') && !/都不自带/.test(sttRow?.hint ?? ''),
+  String(sttRow?.hint).slice(0, 70))
+// schema 描述也要一致（配置文件里看得到）
+check('schema 描述口径一致：STT 说 DSH SHIPS，TTS/生图说 NOT BUNDLED',
+  /DSH SHIPS STT/.test(String(dict.sttEnabled?.meta?.description))
+  && /NOT BUNDLED/.test(String(dict.ttsEnabled?.meta?.description))
+  && /NOT BUNDLED/.test(String(dict.imageGenEnabled?.meta?.description))
+  && !/no TTS service/.test(String(dict.imageGenEnabled?.meta?.description)))
+const mediaGroup = PANEL_GROUPS.find((group) => group.id === 'media')
+check('"语音与媒体"这一组有组级提示，且把 STT 的例外写清（自带但要启用）',
+  typeof mediaGroup?.note === 'string' && /不自带/.test(mediaGroup.note)
+  && /语音转文字 DSH 自带/.test(mediaGroup.note) && /默认(全部)?关/.test(mediaGroup.note),
+  String(mediaGroup?.note).slice(0, 70))
+check('快照把组级提示带给界面',
+  panelSnapshot({}, { defaults: {} }).groups.find((group) => group.id === 'media')?.note?.includes('不自带') === true)
+
+// 用户的规则：**需要额外安装/配密钥的功能一律默认关**（"因为这些需要额外安装扩展"）。
+// 这条把规则钉进 schema：以后谁把这类开关的默认值改回 true，测试直接红。
+const externalNeeds = new Set([PANEL_NEEDS.service, PANEL_NEEDS.key])
+const shouldBeOff = allRows.filter((entry) => externalNeeds.has(entry.needs))
+const wronglyOn = shouldBeOff.filter((entry) => dict[entry.key]?.meta?.default !== false)
+check('凡标了「需外部服务 / 需密钥」的开关都必须默认关',
+  wronglyOn.length === 0,
+  `检查了 ${shouldBeOff.length} 个：` + (wronglyOn.map((entry) => entry.key).join(',') || '全部默认关 ✅'))
 
 const snapshot = panelSnapshot({ ttsEnabled: true, groupOpsEnabled: false }, { defaults: { ttsEnabled: false, groupOpsEnabled: false } })
 const flat = snapshot.groups.flatMap((group) => group.rows)
 const tts = flat.find((row) => row.key === 'ttsEnabled')
 const ops = flat.find((row) => row.key === 'groupOpsEnabled')
-check('快照把生效值整理成布尔 + 标出"非默认"',
-  tts?.value === true && tts?.nonDefault === true && ops?.value === false && ops?.nonDefault === false,
+check('快照把生效值整理成布尔 + 标出"非默认"及其**方向**',
+  tts?.value === true && tts?.nonDefault === true && tts?.defaultValue === false
+  && ops?.value === false && ops?.nonDefault === false && ops?.defaultValue === false,
   brief({ tts, ops }))
 check('快照没有 fileValues 时 pending 一律 false（不假装知道配置文件）',
   flat.every((row) => row.pending === false && row.fileValue === null))
@@ -685,6 +720,7 @@ try {
           hint: '**需要额外的语音服务**：本地 GPT-SoVITS 或云端 TTS。',
           needs: '需外部服务',
           value: false,
+          defaultValue: false,
           nonDefault: true,
           fileValue: true,
           pending: true,
@@ -697,8 +733,20 @@ try {
   check('浅渲染：标题/分组/开关标签与键名都出现',
     readyText.includes('QQ助手') && readyText.includes('对话基础') && readyText.includes('语音回复')
     && readyText.includes('ttsEnabled'), readyText.slice(0, 120))
-  check('浅渲染：「非默认」与「待重启」两个徽标真的渲染出来（此前文档承诺、代码没做）',
-    readyText.includes('非默认') && readyText.includes('待重启'))
+  check('浅渲染：直接显示出厂默认值（默认：开/关），不再出现"非默认"字样',
+    readyText.includes('默认：关') && !readyText.includes('非默认'))
+  const flipped = shallowText(render, [{
+    ...fixture,
+    data: {
+      ...fixture.data,
+      groups: [{
+        ...fixture.data.groups[0],
+        rows: [{ ...fixture.data.groups[0].rows[0], value: false, defaultValue: true, nonDefault: true, pending: false }],
+      }],
+    },
+  }])
+  check('浅渲染：默认开的那一行写「默认：开」',
+    flipped.text.includes('默认：开') && !flipped.text.includes('非默认'), flipped.text.slice(0, 120))
   check('浅渲染：依赖标记与说明都渲染出来（** 被解析成加粗而不是原样显示）',
     readyText.includes('需外部服务') && readyText.includes('需要额外的语音服务')
     && !readyText.includes('**'), readyText.slice(-160))

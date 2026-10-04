@@ -58,6 +58,8 @@ window.__ModuleLoader__.load({
 .qqai-flash{padding:6px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,#f1f5f9);color:var(--dsw-alias-state-success-primary,#15803d)}
 .qqai-err{padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-state-error-primary,#dc2626);color:var(--dsw-alias-state-error-primary,#dc2626);white-space:pre-wrap}
 .qqai-warn{padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-state-warn-primary,#b45309);color:var(--dsw-alias-state-warn-primary,#b45309)}
+.qqai-note{padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,#eef0f3);background:var(--dsw-alias-bg-layer-2,#f8fafc);color:var(--dsw-alias-label-secondary,#6b7280);font-size:11px;line-height:1.6}
+.qqai-note b{font-weight:600;color:var(--dsw-alias-label-primary,#111)}
 .qqai-footer{margin-top:2px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1,#e5e7eb);display:flex;flex-direction:column;gap:8px}
 .qqai-link-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .qqai-link{color:var(--dsw-alias-brand-primary,#2563eb);text-decoration:none;font-weight:600}
@@ -96,7 +98,15 @@ window.__ModuleLoader__.load({
         h('div', { className: 'qqai-text' },
           h('label', { className: 'qqai-label' }, row.label,
             row.pending === true ? h('span', { className: 'qqai-badge', title: '配置文件里的值与当前生效值不一致' }, '待重启') : null,
-            row.nonDefault === true ? h('span', { className: 'qqai-badge', title: '与这个开关的默认值不同' }, '非默认') : null,
+            // 直接标出**出厂默认值**（不用"非默认"这种说法）：把徽标和右边的开关一对比，
+            // 就知道自己改没改过。用户原话："改成'默认：状态'这样子好一点，而不是显示非默认一条"。
+            row.defaultValue === true || row.defaultValue === false
+              ? h('span', {
+                className: 'qqai-need',
+                title: `出厂默认：${row.defaultValue === true ? '开' : '关'} · 当前：${on ? '开' : '关'}`
+                  + (row.nonDefault === true ? '（你改过）' : '（与出厂一致）'),
+              }, `默认：${row.defaultValue === true ? '开' : '关'}`)
+              : null,
             row.needs ? h('span', { className: 'qqai-need', title: '这个功能要额外准备的东西' }, row.needs) : null),
           row.hint ? h('span', { className: 'qqai-hint', title: row.hint }, richText(row.hint)) : null,
           h('span', { className: 'qqai-key' }, row.key)),
@@ -129,7 +139,8 @@ window.__ModuleLoader__.load({
     }
 
     function Group({ group, busy, onToggle }) {
-      const body = h('div', null, group.rows.map((row) => h(Row, { key: row.key, row, busy, onToggle })))
+      const note = group.note ? h('div', { className: 'qqai-note' }, richText(group.note)) : null
+      const body = h('div', null, note, group.rows.map((row) => h(Row, { key: row.key, row, busy, onToggle })))
       if (group.advanced !== true) {
         return h('div', { className: 'qqai-group' },
           h('div', { className: 'qqai-group-head', style: { padding: '10px 12px', fontWeight: 600, background: 'var(--dsw-alias-bg-layer-2,#f6f7f9)' } }, group.title),
