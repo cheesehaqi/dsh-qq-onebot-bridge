@@ -1153,6 +1153,18 @@ try {
     && clientText.includes('getDerivedStateFromError')
     && clientText.includes('h(PanelBoundary, null, h(QqAiPanel, null))'),
     '没有边界的话，插件里任何渲染异常都会把整个设置页带白')
+  /**
+   * ★ 用户 2026-10-04："应该在启动旁边加个提示，比如过会会出现二维码，而不是什么也没有"。
+   *   两件事都要有：①按钮旁边那句"等几秒二维码会出现"；②**真的会自动出现**——
+   *   启动成功后开始盯二维码（每 3 秒刷一次面板），图一出来就停并提示去扫。
+   */
+  check('★「启动 NapCat」旁边的状态写明"等几秒，二维码会出现在下面"（渲染出来的文本在浅渲染那段再验）',
+    clientText.includes('二维码会出现在下面') && clientText.includes('正在启动 NapCat…等几秒'),
+    clientText.includes('二维码会出现在下面') ? 'ok' : '缺少这句提示')
+  check('★启动成功后自动盯二维码（每 3 秒刷面板、出现即停、90 秒给一句人话）',
+    clientText.includes('watchingQr') && clientText.includes('setInterval(() => { void load() }, 3000)')
+    && clientText.includes('90_000') && clientText.includes('二维码已经出来了'),
+    '光有提示不够——图得自己出现')
   check('客户端把「相关链接」整组渲染出来（挂 data.links，不再是页脚）',
     clientText.includes('qqai-links') && clientText.includes('data.links')
     && !clientText.includes('qqai-footer')
@@ -1342,6 +1354,10 @@ try {
     readyText.includes('快捷操作') && ready.buttons.some((b) => b.text.includes('启动 NapCat'))
     && ready.buttons.some((b) => b.text.includes('重新登录')),
     brief(ready.buttons))
+  // 用户 2026-10-04："应该在启动旁边加个提示，比如过会会出现二维码，而不是什么也没有"。
+  check('★浅渲染：按钮旁边确实渲染出了"等几秒，二维码会出现在下面"那句',
+    readyText.includes('二维码会出现在下面'),
+    brief(readyText.slice(readyText.indexOf('快捷操作'), readyText.indexOf('快捷操作') + 130)))
   // 用户 2026-10-04："把快捷操作拉到相关链接上边"（也顺：没起来时"先把它启动起来"比"点开账号页"更该先看到）。
   // ⚠️ 注意仍不能用 `indexOf('相关链接')`：CSS 是同一棵树里的文本节点，它的注释里也写着这四个字
   //    （第一次就是这么红的）→ 用 lastIndexOf 取**渲染出来的那个**标题。

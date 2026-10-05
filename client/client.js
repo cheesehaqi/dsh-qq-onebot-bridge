@@ -209,6 +209,16 @@ window.__ModuleLoader__.load({
       const qr = napcat?.qr ?? {}
       // busy 没传 / 不是字符串时都按"没有请求在跑"处理（曾经把 undefined 当成"忙"，按钮一直灰着）。
       const pending = typeof busy === 'string' && busy !== ''
+      const starting = busy === '/qqai/napcat/start' || busy === '/qqai/napcat/relogin'
+      /**
+       * 按钮旁边那句状态（用户 2026-10-04："应该在启动旁边加个提示，比如过会会出现二维码，
+       * 而不是什么也没有"）——把"接下来会发生什么"直接写出来，别让用户对着空白猜。
+       */
+      const status = starting
+        ? '正在启动 NapCat…等几秒，二维码会出现在下面'
+        : running === true
+          ? `NapCat：运行中（127.0.0.1:${port}）${qr.fresh === true ? ` · 二维码 ${qr.ageSeconds} 秒前刷新` : ''}`
+          : 'NapCat：未运行 · 点「启动 NapCat」后等几秒，二维码会出现在下面'
       return h('div', { className: 'qqai-actions' },
         h('div', { className: 'qqai-meta' }, '快捷操作'),
         h('div', { className: 'qqai-action-row' },
@@ -224,7 +234,7 @@ window.__ModuleLoader__.load({
             title: '只结束 NapCat 加载器（不会碰你自己开的 QQ），然后重新走一遍登录流程',
             onClick: () => onAction('/qqai/napcat/relogin', '重新登录'),
           }, busy === '/qqai/napcat/relogin' ? '请求中…' : '重新登录（扫码）'),
-          h('span', { className: 'qqai-hint' }, `NapCat：${running === true ? `运行中（127.0.0.1:${port}）` : '未运行'}${qr.fresh === true ? ` · 二维码 ${qr.ageSeconds} 秒前刷新` : ''}`)),
+          h('span', { className: 'qqai-hint' }, status)),
         /**
          * **把二维码直接贴在这里**（用户 2026-10-04 连着两次："没弹出二维码啊"）。
          * NapCat 的码本来只印在它自己的控制台窗口里，而我们把输出重定向进日志了 ⇒ 窗口是空的、看不到码。
@@ -297,7 +307,7 @@ window.__ModuleLoader__.load({
     }
 
     function QqAiPanel() {
-      const [state, setState] = useState({ status: 'loading', data: null, error: '', flash: '', busyKey: '', busyAction: '', qrStamp: Date.now() })
+      const [state, setState] = useState({ status: 'loading', data: null, error: '', flash: '', busyKey: '', busyAction: '', qrStamp: Date.now(), watchingQr: false })
 
       const load = useCallback(async () => {
         try {
@@ -342,18 +352,44 @@ window.__ModuleLoader__.load({
           let payload = null
           try { payload = await response.json() } catch { /* 下面按状态码报错 */ }
           if (payload === null) throw new Error(`HTTP ${response.status}`)
-          setState({
+          setState((prev) => ({
+            ...prev,
             status: 'ready',
-            data: payload.panel ?? state.data,
+            data: payload.panel ?? prev.data,
             busyKey: '',
             busyAction: '',
             error: payload.ok === true ? '' : `${label}：${payload.reason}`,
             flash: payload.ok === true ? `${label}：${payload.reason}${payload.note ? `（${payload.note}）` : ''}` : '',
-          })
+            // 启动/重启成功 ⇒ **开始盯二维码**（用户 2026-10-04："应该在启动旁边加个提示，
+            // 比如过会会出现二维码，而不是什么也没有"）——NapCat 起来后还要几秒才写出那张图，
+            // 所以这段时间面板自己每 3 秒刷一次，图一出来就自动显示。
+            watchingQr: payload.ok === true ? true : prev.watchingQr,
+          }))
         } catch (error) {
           setState((prev) => ({ ...prev, busyAction: '', error: `${label}失败：${String(error?.message ?? error)}` }))
         }
       }, [state.data])
+
+      /**
+       * 盯着二维码：启动/重启之后，NapCat 要过几秒才把码写进 `cache/qrcode.png`。
+       * 这里每 3 秒拉一次面板，**图一出现就停**（并在下面把它显示出来）；
+       * 90 秒还没等到就停下并给一句人话，免得用户对着"什么都没有"发呆。
+       */
+      useEffect(() => {
+        if (state.watchingQr !== true) return undefined
+        const timer = setInterval(() => { void load() }, 3000)
+        const giveUp = setTimeout(() => {
+          setState((prev) => (prev.watchingQr === true
+            ? { ...prev, watchingQr: false, flash: '还没看到二维码：点「QQ助手账号」看看扫码页，或再点一次「启动 NapCat」' }
+            : prev))
+        }, 90_000)
+        return () => { clearInterval(timer); clearTimeout(giveUp) }
+      }, [state.watchingQr, load])
+      useEffect(() => {
+        if (state.watchingQr === true && state.data?.napcat?.qr?.fresh === true) {
+          setState((prev) => ({ ...prev, watchingQr: false, flash: '二维码已经出来了，用手机 QQ 扫下面那张即可' }))
+        }
+      }, [state.data, state.watchingQr])
 
       if (state.status === 'loading') return h('div', { className: 'qqai-wrap' }, h('style', null, CSS), h('div', { className: 'qqai-meta' }, '读取中…'))
       if (state.status === 'error') {
