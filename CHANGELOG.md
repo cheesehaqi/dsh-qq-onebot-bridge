@@ -94,7 +94,10 @@
      `lib/onebot.js` 注释、`test/ops-bridge-unit.mjs` 用例与 CHANGELOG 里，**并且已经推到 GitHub**；
      已全部换成中性占位「机器人昵称」。
   ④ **新增两道自动闸**：把真机日志片段（桥的收信行 / NapCat 的 token 行 / WebUI 地址行 / NapCat 的运行日志片段）
-     列为禁止形状；私有昵称可从 `DSH_QQ_PRIVATE_NICKNAMES` 或本机配置注入比对（收不到就明确跳过，不假装通过）。
+     列为禁止形状；私有昵称有三个来源——`DSH_QQ_PRIVATE_NICKNAMES` 环境变量、本机 profile 配置、
+     以及**本机私有文件** `<cwd>/qq-private-nicknames.txt`（一行一个，落在 `qq-*.txt` 忽略规则下）。
+     本机实测第一版只认前两者时返回**空集**，等于这道闸在本机根本不设防（真昵称就是这么漏进仓库的）——
+     加了文件来源之后，本机跑一次就会拿真昵称去比对仓库。
      这两道闸上线当场就抓到**我自己刚写进源码与测试里的真 token**，已改成假值。
   ⑤ `.gitignore` 补上 `qq-*.cmd` / `qq-*.bat`（垫片里有 NapCat 安装路径，日志里有 token）。
   ✅ 复查结论：**密钥与真实 QQ 号从未进过任何提交**（工作树 / 已推送的 `origin/main` / 全历史 `-S` 搜索三处都干净），

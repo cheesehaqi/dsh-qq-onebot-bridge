@@ -91,6 +91,20 @@ export function collectPrivateNicknames({ env = process.env, home = homedir(), r
     const clean = value.trim()
     if (clean.length >= 3) names.add(clean)
   }
+  /**
+   * 昵称还有一个**本机私有文件**来源：`<cwd>/qq-private-nicknames.txt`（一行一个）。
+   * 为什么需要：昵称是运行时从 QQ 客户端学来的，**不在配置里**——本机实测 `collectPrivateNicknames()`
+   * 返回空集，等于这道闸在本机不设防（真昵称因此漏进了仓库）。文件名落在 `qq-*.txt` 规则下，
+   * 永远不会被提交。
+   */
+  for (const file of [join(process.cwd(), 'qq-private-nicknames.txt'), join(home, '.dsh', 'qq-private-nicknames.txt')]) {
+    try {
+      for (const line of readFile(file, 'utf8').split(/\r?\n/)) {
+        const clean = line.replace(/#.*$/, '').trim()
+        if (clean.length >= 3) names.add(clean)
+      }
+    } catch { /* 没有这个文件就算了 */ }
+  }
   const candidates = [
     join(home, '.dsh', 'profiles', 'web', 'cordis.patch.yml'),
     join(home, '.dsh', 'profiles', 'web', 'cordis.yml'),
