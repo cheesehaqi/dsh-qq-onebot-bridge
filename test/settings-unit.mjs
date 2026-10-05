@@ -344,11 +344,11 @@ const fakeRequest = (method, body, headers = {}) => ({
   async *[Symbol.asyncIterator]() { if (body !== undefined) yield Buffer.from(JSON.stringify(body)) },
 })
 
-check('挂载了六条路由（读面板 + 写开关 + 调试台 + 账号 + 启动 NapCat + 重启登录）',
-  registered.length === 6 && registered.some((r) => r.path === '/qqai/panel')
+check('挂载了七条路由（读面板 + 写开关 + 调试台 + 账号 + 二维码 + 启动 NapCat + 重启登录）',
+  registered.length === 7 && registered.some((r) => r.path === '/qqai/panel')
   && registered.some((r) => r.path === '/qqai/panel/set') && registered.some((r) => r.path === '/qqai/console')
   && registered.some((r) => r.path === '/qqai/account') && registered.some((r) => r.path === '/qqai/napcat/start')
-  && registered.some((r) => r.path === '/qqai/napcat/relogin'),
+  && registered.some((r) => r.path === '/qqai/napcat/relogin') && registered.some((r) => r.path === '/qqai/napcat/qr'),
   registered.map((r) => r.path).join(','))
 
 const getHandler = registered.find((r) => r.path === '/qqai/panel').handler
@@ -766,6 +766,63 @@ check('载荷里带上 NapCat 的运行状态（按钮据此禁用）',
   typeof JSON.parse(accountPanel.out.body).napcat?.running === 'boolean'
   && JSON.parse(accountPanel.out.body).napcat?.port > 0,
   brief(JSON.parse(accountPanel.out.body).napcat))
+/**
+ * ★ 用户连着两次问"没弹出二维码啊"：看到的是**空窗口**（我们把启动输出重定向进日志了）。
+ * 解决＝面板直接贴图：载荷给 `napcat.qr`，`GET /qqai/napcat/qr` 把 `cache/qrcode.png` 交出去。
+ */
+{
+  const qrRoutes = []
+  const freshQr = () => Date.now() - 30_000
+  const staleQr = () => Date.now() - 400_000
+  const mountQr = (mtimeMs) => {
+    qrRoutes.length = 0
+    mountQqAiPanel({
+      webServer: { register(route) { qrRoutes.push(route); return () => { const at = qrRoutes.indexOf(route); if (at >= 0) qrRoutes.splice(at, 1) } } },
+    }, {
+      profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
+      linkSources: { root: napcatRoot }, probe: async () => true, exists: () => true, napcatWaitMs: 0,
+      stat: () => ({ mtimeMs: mtimeMs() }),
+      readBinary: (file) => Buffer.from(`PNG:${file}`, 'utf8'),
+      spawnDetached: async () => ({ pid: 1, failed: false, code: 0, stdout: '', stderr: '' }),
+      exec: (command, args, options, callback) => (typeof options === 'function' ? options : callback)(null, '', ''),
+    })
+    return qrRoutes.find((r) => r.path === '/qqai/napcat/qr')
+  }
+
+  const fresh = mountQr(freshQr)
+  const qrRes = makeResponse()
+  await fresh.handler(fakeRequest('GET', undefined, { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'no-cors' }), qrRes)
+  check('★二维码新鲜时：GET /qqai/napcat/qr 直接回 PNG（面板据此内嵌图片）',
+    qrRes.out.status === 200 && String(qrRes.out.headers['content-type']).includes('image/png')
+    && Buffer.isBuffer(qrRes.out.body) && qrRes.out.body.toString('utf8').startsWith('PNG:'),
+    `${qrRes.out.status} ${qrRes.out.headers['content-type']} ${String(qrRes.out.body).slice(0, 40)}`)
+  const qrPanel = makeResponse()
+  await qrRoutes.find((r) => r.path === '/qqai/panel').handler(fakeRequest('GET'), qrPanel)
+  const qrPayload = JSON.parse(qrPanel.out.body).napcat.qr
+  check('★载荷里的 napcat.qr 指路 /qqai/napcat/qr（新鲜时给 url，附年龄）',
+    qrPayload.fresh === true && qrPayload.url === '/qqai/napcat/qr' && qrPayload.ageSeconds >= 0,
+    brief(qrPayload))
+
+  const stale = mountQr(staleQr)
+  const staleRes = makeResponse()
+  await stale.handler(fakeRequest('GET'), staleRes)
+  const staleBody = JSON.parse(staleRes.out.body)
+  check('★二维码过期（>5 分钟）时：404 + 人话（让人去点「重新登录」刷新）',
+    staleRes.out.status === 404 && staleBody.ok === false && staleBody.reason.includes('过期'),
+    brief(staleBody.reason))
+  const stalePanel = makeResponse()
+  await qrRoutes.find((r) => r.path === '/qqai/panel').handler(fakeRequest('GET'), stalePanel)
+  check('过期时载荷不给 url（客户端就不会显示一张废图）',
+    JSON.parse(stalePanel.out.body).napcat.qr.fresh === false
+    && JSON.parse(stalePanel.out.body).napcat.qr.url === '',
+    brief(JSON.parse(stalePanel.out.body).napcat.qr))
+  const postQr = makeResponse()
+  await stale.handler(fakeRequest('POST', {}, JSON_HEADERS), postQr)
+  check('二维码路由拒绝 POST', postQr.out.status === 405, String(postQr.out.status))
+  const crossQr = makeResponse()
+  await stale.handler(fakeRequest('GET', undefined, { origin: 'https://evil.example' }), crossQr)
+  check('二维码路由拒绝跨站（本机文件不外流）', crossQr.out.status === 403, String(crossQr.out.status))
+}
 // 提权命令必须**先判断自己是不是管理员**：宿主已经是管理员时 RunAs 不会弹 UAC（真机实测），
 // 非管理员时这台机器上 RunAs 会被静默拒绝 —— 两条分支都要写清楚，且各打一个标记给调用方。
 check('提权命令里有"是否管理员"判断 + 两条分支标记（QAI-ELEVATED / QAI-RUNAS）',
@@ -951,11 +1008,11 @@ check('★提权命令只把**垫片路径**交给 cmd（不允许再塞复杂�
 
 dispose()
 check('dispose 注销了全部路由（配置热重载后能重新挂载，不会撞 duplicate route）',
-  registered.length === 0 && disposed.length === 6, `left=${registered.length}`)
+  registered.length === 0 && disposed.length === 7, `left=${registered.length}`)
 mountQqAiPanel(fakeHost, {
   profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
 })
-check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 6, String(registered.length))
+check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 7, String(registered.length))
 
 // ------------------------------------------------- 3. 客户端 bundle 冒烟 ---- ----
 const clientText = readFileSync(join(import.meta.dirname, '..', 'client', 'client.js'), 'utf8')
@@ -1025,6 +1082,13 @@ try {
     clientText.includes("=== 'dsh-app:'") && clientText.includes('format=json')
     && clientText.includes('window.open(url') && clientText.includes("String(link.href).startsWith('/')"),
     '桌面端开不了 dsh-app:// 新窗口，必须让系统浏览器去开 http 地址')
+  /**
+   * ★ "没弹出二维码啊"的正面回答：面板里直接贴图（image/png 那条路由）+ 一个刷新按钮。
+   */
+  check('★客户端在二维码新鲜时内嵌 <img>（src 指向 /qqai/napcat/qr，带时间戳防缓存）',
+    clientText.includes('qqai-qr-img') && clientText.includes('qr.url')
+    && clientText.includes('?t=${qrStamp}') && clientText.includes('刷新二维码'),
+    clientText.includes('qqai-qr-img') ? 'ok' : '缺少内嵌二维码')
   check('客户端把「相关链接」整组渲染出来（挂 data.links，不再是页脚）',
     clientText.includes('qqai-links') && clientText.includes('data.links')
     && !clientText.includes('qqai-footer')
@@ -1134,7 +1198,7 @@ try {
       napcat: { running: false, port: 6099 },
       // 「相关链接」整组（账号第一、调试台压最底下）——渲染在标题正下方、开关分组之前。
       links: [
-        { id: 'account', label: 'QQ助手账号（登录 / 扫码）', href: '/qqai/account', hint: '机器人账号的登录状态与扫码页；点开就是带 token 的地址，不用手输' },
+        { id: 'account', label: 'QQ助手账号（登录 / 扫码）', href: '/qqai/account', hint: '机器人账号的扫码 / 登录状态页；**需要先运行 NapCat**（没起来就点上面的「启动 NapCat」），点开就是带 token 的地址，不用手输' },
         { id: 'changelog', label: '更新日志（v9.9.9）', href: 'https://example.invalid/CHANGELOG.md', hint: '每个版本的改动' },
         { id: 'readme-debug', label: '调试文档', href: 'https://example.invalid/README.md#调试v04一切皆可调试', hint: 'trace / 回放 / 体检 / 注入的用法' },
         { id: 'console', label: '调试台（独立控制台）', href: '/qqai/console', running: false, state: '未启动 · 需要单独运行：node x', hint: '调试台是独立进程' },
@@ -1189,6 +1253,10 @@ try {
     && accountRow.text.includes('QQ助手账号（登录 / 扫码）') && accountRow.text.includes('不用手输')
     && accountRow.target === '_blank',
     brief(accountRow))
+  // 用户 2026-10-04："这旁边加一个描述，比如需要先运行 NapCat"。
+  check('★账号入口的说明里写明"需要先运行 NapCat"（并指路「启动 NapCat」）',
+    accountRow.text.includes('需要先运行 NapCat') && accountRow.text.includes('启动 NapCat'),
+    brief(accountRow.text.slice(-90)))
   const consoleRow = ready.linkRows.find((row) => row.href === '/qqai/console')
   check('调试台那一行同样整行可点（含"未启动 · 需要单独运行…"那段）',
     consoleRow !== undefined && consoleRow.text.includes('调试台（独立控制台）')

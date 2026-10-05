@@ -72,6 +72,10 @@ window.__ModuleLoader__.load({
 .qqai-action-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .qqai-action{border:1px solid var(--dsw-alias-border-l3,#0000001f);background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);border-radius:8px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}
 .qqai-action:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2,#f6f7f9)}
+.qqai-qr{display:flex;gap:12px;align-items:flex-start}
+.qqai-qr-img{display:block;width:176px;height:176px;border:1px solid var(--dsw-alias-border-l1,#e5e7eb);border-radius:8px;background:#fff}
+.qqai-qr-side{display:flex;flex-direction:column;gap:6px;font-size:12px}
+.qqai-qr-title{font-weight:600;color:var(--dsw-alias-label-primary,#111)}
 .qqai-action:disabled{cursor:default;opacity:.5}
 .qqai-state{font-size:11px}
 .qqai-state.on{color:var(--dsw-alias-state-success-primary,#15803d)}
@@ -186,7 +190,7 @@ window.__ModuleLoader__.load({
         },
         h('span', { className: 'qqai-link' }, link.label),
         link.state ? h('span', { className: `qqai-state ${link.running === true ? 'on' : 'off'}` }, link.state) : null,
-        link.hint ? h('span', { className: 'qqai-hint' }, link.hint) : null)))
+        link.hint ? h('span', { className: 'qqai-hint' }, richText(link.hint)) : null)))
     }
 
     /**
@@ -199,9 +203,10 @@ window.__ModuleLoader__.load({
      * 这两条会 POST 到宿主的 `/qqai/napcat/start` 与 `/qqai/napcat/relogin`；
      * 服务端只按**加载器 PID** 清理，绝不会按镜像名杀 QQ（那会连用户自己的 QQ 一起杀掉）。
      */
-    function Actions({ napcat, busy, onAction }) {
+    function Actions({ napcat, busy, onAction, qrStamp, onRefreshQr }) {
       const running = napcat?.running === true
       const port = napcat?.port ?? 6099
+      const qr = napcat?.qr ?? {}
       // busy 没传 / 不是字符串时都按"没有请求在跑"处理（曾经把 undefined 当成"忙"，按钮一直灰着）。
       const pending = typeof busy === 'string' && busy !== ''
       return h('div', { className: 'qqai-actions' },
@@ -210,7 +215,7 @@ window.__ModuleLoader__.load({
           h('button', {
             className: 'qqai-action',
             disabled: running === true || pending,
-            title: running === true ? 'NapCat 已经在运行了' : '以管理员身份启动 NapCat（会弹 UAC，点「是」）',
+            title: running === true ? 'NapCat 已经在运行了' : '以管理员身份启动 NapCat（本机策略下不会弹 UAC，命令直接执行）',
             onClick: () => onAction('/qqai/napcat/start', '启动 NapCat'),
           }, running === true ? 'NapCat 运行中' : (busy === '/qqai/napcat/start' ? '请求中…' : '启动 NapCat')),
           h('button', {
@@ -219,7 +224,31 @@ window.__ModuleLoader__.load({
             title: '只结束 NapCat 加载器（不会碰你自己开的 QQ），然后重新走一遍登录流程',
             onClick: () => onAction('/qqai/napcat/relogin', '重新登录'),
           }, busy === '/qqai/napcat/relogin' ? '请求中…' : '重新登录（扫码）'),
-          h('span', { className: 'qqai-hint' }, `NapCat：${running === true ? `运行中（127.0.0.1:${port}）` : '未运行'} · 宿主不是管理员时会弹一次 UAC`)))
+          h('span', { className: 'qqai-hint' }, `NapCat：${running === true ? `运行中（127.0.0.1:${port}）` : '未运行'}${qr.fresh === true ? ` · 二维码 ${qr.ageSeconds} 秒前刷新` : ''}`)),
+        /**
+         * **把二维码直接贴在这里**（用户 2026-10-04 连着两次："没弹出二维码啊"）。
+         * NapCat 的码本来只印在它自己的控制台窗口里，而我们把输出重定向进日志了 ⇒ 窗口是空的、看不到码。
+         * 现在只要 `cache/qrcode.png` 还新鲜（≤5 分钟），面板就把图显示出来，点「刷新二维码」重新取一张。
+         */
+        qr.fresh === true
+          ? h('div', { className: 'qqai-qr' },
+            h('img', {
+              className: 'qqai-qr-img',
+              src: `${qr.url}?t=${qrStamp}`,
+              alt: 'NapCat 登录二维码',
+              width: 176,
+              height: 176,
+            }),
+            h('div', { className: 'qqai-qr-side' },
+              h('div', { className: 'qqai-qr-title' }, '用手机 QQ 扫码登录'),
+              h('div', { className: 'qqai-hint' }, '二维码由 NapCat 生成在 cache/qrcode.png；超过 5 分钟会自动隐藏。'),
+              h('button', {
+                className: 'qqai-action',
+                disabled: pending,
+                title: '重新拉取这张二维码图（NapCat 会自己刷新码）',
+                onClick: () => (typeof onRefreshQr === 'function' ? onRefreshQr() : undefined),
+              }, '刷新二维码')))
+          : null)
     }
 
     function Group({ group, busy, onToggle }) {
@@ -236,7 +265,7 @@ window.__ModuleLoader__.load({
     }
 
     function QqAiPanel() {
-      const [state, setState] = useState({ status: 'loading', data: null, error: '', flash: '', busyKey: '', busyAction: '' })
+      const [state, setState] = useState({ status: 'loading', data: null, error: '', flash: '', busyKey: '', busyAction: '', qrStamp: Date.now() })
 
       const load = useCallback(async () => {
         try {
@@ -309,7 +338,13 @@ window.__ModuleLoader__.load({
           h('button', { onClick: () => void load(), disabled: state.busyKey !== '' }, '刷新')),
         // 顶部第一块是「快捷操作」（启动 NapCat / 重新登录）——用户 2026-10-04："把快捷操作拉到相关链接上边"。
         // 理由也顺：没起来的时候，"把它启动起来"比"点开账号页"更该先看到。
-        h(Actions, { napcat: data.napcat, busy: state.busyAction, onAction: runAction }),
+        h(Actions, {
+          napcat: data.napcat,
+          busy: state.busyAction,
+          onAction: runAction,
+          qrStamp: state.qrStamp,
+          onRefreshQr: () => { setState({ qrStamp: Date.now() }); void load() },
+        }),
         // 紧接着是「相关链接」整组（第一条是账号入口）。
         h(Links, { links: data.links }),
         h('div', { className: 'qqai-meta' },
