@@ -1018,7 +1018,16 @@ check('注销后可以再次挂载（模拟宿主重建插件条目）', registe
 const clientText = readFileSync(join(import.meta.dirname, '..', 'client', 'client.js'), 'utf8')
 let loaded = null
 const sandboxWindow = { __ModuleLoader__: { load: (spec) => { loaded = spec } } }
-const fakeReact = { createElement: () => null, useState: () => [null, () => {}], useEffect: () => {}, useCallback: (fn) => fn }
+// 最小 React 桩：`Component` 是给**渲染边界**（class 组件）用的——错误边界只能是 class，
+// 所以桩里得有它，否则 bundle 一执行就 "Class extends value undefined"。
+const fakeComponent = class { constructor(props) { this.props = props ?? {}; this.state = {} } setState(next) { this.state = { ...this.state, ...(typeof next === 'function' ? next(this.state) : next) } } }
+const fakeReact = {
+  createElement: () => null,
+  useState: () => [null, () => {}],
+  useEffect: () => {},
+  useCallback: (fn) => fn,
+  Component: fakeComponent,
+}
 try {
   /**
    * 严格照抄真实加载器的契约（dsh-client-modules/lib/client.js:683）：
@@ -1089,6 +1098,19 @@ try {
     clientText.includes('qqai-qr-img') && clientText.includes('qr.url')
     && clientText.includes('?t=${qrStamp}') && clientText.includes('刷新二维码'),
     clientText.includes('qqai-qr-img') ? 'ok' : '缺少内嵌二维码')
+  /**
+   * ★ 白屏回归（用户 2026-10-04："为啥点击刷新二维码会白屏"）：
+   *   `setState({ qrStamp })` 整对象替换会把 `data` 一起清掉 → 下一帧读 `data.napcat` 抛错 → **整页白**。
+   *   两条断言：①「刷新二维码」必须走函数式更新；② 面板外面套一层渲染边界（以后再有类似 bug 也只显示一句话）。
+   */
+  check('★「刷新二维码」用函数式 setState（整对象替换会清掉 data → 白屏）',
+    clientText.includes('setState((prev) => ({ ...prev, qrStamp: Date.now() }))'),
+    '必须保留 data，只更新 qrStamp')
+  check('★面板外面套了渲染边界（渲染出错显示一句话，而不是整页白屏）',
+    clientText.includes('class PanelBoundary extends React.Component')
+    && clientText.includes('getDerivedStateFromError')
+    && clientText.includes('h(PanelBoundary, null, h(QqAiPanel, null))'),
+    '没有边界的话，插件里任何渲染异常都会把整个设置页带白')
   check('客户端把「相关链接」整组渲染出来（挂 data.links，不再是页脚）',
     clientText.includes('qqai-links') && clientText.includes('data.links')
     && !clientText.includes('qqai-footer')
@@ -1126,6 +1148,8 @@ const makeReactStub = () => {
     },
     useEffect: () => {},
     useCallback: (fn) => fn,
+    // 渲染边界是 class 组件（React 只支持 class 做错误边界）——桩里必须给 Component。
+    Component: fakeComponent,
   }
   return stub
 }
@@ -1148,7 +1172,16 @@ const shallowText = (element, states) => {
     if (node === null || node === undefined || typeof node === 'boolean') return
     if (typeof node === 'string' || typeof node === 'number') { text.push(String(node)); return }
     if (Array.isArray(node)) { for (const child of node) walk(child); return }
-    if (typeof node.type === 'function') { reactStub.resetSlot(); walk(node.type({ ...(node.props ?? {}) })); return }
+    if (typeof node.type === 'function') {
+      // class 组件（渲染边界）要 `new` 出来再走它的 render()——直接当函数调用会抛
+      // "Class constructor cannot be invoked without 'new'"。
+      if (node.type.prototype !== undefined && typeof node.type.prototype.render === 'function') {
+        const instance = new node.type(node.props ?? {})
+        walk(instance.render())
+        return
+      }
+      reactStub.resetSlot(); walk(node.type({ ...(node.props ?? {}) })); return
+    }
     // 链接目标在属性上，不在文本里——单独收集，否则断言会"看着渲染出来了其实没验链接"。
     if (typeof node.props?.href === 'string') {
       hrefs.push(node.props.href)

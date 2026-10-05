@@ -264,15 +264,43 @@ window.__ModuleLoader__.load({
         body)
     }
 
+    /**
+     * 渲染兜底：**插件里任何一个渲染异常都不该把整页设置带成白屏**。
+     *
+     * 真机事故（2026-10-04 用户："为啥点击刷新二维码会白屏"）：`onRefreshQr` 里写成
+     * `setState({ qrStamp })`（整对象替换）→ 把 `data` 清掉 → 下一帧读 `data.napcat` 抛错 →
+     * React 直接把整棵树卸掉，用户看到的就是**一片白**，连"哪出错了"都不知道。
+     * 根因已在 `onRefreshQr` 修掉（改成函数式更新），这里再加一道边界：以后再有类似 bug，
+     * 面板位置会显示一句人话 + 重试按钮，而不是白屏。
+     */
+    class PanelBoundary extends React.Component {
+      constructor(props) { super(props); this.state = { error: '' } }
+      static getDerivedStateFromError(error) { return { error: String(error?.message ?? error) } }
+      render() {
+        if (this.state.error !== '') {
+          return h('div', { className: 'qqai-wrap' },
+            h('style', null, CSS),
+            h('div', { className: 'qqai-err' }, `QQ助手面板渲染出错：${this.state.error}`,
+              h('div', null, '（已隔离，不影响其它设置项。点下面重试，若一直失败请把这句话报给开发者。）')),
+            h('button', {
+              className: 'qqai-retry',
+              onClick: () => this.setState({ error: '' }),
+            }, '重试'))
+        }
+        return this.props.children
+      }
+    }
+
     function QqAiPanel() {
       const [state, setState] = useState({ status: 'loading', data: null, error: '', flash: '', busyKey: '', busyAction: '', qrStamp: Date.now() })
 
       const load = useCallback(async () => {
         try {
           const data = await callJson('/qqai/panel')
-          setState({ status: 'ready', data, error: '', flash: '', busyKey: '' })
+          // 保留 qrStamp（用它做二维码的防缓存参数），其余按新载荷覆盖。
+          setState((prev) => ({ ...prev, status: 'ready', data, error: '', flash: '', busyKey: '' }))
         } catch (error) {
-          setState({ status: 'error', data: null, error: String(error?.message ?? error), flash: '', busyKey: '' })
+          setState((prev) => ({ ...prev, status: 'error', data: null, error: String(error?.message ?? error), flash: '', busyKey: '' }))
         }
       }, [])
 
@@ -343,7 +371,12 @@ window.__ModuleLoader__.load({
           busy: state.busyAction,
           onAction: runAction,
           qrStamp: state.qrStamp,
-          onRefreshQr: () => { setState({ qrStamp: Date.now() }); void load() },
+          onRefreshQr: () => {
+            // ⚠️ 这里**必须**用函数式更新（`(prev) => ({...prev, ...})`）：整对象替换会把 `data` 一起清掉，
+            //    下一帧 `data.napcat` 取不到 → React 渲染直接抛错 → **整页白屏**（真机踩过）。
+            setState((prev) => ({ ...prev, qrStamp: Date.now() }))
+            void load()
+          },
         }),
         // 紧接着是「相关链接」整组（第一条是账号入口）。
         h(Links, { links: data.links }),
@@ -362,7 +395,7 @@ window.__ModuleLoader__.load({
     exports.apply = function apply(ctx) {
       ctx.slots.inject('settings.section', () => ctx.slots.register(
         { name: 'settings.section', id: 'qqai', order: 45, label: () => 'QQ助手' },
-        () => h(QqAiPanel, null),
+        () => h(PanelBoundary, null, h(QqAiPanel, null)),
       ))
     }
 
