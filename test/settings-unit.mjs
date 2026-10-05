@@ -999,6 +999,16 @@ check('★管理员分支走 WMI Win32_Process.Create，且 if/else 之间没有
     planText(planStart).includes('>> "') && planText(planStart).includes('2>&1')
     && String(planStart.shim?.logFile ?? '').endsWith('.log'),
     `${planStart.shim?.logFile} ← ${planStart.shim?.content ?? ''}`)
+  /**
+   * 那个 cmd 窗口现在是空的（输出都进日志了），所以垫片自己要往窗口里写两行"指路"：
+   * 输出在哪、二维码去哪看——否则用户看到的就是"窗口运行了但什么都没有"（真机反馈过两次）。
+   * 注意 `chcp 65001`：不切码页，中文在 cmd 里就是乱码。
+   */
+  check('★垫片往窗口里写两行指路（输出在哪 / 二维码去哪看），并先切 UTF-8 码页',
+    String(planStart.shim?.content ?? '').includes('chcp 65001')
+    && String(planStart.shim?.content ?? '').includes('[QQ助手] NapCat 正在启动')
+    && String(planStart.shim?.content ?? '').includes('二维码会自动显示在 DSH 面板'),
+    String(planStart.shim?.content ?? '').split('\r\n').slice(0, 5).join(' ｜ '))
   check('重新登录的垫片也带 `cd /d`、日志重定向与 taskkill（同一条坑，别只修一半）',
     planText(planRelogin).includes('cd /d "C:\\NapCat\\bootmain"') && planText(planRelogin).includes('>> "')
     && planText(planRelogin).includes('taskkill /PID 4100'),
