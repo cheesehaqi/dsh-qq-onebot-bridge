@@ -161,7 +161,7 @@
   浅渲染：两个按钮 + 禁用态）；
   `control-unit` 里几条把命令形状写死的断言
   （supervisor 侧与控制台接口侧）跟着新的 splatting 写法更新（仍然只有一次 `Start-Process`）。
-  全量 **57 套 / 3841 断言全绿**。
+  全量 **57 套 / 3842 断言全绿**。
 
 ## v0.6.2（2026-10-04）— 功能说明补全 / Every switch explains itself
 

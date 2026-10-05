@@ -830,10 +830,20 @@ check('提权命令里有"是否管理员"判断 + 两条分支标记（QAI-ELEV
   && planStart.args.join(' ').includes('QAI-RUNAS') && planStart.args.join(' ').includes("'RunAs'"),
   planStart.args.join(' ').slice(-150))
 check('★提权命令只把**垫片路径**交给 cmd（不允许再塞复杂内层命令 —— 真机上引号会被打乱、压根不执行）',
-  planStart.args.join(' ').includes("ArgumentList = @('/c','C:\\QQAI\\qq-napcat-launch.cmd')")
-  && planStart.args.join(' ').includes('Start-Process @p')
+  planStart.args.join(' ').includes(`@('/c','C:\\QQAI\\qq-napcat-launch.cmd')`)
   && !/&&|>>|taskkill|call "/.test(planStart.args.join(' ')),
   planStart.args.join(' ').slice(-170))
+/**
+ * ★ 管理员宿主改走 WMI（真机：`-Verb RunAs` 在已是管理员的宿主里偶尔静默什么都不做），
+ *   而且 `if {}` 与 `else {}` 之间**不能有分号**（PowerShell 语法；真机报过
+ *   `else : 无法将"else"项识别为 cmdlet`）；脚本里也不放字面量双引号（用 `[char]34` 拼）。
+ */
+check('★管理员分支走 WMI Win32_Process.Create，且 if/else 之间没有分号',
+  planStart.args.join(' ').includes('Invoke-CimMethod -ClassName Win32_Process')
+  && planStart.args.join(' ').includes('[char]34')
+  && !/\} *; *else/.test(planStart.args.join(' '))
+  && planStart.args.join(' ').includes("Verb = 'RunAs'"),
+  planStart.args.join(' ').slice(-200))
 
 /**
  * ★ 2026-10-04 真机总根源的回归：**`detached: true` 会让子进程压根不执行命令**
