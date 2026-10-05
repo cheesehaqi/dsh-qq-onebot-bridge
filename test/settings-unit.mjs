@@ -8,7 +8,7 @@
  *      确认它导出 inject/apply 并注册了 settings.section——并钉住它 fetch 的路由名
  *      与服务端注册的路由名一致（两边的名字漂移会在这里红）。
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
@@ -21,7 +21,7 @@ import {
 import { planNapcatAction } from '../lib/napcat-launch.js'
 import {
   argvProfile, consoleStartCommand, mountQqAiPanel, napcatWebUiUrl, panelLinkSources, probePort, profileDirOf,
-  resolveProfile, sameSiteGuard, spawnDetachedProcess,
+  resolveProfile, sameSiteGuard, shimHeartbeatFresh, spawnDetachedProcess,
 } from '../lib/settings-routes.js'
 import { Config } from '../lib/index.js'
 
@@ -879,6 +879,9 @@ check('★提权命令只把**垫片路径**交给 cmd（不允许再塞复杂�
     profile: 'web', config: {}, readFile: readFileSync, env,
     // 垫片要先落盘再执行 —— 这里把写入内容抓下来（断言"真正执行的脏活"）。
     writeFile: (file, content, encoding) => { shims.push({ file, content }); return writeFileSync(file, content, encoding) },
+    // 垫片心跳桩：日志文件视作"刚刚写过、且含心跳行"（真机上这行是垫片自己写的）。
+    stat: (target) => (String(target).endsWith('.log') ? { mtimeMs: Date.now() } : statSync(target)),
+    readFile: (target, encoding) => (String(target).endsWith('.log') ? '=== shim start 2026/10/06 1:00:00 ===\r\n' : readFileSync(target, encoding)),
     linkSources: { root: napcatRoot },
     probe: async () => false,                                  // 6099 没在听
     exists: (file) => /launcher\.bat$/i.test(file),             // 同目录只有 launcher.bat
@@ -1004,6 +1007,35 @@ check('★提权命令只把**垫片路径**交给 cmd（不允许再塞复杂�
   check('★非零退出码也算失败：如实报"Access is denied"',
     JSON.parse(nzRes.out.body).ok === false && JSON.parse(nzRes.out.body).reason.includes('Access is denied'),
     brief(JSON.parse(nzRes.out.body).reason))
+  /**
+   * ★ 假成功回归（真机抓到：NapCat 本来就在跑时，提权被悄悄拦下、垫片根本没执行，
+   *   而"6099 在听"这条判据永远为真 ⇒ 界面报"重启成功"，其实什么都没发生）。
+   *   现在以**垫片心跳**为判据：没心跳就 `ok:false` + 说明这次点击什么都没发生。
+   */
+  const noHeartbeat = []
+  mountQqAiPanel({
+    webServer: { register(route) { noHeartbeat.push(route); return () => { const at = noHeartbeat.indexOf(route); if (at >= 0) noHeartbeat.splice(at, 1) } } },
+  }, {
+    profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
+    linkSources: { root: napcatRoot }, probe: async () => true, exists: () => true, napcatWaitMs: 0,
+    // 日志文件"很旧"（或干脆不存在）⇒ 没有心跳
+    stat: () => ({ mtimeMs: Date.now() - 600_000 }),
+    spawnDetached: async () => ({ pid: 7, failed: false, code: 0, stdout: 'QAI-ELEVATED', stderr: '' }),
+    exec: (command, args, options, callback) => (typeof options === 'function' ? options : callback)(null, '"NapCatWinBootMain.exe","4100","Console","1","1 K"\n', ''),
+  })
+  const noBeatRes = makeResponse()
+  await noHeartbeat.find((r) => r.path === '/qqai/napcat/relogin').handler(fakeRequest('POST', {}, JSON_HEADERS), noBeatRes)
+  const noBeatBody = JSON.parse(noBeatRes.out.body)
+  check('★垫片没留下心跳时：ok=false，并明说"这次点击什么都没发生"（不再拿 6099 在听当成功）',
+    noBeatBody.ok === false && noBeatBody.shimRan === false
+    && noBeatBody.reason.includes('没有留下心跳') && noBeatBody.reason.includes('什么都没发生'),
+    brief(noBeatBody.reason.slice(0, 120)))
+  check('shimHeartbeatFresh：新鲜 + 有心跳 → true；文件太旧 / 读不到 / 没有心跳行 → false',
+    shimHeartbeatFresh('x.log', { stat: () => ({ mtimeMs: Date.now() }), readFile: () => '=== shim start 1:00 ===\n' }) === true
+    && shimHeartbeatFresh('x.log', { stat: () => ({ mtimeMs: Date.now() - 600_000 }), readFile: () => '=== shim start 1:00 ===\n' }) === false
+    && shimHeartbeatFresh('x.log', { stat: () => ({ mtimeMs: Date.now() }), readFile: () => 'launcher output only\n' }) === false
+    && shimHeartbeatFresh('x.log', { stat: () => { throw new Error('ENOENT') }, readFile: () => '' }) === false,
+    '心跳是"命令真的落地了"的唯一可靠证据')
 }
 
 dispose()

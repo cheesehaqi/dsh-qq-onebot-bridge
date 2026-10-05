@@ -248,7 +248,12 @@ window.__ModuleLoader__.load({
                 title: '重新拉取这张二维码图（NapCat 会自己刷新码）',
                 onClick: () => (typeof onRefreshQr === 'function' ? onRefreshQr() : undefined),
               }, '刷新二维码')))
-          : null)
+          // 运行中但**码已过期**：不能什么都不显示——那看起来就像"没有二维码"（用户已经问过一次了）。
+          : (running === true
+            ? h('div', { className: 'qqai-hint' }, qr.ageSeconds >= 0
+              ? `二维码已过期（${qr.ageSeconds} 秒前刷新的那张，超过 5 分钟就不显示了）——点上面「重新登录（扫码）」重新生成`
+              : '还没有二维码——点上面「启动 NapCat」，或直接点「重新登录（扫码）」')
+            : null))
     }
 
     function Group({ group, busy, onToggle }) {
