@@ -385,15 +385,15 @@ function makeBridge(overrides = {}) {
   t.stop()
 }
 {
-  // 没配别名，但桥自己学到了昵称 → 也要认（真机上就是这种情况：@Deepseek_小鲸鱼）。
+  // 没配别名，但桥自己学到了昵称 → 也要认（真机上是"@机器人昵称"这种形态）。
   const t = makeBridge({ groupOpsEnabled: true })
-  t.server.botNickname = 'Deepseek_小鲸鱼'
-  await t.send(t.message('@Deepseek_小鲸鱼 /禁言名单', { atMe: false, ats: [] }))
+  t.server.botNickname = '机器人昵称'
+  await t.send(t.message('@机器人昵称 /禁言名单', { atMe: false, ats: [] }))
   check('S5 未配置别名时，桥学到的昵称同样能认（读 get_login_info）',
-    t.server.count('get_group_shut_list') === 1 && t.reasonsOf(t.traceStage('mention', true)).includes('Deepseek_小鲸鱼'),
+    t.server.count('get_group_shut_list') === 1 && t.reasonsOf(t.traceStage('mention', true)).includes('机器人昵称'),
     `${t.server.count('get_group_shut_list')}|${t.reasonsOf(t.traceStage('mention', true))}`)
   check('S6 学习只读一次', t.server.count('get_login_info') === 1, String(t.server.count('get_login_info')))
-  await t.send(t.message('@Deepseek_小鲸鱼 /禁言名单', { atMe: false, ats: [] }))
+  await t.send(t.message('@机器人昵称 /禁言名单', { atMe: false, ats: [] }))
   check('S7 第二条同样认（缓存生效，没有第二次登录信息读取）',
     t.server.count('get_group_shut_list') === 2 && t.server.count('get_login_info') === 1,
     `shut=${t.server.count('get_group_shut_list')} login=${t.server.count('get_login_info')}`)

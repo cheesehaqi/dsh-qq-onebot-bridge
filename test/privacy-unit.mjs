@@ -77,6 +77,41 @@ export function collectPrivateIds({ env = process.env, home = homedir(), readFil
 
 const PLACEHOLDER_IDS = new Set(['2000000001', '3000000001', '100000001', '100000002'])
 
+/**
+ * 本机的**私有昵称**（机器人自己的 QQ 昵称、群名片里的自定义别名……）。
+ *
+ * 为什么要有这一类（2026-10-06 审计发现）：`Deepseek_小鲸鱼`（这台机器上机器人账号的昵称）
+ * 曾经出现在 3 个已跟踪文件里（`lib/onebot.js` 的注释、`test/ops-bridge-unit.mjs` 的用例、
+ * CHANGELOG），而且**已经推到了 GitHub**——昵称能直接把仓库指到用户的 QQ 账号上。
+ * 号是数字好认，昵称是任意字符串，所以这里从**本机私有配置**里收集，同样不写进仓库。
+ */
+export function collectPrivateNicknames({ env = process.env, home = homedir(), readFile = readFileSync } = {}) {
+  const names = new Set()
+  for (const value of String(env.DSH_QQ_PRIVATE_NICKNAMES ?? '').split(/[,，\s]+/)) {
+    const clean = value.trim()
+    if (clean.length >= 3) names.add(clean)
+  }
+  const candidates = [
+    join(home, '.dsh', 'profiles', 'web', 'cordis.patch.yml'),
+    join(home, '.dsh', 'profiles', 'web', 'cordis.yml'),
+  ]
+  for (const file of candidates) {
+    let text = ''
+    try { text = readFile(file, 'utf8') } catch { continue }
+    // 只看"昵称类"键：值里带数字的留给 collectPrivateIds，避免把 `botQq: <一串数字>` 当昵称收进来。
+    for (const key of ['botNickname', 'botName', 'nickname', 'botAlias', 'aliases', 'botNames']) {
+      const block = new RegExp(`^\\s*${key}\\s*:[ \t]*([^\n]*)((?:\n[ \t]+-[^\n]*)*)`, 'm').exec(text)
+      if (!block) continue
+      for (const raw of `${block[1]}\n${block[2]}`.split(/\r?\n/)) {
+        const value = raw.replace(/^\s*(-\s*)?/, '').replace(/^[\w.-]+\s*:\s*/, '').replace(/[#'"]/g, '').trim()
+        if (value === '' || /^\d+$/.test(value)) continue
+        for (const piece of value.split(/[,，\s]+/)) if (piece.length >= 3) names.add(piece)
+      }
+    }
+  }
+  return names
+}
+
 /** 运行时产物名（代码会写进工作目录）：必须被 .gitignore 覆盖，且不得被跟踪。 */
 const RUNTIME_ARTIFACTS = [
   'qq-inbox.jsonl', 'qq-inject.jsonl', 'qq-trace.jsonl', 'qq-runtime.json', 'qq-actions.log',
@@ -87,6 +122,9 @@ const RUNTIME_ARTIFACTS = [
   'qq-memory/g_1.json', 'qq-media/a.png', 'qq-images/a.png', 'qq-replies/a.png', 'qq-tts/a.mp3',
   'qq-files/a.txt', 'qq-exports/a.md', 'qq-faces/list.json', 'qq-badwords.txt',
   'qq-engage.json', 'qq-broadcast.json',
+  // v0.6.3 起"快捷启动 NapCat"会往工作目录写这两样：垫片（含 NapCat 安装路径）
+  // 与启动日志（真机实测里面会出现 `WebUi Token: …`）——必须同 .cmd/.log 一起被忽略。
+  'qq-napcat-launch.cmd', 'qq-napcat-launch.log',
   // 审计提的缺口：规则按扩展名兜底，就不能只兜一半（`/export` 产出的就是 .md）。
   'qq-export.md', 'qq-notes.md', 'qq-raw.bin', 'qq-dump.html',
   // writeJsonAtomic 的临时文件是**隐藏名** `.m1a2b3-x9y8z7.tmp`（写一半崩掉就会留下，
@@ -215,6 +253,57 @@ if (PRIVATE_IDS.size === 0) {
   check('文件名里也没有真实 QQ 号', nameHits.length === 0, nameHits.slice(0, 3).join(','))
 }
 check('占位号在示例/测试里被有意使用', textFiles.some(({ text }) => [...PLACEHOLDER_IDS].some((id) => text.includes(id))))
+
+// ------------------------------------------- ②b 私有昵称（昵称也能指到账号）--
+{
+  const nicknames = collectPrivateNicknames()
+  const hits = []
+  for (const { name: trackedName, text } of textFiles) {
+    for (const name of nicknames) if (text.includes(name)) hits.push(`${trackedName}: ${name}`)
+  }
+  // 收不到就明确跳过（CI 里用 DSH_QQ_PRIVATE_NICKNAMES 注入），不假装通过。
+  check('没有把本机机器人的真实昵称写进仓库（昵称同样能指到用户的 QQ 账号）',
+    nicknames.size === 0 || hits.length === 0,
+    nicknames.size === 0 ? '本机没收集到私有昵称（跳过）' : hits.slice(0, 3).join(' / '))
+  check('私有昵称清单可用（本机有配置时不许静默跳过）',
+    typeof collectPrivateNicknames === 'function'
+    && collectPrivateNicknames({ env: { DSH_QQ_PRIVATE_NICKNAMES: '某个昵称甲,另一个昵称乙' } }).has('某个昵称甲'),
+    [...nicknames].length ? [...nicknames].join(',') : '（本机为空）')
+}
+
+// ------------------------------- ②c "真机输出被抄进仓库"的几种具体形状 --
+/**
+ * 昵称不好枚举，但**"从真机日志里复制一段"**这个动作有固定形状。2026-10-06 审计发现
+ * `Deepseek_小鲸鱼` 就是被这么抄进注释/用例并推到 GitHub 的，所以这里直接拦形状：
+ * 桥的收信行、NapCat 的 WebUI token 行、NapCat 的运行日志片段。
+ */
+const REAL_MACHINE_SHAPES = [
+  [/\|\s*接收\s*<-/, '桥日志里的真机收信行（含昵称/号）'],
+  // 模式本身要"带值"才精准：写成 /WebUi Token:\s*\S+/ 会**匹配到这条规则自己的源码**
+  // （\s*\S+ 里那个反斜杠也算非空白字符），第一版就因此误报了一次。
+  [/WebUi Token:\s*[0-9a-fA-F]{6,}/i, 'NapCat 的 WebUI token 行'],
+  [/User Panel Url:\s*https?:\/\/[^\s]*[?&]token=[^\s"']{4,}/i, 'NapCat 的 WebUI 地址行（含 token 参数）'],
+  [/\[AdapterManager\]/, 'NapCat 运行日志片段'],
+]
+/**
+ * 命中形状后还要看一眼"是不是明显假值"——真 token 是随机串，示例里写的是
+ * placeholder/example/尖括号占位。不这样区分的话，规则会把**测试自己写的那行假 token**
+ * 也当成泄露（第一版就误报了自己刚写的断言）。
+ */
+const FAKE_MACHINE_ALLOW = [/example/i, /placeholder/i, /<[^>]{1,40}>/, /token=x?abc/i, /a1b2c3d4/i]
+{
+  const hits = []
+  for (const { name: trackedName, text } of textFiles) {
+    for (const [pattern, label] of REAL_MACHINE_SHAPES) {
+      const match = pattern.exec(text)
+      if (match === null) continue
+      if (FAKE_MACHINE_ALLOW.some((allow) => allow.test(match[0]))) continue
+      hits.push(`${trackedName}: ${label}`)
+    }
+  }
+  check('没有把真机日志片段原样抄进仓库（这类复制是昵称/token 泄露的实际入口）',
+    hits.length === 0, hits.slice(0, 3).join(' / '))
+}
 
 // ------------------------------------------------------------- ③ 密钥形态 --
 const SECRET_PATTERNS = [

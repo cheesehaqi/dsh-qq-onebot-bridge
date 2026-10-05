@@ -21,7 +21,7 @@ import {
 import { planNapcatAction } from '../lib/napcat-launch.js'
 import {
   argvProfile, consoleStartCommand, mountQqAiPanel, napcatWebUiUrl, panelLinkSources, probePort, profileDirOf,
-  resolveProfile, sameSiteGuard, shimHeartbeatFresh, spawnDetachedProcess,
+  redactSecrets, resolveProfile, sameSiteGuard, shimHeartbeatFresh, spawnDetachedProcess,
 } from '../lib/settings-routes.js'
 import { Config } from '../lib/index.js'
 
@@ -1004,6 +1004,24 @@ check('★管理员分支走 WMI Win32_Process.Create，且 if/else 之间没有
    * 输出在哪、二维码去哪看——否则用户看到的就是"窗口运行了但什么都没有"（真机反馈过两次）。
    * 注意 `chcp 65001`：不切码页，中文在 cmd 里就是乱码。
    */
+  /**
+   * ★ 隐私（2026-10-06 审计）：NapCat 会把 `[WebUi] WebUi Token: …` 打进启动日志，
+   *   而接口会把日志"最后一行"贴回面板 —— 万一那一刻正好是 token 行，密钥就进了浏览器。
+   *   现在回显前先打码（URL 里的 ?token= 也一起挡）。
+   */
+  check('★回显日志前把密钥打码（NapCat 的 WebUi Token 行不会进面板）',
+    redactSecrets('10-05 23:07 [info] [WebUi] WebUi Token: placeholder-token') === '10-05 23:07 [info] [WebUi] WebUi Token: <已隐藏>'
+    && redactSecrets('User Panel Url: http://127.0.0.1:6099/webui?token=placeholder-token').includes('token=<已隐藏>')
+    && redactSecrets('password: hunter2secret').includes('<已隐藏>')
+    && redactSecrets('10-05 23:07 [info] 等待网络连接...') === '10-05 23:07 [info] 等待网络连接...',
+    redactSecrets('WebUi Token: placeholder-token'))
+  check('★垫片会收紧启动日志的权限（撤掉继承的 Users:(RX)，只留本人+管理员+SYSTEM）',
+    String(planStart.shim?.content ?? '').includes('icacls "')
+    && String(planStart.shim?.content ?? '').includes('/inheritance:r')
+    && String(planStart.shim?.content ?? '').includes('*S-1-5-32-544:F')
+    && String(planStart.shim?.content ?? '').includes('>nul 2>&1'),
+    String(planStart.shim?.content ?? '').split('\r\n').find((l) => l.includes('icacls')) ?? '（垫片里没有 icacls）')
+
   check('★垫片往窗口里写两行指路（输出在哪 / 二维码去哪看），并先切 UTF-8 码页',
     String(planStart.shim?.content ?? '').includes('chcp 65001')
     && String(planStart.shim?.content ?? '').includes('[QQ助手] NapCat 正在启动')

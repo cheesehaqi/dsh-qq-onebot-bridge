@@ -19,6 +19,10 @@ qq-*.csv
 qq-*.md
 qq-*.bin
 qq-*.html
+# 启动垫片（v0.6.3 起：`qq-napcat-launch.cmd`）与批处理类产物：
+# 垫片里有 NapCat 的安装路径，日志里还有它的 WebUI Token（真机上实测出现过）⇒ 一律不进仓库。
+qq-*.cmd
+qq-*.bat
 
 # 明确列出（可读性 + 防止有人用 ! 规则重新包含）
 qq-control.json
