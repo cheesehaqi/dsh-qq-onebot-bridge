@@ -77,8 +77,29 @@
 - **快捷操作排到「相关链接」上面**（用户 2026-10-04："把快捷操作拉到相关链接上边"）：
   面板顶部的顺序现在是 **「快捷操作」→「相关链接」→ 开关分组**（理由也顺：NapCat 没起来时，
   "先把它启动起来"比"点开账号页"更该先看到）。浅渲染加了顺序断言钉住这三点先后。
+- **控制台按钮改名**：`control/` 里「打开 NapCat 扫码页」→「**QQ助手账号**」
   （禁用态文案同步成「QQ助手账号不可用（NapCat 未运行）」），与设置页面板入口同名；
   端口标签也从「NapCat WebUI（扫码）」改成「NapCat WebUI（QQ助手账号 / 扫码）」。
+- 🔴 **真机事故四：快捷操作"点了没反应"的真正总根源 —— `detached: true` 会让子进程压根不执行命令。**
+  这是前几次"点了没反应"背后**共有的**那一层：`spawnDetachedProcess` 一直用
+  `{ detached: true, windowsHide: true, stdio: ['ignore','pipe','pipe'] }` 去起 powershell，
+  而在这台机器（Node 26 + Windows）上，**带 `detached` 时子进程 exit=0、stdout/stderr 全空、命令根本没有执行**
+  （用落盘标记验证过：连标记文件都没生成）；去掉 `detached` 立刻恢复正常。矩阵实测：
+  默认 / 只有管道 / windowsHide+管道 三种形状都拿得到输出，**detached+管道 与 detached+windowsHide+管道 都是"空且未执行"**。
+  当初加 `detached` 是担心子进程随宿主退出被收走——其实**提权那一跳是 AppInfo 服务拉起的**（不在我们的 Job 里），
+  自己那个 powershell 只是发令、一秒内就退出，不需要 detached。现在只保留 `unref()`，并加了一条单测钉死"不许再传 detached"。
+- 🔴 **同一轮还修掉两个"命令发出去了却什么都没发生"的原因**（都靠落盘证据定位，不靠猜）：
+  ① **提权后 `%cd%` 会变成 `C:\Windows\System32`**：`launcher.bat` 是用 `%cd%` 拼自己路径的
+     （`%cd%\NapCatWinBootMain.exe` 等）⇒ 它去找 `System32\NapCatWinBootMain.exe`，报一句
+     `is not recognized...` 就退出。而 `-WorkingDirectory` **不管用**（提权那一跳会把工作目录丢掉）。
+  ② **把复杂内层命令塞进 `cmd /c`、再经 `Start-Process -ArgumentList` 传参时，引号会被打乱**——
+     内层压根不执行，而 powershell 退出码还是 0，界面上完全看不出来。
+  现在改成：插件把脏活写进一个**垫片脚本** `<cwd>\qq-napcat-launch.cmd`
+  （心跳行 + 可选 taskkill + `cd /d` + `call launcher.bat` + 输出重定向到 `<cwd>\qq-napcat-launch.log`），
+  提权命令只做一件事：`cmd.exe /c <垫片路径>`（只传一个纯路径，零嵌套引号）。
+  垫片每一行都可读可审计；失败时日志里有原话，接口还会把日志**最后一行**带进回执。
+  真机端到端实测（走插件自己的路由）：`POST /qqai/napcat/start → ok=true started=true`，
+  垫片日志里有心跳行与 `Administrator mode detected.`，6099 起来、二维码生成。
 - 🔴 **真机事故三：桌面端点「QQ助手账号」没反应（读 `app.asar` 定的案）。**
   桌面端主窗口对"开新窗口"是这么处理的：
   `setWindowOpenHandler(({url}) => { if (["http:","https:"].includes(protocol)) shell.openExternal(url); return { action: "deny" } })`
@@ -96,7 +117,7 @@
 - **顺手修掉一个测试卫生问题**：账号入口原来漏传调用方解析出来的插件根，于是单测里读到了**真机的**
   `qq-control.json`（断言输出里带出了本机 NapCat token）。现在 `pluginRoot` 与 `readFile` 都由调用方注入，
   单测全在临时目录里跑。
-- 新增 67 条断言（`settings-unit` 86 → **153**）：落点形状（`/webui/?token=` + 明文 token）、
+- 新增 72 条断言（`settings-unit` 86 → **159**）：落点形状（`/webui/?token=` + 明文 token）、
   读不到配置时退回裸 `/webui/`、`webui.json` 没有 token 时只给裸地址但端口仍按 `qq-control.json`、
   `GET /qqai/account` → 302、跨站 403、面板载荷不含 token，**「相关链接」的位置与顺序**四条
   （整组在第一个分组之前、账号入口是 `links[0]`、组内顺序 账号→更新日志→调试文档→调试台、账号入口整页只出现一次）、
@@ -110,7 +131,7 @@
   浅渲染：两个按钮 + 禁用态）；
   `control-unit` 里几条把命令形状写死的断言
   （supervisor 侧与控制台接口侧）跟着新的 splatting 写法更新（仍然只有一次 `Start-Process`）。
-  全量 **57 套 / 3821 断言全绿**。
+  全量 **57 套 / 3829 断言全绿**。
 
 ## v0.6.2（2026-10-04）— 功能说明补全 / Every switch explains itself
 

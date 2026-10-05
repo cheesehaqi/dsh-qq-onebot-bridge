@@ -21,7 +21,7 @@ import {
 import { planNapcatAction } from '../lib/napcat-launch.js'
 import {
   argvProfile, consoleStartCommand, mountQqAiPanel, napcatWebUiUrl, panelLinkSources, probePort, profileDirOf,
-  resolveProfile, sameSiteGuard,
+  resolveProfile, sameSiteGuard, spawnDetachedProcess,
 } from '../lib/settings-routes.js'
 import { Config } from '../lib/index.js'
 
@@ -720,30 +720,42 @@ check('面板载荷里**没有** NapCat token（密钥只走 302）',
  * ---- 快捷操作：启动 NapCat / 重新登录（用户："不能自己快捷启动吗？比如加到哪个控制选项中"）----
  * 决策逻辑是纯函数（`planNapcatAction`），执行走注入的 spawnDetached —— 测试**绝不真的拉进程**。
  */
-const planStart = planNapcatAction('start', { bat: 'C:\\NapCat\\bootmain\\launcher.bat', running: false, loaders: [], exists: () => true })
+/**
+ * 一条快捷操作的"有效命令文本" = 提权命令 + 它要执行的垫片脚本内容。
+ * 2026-10-04 起真正的脏活（cd /d、call launcher.bat、taskkill、日志重定向）都在垫片里，
+ * 提权命令只指向垫片路径——所以断言要看这两者合起来，别只看 args。
+ */
+const planText = (plan) => `${(plan.args ?? []).join(' ')}\n${plan.shim?.content ?? ''}`
+
+const planStart = planNapcatAction('start', {
+  bat: 'C:\\NapCat\\bootmain\\launcher.bat', running: false, loaders: [], exists: () => true,
+  logFile: 'C:\\QQAI\\qq-napcat-launch.log', shimFile: 'C:\\QQAI\\qq-napcat-launch.cmd',
+})
 check('快捷启动：没在跑时给出提权启动命令（非管理员分支补 Verb=RunAs）',
-  planStart.ok === true && planStart.args.join(' ').includes("$p.Verb = 'RunAs'")
-  && planStart.args.join(' ').includes('launcher.bat'),
-  planStart.args.join(' ').slice(-140))
+  planStart.ok === true && planText(planStart).includes("$p.Verb = 'RunAs'")
+  && planText(planStart).includes('launcher.bat'),
+  planText(planStart).slice(-140))
 check('快捷启动：已经在跑时不去重复拉一个，并指路「重新登录」',
   planNapcatAction('start', { bat: 'C:\\x\\launcher.bat', running: true, exists: () => true }).ok === false
   && planNapcatAction('start', { bat: 'C:\\x\\launcher.bat', running: true, exists: () => true }).focus === 'relogin')
 const planSwitched = planNapcatAction('start', {
   bat: 'C:\\NapCat\\bootmain\\napcat.bat', running: false, exists: (file) => /launcher\.bat$/i.test(file),
+  shimFile: 'C:\\QQAI\\qq-napcat-launch.cmd', logFile: 'C:\\QQAI\\qq-napcat-launch.log',
 })
 check('快捷启动：配置里写的是 napcat.bat 时自动改用同目录 launcher.bat（并说明原因）',
-  planSwitched.ok === true && planSwitched.args.join(' ').includes('launcher.bat')
+  planSwitched.ok === true && planText(planSwitched).includes('launcher.bat')
   && planSwitched.note.includes('launcher.bat'),
   planSwitched.note)
 const planRelogin = planNapcatAction('relogin', {
   bat: 'C:\\NapCat\\bootmain\\launcher.bat',
   loaders: [{ pid: 4100, name: 'NapCatWinBootMain.exe' }, { pid: 4200, name: 'QQ.exe' }],
   exists: () => true,
+  logFile: 'C:\\QQAI\\qq-napcat-launch.log', shimFile: 'C:\\QQAI\\qq-napcat-launch.cmd',
 })
 check('重新登录：只按加载器 PID 杀（QQ.exe 那个 PID 不在命令里）',
-  planRelogin.ok === true && planRelogin.args.join(' ').includes('taskkill /PID 4100 /T /F')
-  && !planRelogin.args.join(' ').includes('4200'),
-  planRelogin.args.join(' ').slice(-160))
+  planRelogin.ok === true && planText(planRelogin).includes('taskkill /PID 4100 /T /F')
+  && !planText(planRelogin).includes('4200'),
+  planText(planRelogin).slice(-160))
 check('重新登录：拿不到加载器 PID 就拒绝（绝不退回按名杀 QQ）',
   planNapcatAction('relogin', { bat: 'C:\\x\\launcher.bat', loaders: [], exists: () => true }).ok === false
   && planNapcatAction('relogin', { bat: 'C:\\x\\launcher.bat', loaders: [], exists: () => true }).reason.includes('QQ'),
@@ -760,17 +772,56 @@ check('提权命令里有"是否管理员"判断 + 两条分支标记（QAI-ELEV
   planStart.args.join(' ').includes('IsInRole') && planStart.args.join(' ').includes('QAI-ELEVATED')
   && planStart.args.join(' ').includes('QAI-RUNAS') && planStart.args.join(' ').includes("'RunAs'"),
   planStart.args.join(' ').slice(-150))
+check('★提权命令只把**垫片路径**交给 cmd（不允许再塞复杂内层命令 —— 真机上引号会被打乱、压根不执行）',
+  planStart.args.join(' ').includes("ArgumentList = @('/c','C:\\QQAI\\qq-napcat-launch.cmd')")
+  && planStart.args.join(' ').includes('Start-Process @p')
+  && !/&&|>>|taskkill|call "/.test(planStart.args.join(' ')),
+  planStart.args.join(' ').slice(-170))
+
+/**
+ * ★ 2026-10-04 真机总根源的回归：**`detached: true` 会让子进程压根不执行命令**
+ * （Node 26 + Windows 实测：同一命令 detached 时 exit=0、输出全空、落盘标记都没生成；
+ * 去掉它立刻正常）。这里用假 spawnImpl 钉住"绝不能传 detached"。
+ */
+{
+  const seen = []
+  const fakeSpawn = (command, args, options) => {
+    seen.push({ command, args, options })
+    const listeners = {}
+    const child = {
+      pid: 4321,
+      stdout: { on: () => {} },
+      stderr: { on: () => {} },
+      on: () => {},
+      once(event, handler) { listeners[event] = handler; return child },
+      unref: () => {},
+    }
+    setTimeout(() => listeners.exit?.(0), 0)
+    return child
+  }
+  const result = await spawnDetachedProcess({ command: 'powershell.exe', args: ['-NoProfile'], spawnImpl: fakeSpawn, waitMs: 50 })
+  check('★spawnDetachedProcess 不传 detached（传了的话命令根本不会执行 —— 真机总根源）',
+    seen.length === 1 && seen[0].options.detached === undefined && seen[0].options.windowsHide === true
+    && Array.isArray(seen[0].options.stdio) && seen[0].options.stdio[1] === 'pipe' && result.pid === 4321,
+    JSON.stringify({ options: seen[0]?.options, pid: result.pid }))
+  const failed = await spawnDetachedProcess({ command: 'x', spawnImpl: () => { throw new Error('ENOENT 找不到 powershell.exe') }, waitMs: 50 })
+  check('spawnDetachedProcess 把 spawn 抛出的错误如实带回（不静默）',
+    failed.failed === true && String(failed.message).includes('ENOENT'), brief(failed))
+}
 
 // ---- 快捷操作路由：真的会拉起进程，所以 spawn / exec 全部注入（测试绝不动真机）----
 {
   const spawned = []
+  const shims = []
   const actionRoutes = []
   mountQqAiPanel({
     webServer: {
       register(route) { actionRoutes.push(route); return () => { const at = actionRoutes.indexOf(route); if (at >= 0) actionRoutes.splice(at, 1) } },
     },
   }, {
-    profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
+    profile: 'web', config: {}, readFile: readFileSync, env,
+    // 垫片要先落盘再执行 —— 这里把写入内容抓下来（断言"真正执行的脏活"）。
+    writeFile: (file, content, encoding) => { shims.push({ file, content }); return writeFileSync(file, content, encoding) },
     linkSources: { root: napcatRoot },
     probe: async () => false,                                  // 6099 没在听
     exists: (file) => /launcher\.bat$/i.test(file),             // 同目录只有 launcher.bat
@@ -788,15 +839,18 @@ check('提权命令里有"是否管理员"判断 + 两条分支标记（QAI-ELEV
   const startRes = makeResponse()
   await startRoute.handler(fakeRequest('POST', {}, JSON_HEADERS), startRes)
   const startBody = JSON.parse(startRes.out.body)
-  check('POST /qqai/napcat/start 真的拉起了提权进程（用的是 launcher.bat）',
+  check('POST /qqai/napcat/start 写了垫片、并拉起了提权进程（垫片里才是 launcher.bat）',
     startRes.out.status === 200 && startBody.ok === true && startBody.pid === 4242
-    && spawned.length === 1 && spawned[0].args.join(' ').includes('launcher.bat'),
-    brief({ status: startRes.out.status, spawned: spawned.length, reason: startBody.reason?.slice(0, 60) }))
-  check('启动接口回的是人话（含"UAC"与扫码提示），并带回最新面板',
-    startBody.reason.includes('UAC') && startBody.panel?.links?.length > 0, brief(startBody.reason))
+    && spawned.length === 1 && spawned[0].args.join(' ').includes('qq-napcat-launch.cmd')
+    && shims.length === 1 && shims[0].content.includes('launcher.bat')
+    && shims[0].content.includes('cd /d "'),
+    brief({ status: startRes.out.status, spawned: spawned.length, shim: shims[0]?.file }))
+  check('启动接口回的是人话（说自己走的哪条分支 + 扫码提示），并带回最新面板',
+    startBody.reason.includes('管理员') && startBody.reason.includes('扫码') && startBody.panel?.links?.length > 0,
+    brief(startBody.reason))
   check('★启动之后会去确认结果：8 秒内 6099 没起来就如实说"还没起来"（不再盲报成功）',
     startBody.elevated === true && startBody.started === false
-    && startBody.reason.includes('还没起来') && startBody.reason.includes('当前宿主已是管理员'),
+    && startBody.reason.includes('还没起来') && startBody.reason.includes('已是管理员'),
     brief({ elevated: startBody.elevated, started: startBody.started, reason: startBody.reason.slice(0, 80) }))
   check('启动接口拒绝 GET（这是个会拉进程的动作）',
     await (async () => { const r = makeResponse(); await startRoute.handler(fakeRequest('GET'), r); return r.out.status })() === 405)
@@ -810,10 +864,11 @@ check('提权命令里有"是否管理员"判断 + 两条分支标记（QAI-ELEV
   const reloginRes = makeResponse()
   await reloginRoute.handler(fakeRequest('POST', {}, JSON_HEADERS), reloginRes)
   const reloginBody = JSON.parse(reloginRes.out.body)
-  check('POST /qqai/napcat/relogin 只按加载器 PID 清理（假 tasklist 里的 QQ.exe 4200 没被写进命令）',
+  check('POST /qqai/napcat/relogin 只按加载器 PID 清理（假 tasklist 里的 QQ.exe 4200 没被写进垫片）',
     reloginRes.out.status === 200 && reloginBody.ok === true
-    && spawned[1]?.args.join(' ').includes('taskkill /PID 4100')
-    && !spawned[1]?.args.join(' ').includes('4200'),
+    && String(shims[1]?.content ?? '').includes('taskkill /PID 4100')
+    && !String(shims[1]?.content ?? '').includes('4200')
+    && spawned[1]?.args.join(' ').includes('qq-napcat-launch.cmd'),
     brief({ status: reloginRes.out.status, cmd: String(spawned[1]?.args.join(' ')).slice(-90) }))
 
   // 已经在跑时：不重复拉，指路"重新登录"
@@ -859,8 +914,25 @@ check('提权命令里有"是否管理员"判断 + 两条分支标记（QAI-ELEV
   const deniedBody = JSON.parse(denied.out.body)
   check('★提权被拒时：ok=false 且把 powershell 的原话带出来（不再显示假成功）',
     deniedBody.ok === false && deniedBody.started === false
-    && deniedBody.reason.includes('提权失败') && deniedBody.reason.includes('elevation'),
+    && deniedBody.reason.includes('没发出去') && deniedBody.reason.includes('elevation'),
     brief(deniedBody.reason))
+  /**
+   * ★ 2026-10-04 真机根因回归：**提权后 `%cd%` 会变成 `C:\Windows\System32`**，
+   * 而 launcher.bat 用 `%cd%` 拼自己的路径（`%cd%\NapCatWinBootMain.exe` 等）⇒ 它去找
+   * `System32\NapCatWinBootMain.exe`，报一句 "is not recognized..." 就退出，界面上什么都看不到。
+   * 所以命令里必须自己 `cd /d "<脚本目录>"`，并且把输出重定向到日志（隐藏窗口里的报错要留痕）。
+   */
+  check('★启动命令自己 `cd /d` 回脚本目录（提权后 %cd% 会跑到 System32 —— "点了没反应"的根因之一）',
+    planText(planStart).includes('cd /d "C:\\NapCat\\bootmain"') && planText(planStart).includes('launcher.bat'),
+    planText(planStart).slice(-190))
+  check('★启动命令把 launcher 的输出重定向到日志（提权窗口是隐藏的，报错不能没人看见）',
+    planText(planStart).includes('>> "') && planText(planStart).includes('2>&1')
+    && String(planStart.shim?.logFile ?? '').endsWith('.log'),
+    `${planStart.shim?.logFile} ← ${planStart.shim?.content ?? ''}`)
+  check('重新登录的垫片也带 `cd /d`、日志重定向与 taskkill（同一条坑，别只修一半）',
+    planText(planRelogin).includes('cd /d "C:\\NapCat\\bootmain"') && planText(planRelogin).includes('>> "')
+    && planText(planRelogin).includes('taskkill /PID 4100'),
+    planText(planRelogin).slice(-160))
   const nonzero = []
   mountQqAiPanel({
     webServer: { register(route) { nonzero.push(route); return () => { const at = nonzero.indexOf(route); if (at >= 0) nonzero.splice(at, 1) } } },

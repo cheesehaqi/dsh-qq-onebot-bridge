@@ -452,7 +452,11 @@ const openThrows = openPanel(panelUrl, { browser: 'C:/Edge/msedge.exe', spawnImp
 check('openPanel 启动失败安全返回', openThrows.ok === false && openThrows.mode === 'app')
 
 // ---- v0.5.6：提权启动 / 登录流程重启 / 二维码（纯函数 + 护栏） ----
-const launch = napcatLaunchCommand('C:\\NapCat\\bootmain\\launcher.bat')
+// 2026-10-04 起：真正的"脏活"（cd /d、call launcher.bat、taskkill、日志重定向）写进**垫片脚本**，
+// 提权命令只执行垫片一个路径。所以断言要看"命令 + 垫片内容"合起来（shimText），别只看 args。
+const SHIM = 'C:\\QQAI\\qq-napcat-launch.cmd'
+const shimText = (plan) => `${(plan.args ?? []).join(' ')}\n${plan.shim?.content ?? ''}`
+const launch = napcatLaunchCommand('C:\\NapCat\\bootmain\\launcher.bat', { shimFile: SHIM, logFile: 'C:\\QQAI\\qq-napcat-launch.log' })
 check('napcatLaunchCommand 用 PowerShell 提权启动', launch.ok === true && launch.command === 'powershell.exe' && launch.args.includes('-Command'), JSON.stringify(launch))
 // 2026-10-04 起：命令先判断自己是不是管理员——已经是就直起（RunAs 在管理员进程里不会弹 UAC），
 // 不是才补 Verb='RunAs'。所以这里断言"确实会提权 + 两条分支各有标记"，而不是字面量 `-Verb RunAs`。
@@ -460,49 +464,54 @@ check('napcatLaunchCommand 会提权（非管理员分支补 Verb=RunAs），并
   launch.args.join(' ').includes("$p.Verb = 'RunAs'") && launch.args.join(' ').includes('QAI-RUNAS')
   && launch.args.join(' ').includes('QAI-ELEVATED') && launch.args.join(' ').includes('IsInRole'),
   launch.args.join(' ').slice(-180))
-check('napcatLaunchCommand 目标脚本用 call + 引号包住（括号路径不会被 cmd 剥引号）',
-  launch.args.join(' ').includes('call \\"C:\\\\NapCat\\\\bootmain\\\\launcher.bat\\"') || launch.args.join(' ').includes('call "C:\\NapCat\\bootmain\\launcher.bat"'),
-  launch.args.join(' ').slice(0, 220))
-check('napcatLaunchCommand 指定工作目录为脚本所在目录',
-  launch.args.join(' ').includes("WorkingDirectory = 'C:\\NapCat\\bootmain'"), launch.args.join(' ').slice(-200))
-check('napcatLaunchCommand 用 @() 数组传参（不走裸 /c,\'"path"\' 那条会被剥引号的写法）',
-  launch.args.join(' ').includes("@('/c',") && !launch.args.join(' ').includes("-ArgumentList '/c'"),
-  launch.args.join(' ').slice(0, 220))
+check('★提权命令只把垫片路径交给 cmd（不允许再塞复杂内层命令 —— 真机上引号会被打乱、压根不执行）',
+  launch.args.join(' ').includes(`ArgumentList = @('/c','${SHIM}')`) && !/&&|>>|taskkill|call "/.test(launch.args.join(' ')),
+  launch.args.join(' ').slice(-170))
+check('napcatLaunchCommand 垫片里用 call + 引号包住（括号路径不会被 cmd 剥引号）',
+  shimText(launch).includes('call "C:\\NapCat\\bootmain\\launcher.bat"'), shimText(launch))
+check('napcatLaunchCommand 垫片里先 cd /d 到脚本所在目录（提权后 %cd% 会跑到 System32）',
+  shimText(launch).includes('cd /d "C:\\NapCat\\bootmain"'), shimText(launch))
+check('napcatLaunchCommand 垫片里把输出重定向到日志（提权窗口是隐藏的，报错要留痕）',
+  shimText(launch).includes('>> "C:\\QQAI\\qq-napcat-launch.log" 2>&1'), shimText(launch))
 check('napcatLaunchCommand 空路径 → 明确拒绝', napcatLaunchCommand('').ok === false && napcatLaunchCommand('').reason.includes('napcatBat'))
+check('napcatLaunchCommand 没给垫片路径 → 明确拒绝（不许退回"复杂命令直接传"那条踩过的路）',
+  napcatLaunchCommand('C:\\NapCat\\bootmain\\launcher.bat').ok === false
+  && napcatLaunchCommand('C:\\NapCat\\bootmain\\launcher.bat').reason.includes('shimFile'))
 
-const restart = napcatRestartCommand('C:\\NapCat\\bootmain\\launcher.bat', [11460, 11461])
+const restart = napcatRestartCommand('C:\\NapCat\\bootmain\\launcher.bat', [11460, 11461], { shimFile: SHIM, logFile: 'C:\\QQAI\\qq-napcat-launch.log' })
 check('napcatRestartCommand 按 PID 清理（不发 taskkill /IM）',
-  restart.ok === true && restart.args.join(' ').includes('taskkill /PID 11460 /T /F') && restart.args.join(' ').includes('taskkill /PID 11461 /T /F'),
-  restart.args.join(' ').slice(0, 240))
+  restart.ok === true && shimText(restart).includes('taskkill /PID 11460 /T /F') && shimText(restart).includes('taskkill /PID 11461 /T /F'),
+  shimText(restart).slice(0, 240))
 // 审查 S1 的核心回归：绝不能按镜像名杀 QQ —— 那会把用户自己开着的 QQ 一起杀掉
-check('绝不出现 taskkill /IM（按名杀会误杀个人 QQ）', !/taskkill \/F \/IM|taskkill \/IM/.test(restart.args.join(' ')), restart.args.join(' ').slice(0, 240))
-check('绝不出现 QQ.exe 字样', !/QQ\.exe/i.test(restart.args.join(' ')), restart.args.join(' ').slice(0, 200))
+check('绝不出现 taskkill /IM（按名杀会误杀个人 QQ）', !/taskkill \/F \/IM|taskkill \/IM/.test(shimText(restart)), shimText(restart).slice(0, 240))
+check('绝不出现 QQ.exe 字样', !/QQ\.exe/i.test(shimText(restart)), shimText(restart).slice(0, 200))
 check('加载器名单只含 NapCat 系进程，不含 QQ',
   NAPCAT_LOADER_NAMES.every((name) => !/^qq\.exe$/i.test(name)) && NAPCAT_LOADER_NAMES.some((name) => name.includes('napcat')),
   JSON.stringify(NAPCAT_LOADER_NAMES))
 check('restartNapcatCommand 没有 PID 时拒绝执行（不退回按名杀）',
-  napcatRestartCommand('C:\\NapCat\\launcher.bat', []).ok === false
-  && napcatRestartCommand('C:\\NapCat\\launcher.bat', []).reason.includes('PID'),
-  napcatRestartCommand('C:\\NapCat\\launcher.bat', []).reason)
-check('napcatRestartCommand 清理后仍会启动 launcher.bat', restart.args.join(' ').includes('call "C:\\NapCat\\bootmain\\launcher.bat"'))
-// 回归：清理与启动必须在**同一个提权进程**里，否则非提权的 taskkill 杀不掉由提权 launcher 拉起的 QQ
-const restartScript = restart.args.join(' ')
-check('清理与启动在同一个提权命令里（不是只把启动提权）',
-  restartScript.includes("$p = @{ FilePath = 'cmd.exe'") && restartScript.includes("'/c'")
-  && restartScript.indexOf('taskkill') < restartScript.indexOf('launcher.bat'),
-  restartScript.slice(0, 240))
+  napcatRestartCommand('C:\\NapCat\\launcher.bat', [], { shimFile: SHIM }).ok === false
+  && napcatRestartCommand('C:\\NapCat\\launcher.bat', [], { shimFile: SHIM }).reason.includes('PID'),
+  napcatRestartCommand('C:\\NapCat\\launcher.bat', [], { shimFile: SHIM }).reason)
+check('napcatRestartCommand 清理后仍会启动 launcher.bat', shimText(restart).includes('call "C:\\NapCat\\bootmain\\launcher.bat"'))
+// 回归：清理与启动必须落在**同一个提权进程**里（都写在同一个垫片里），否则非提权的 taskkill 杀不掉提权拉起的 QQ
+const restartShim = restart.shim.content
+check('清理与启动在同一个垫片里（不是只把启动提权）',
+  restartShim.indexOf('taskkill') < restartShim.indexOf('launcher.bat')
+  && restartShim.includes('cd /d "C:\\NapCat\\bootmain"'),
+  restartShim.slice(0, 240))
 check('提权命令里只有一次 Start-Process（不会"没杀掉又拉一个"）',
-  (restartScript.match(/Start-Process /g) ?? []).length === 1, String((restartScript.match(/Start-Process /g) ?? []).length))
+  ((restart.args.join(' ').match(/Start-Process /g) ?? []).length) === 1, String((restart.args.join(' ').match(/Start-Process /g) ?? []).length))
 // 审查 G1/G2：cmd 的引号剥离规则 + PowerShell 单引号转义
-const launchScript = launch.args.join(' ')
 check('启动命令用 call "<path>"（括号路径不会被 cmd 剥引号）',
-  launchScript.includes("call \\\"C:\\\\NapCat\\\\bootmain\\\\launcher.bat\\\"") || launchScript.includes('call "C:\\NapCat\\bootmain\\launcher.bat"'),
-  launchScript.slice(0, 220))
-check('启动命令用 @() 数组传参（不是裸的 \'/c\',\'"path"\'）',
-  launchScript.includes("@('/c',") && !launchScript.includes("-ArgumentList '/c','\""), launchScript.slice(0, 220))
-const quoted = napcatLaunchCommand("D:\\O'Brien\\napcat.bat")
+  launch.shim.content.includes('call "C:\\NapCat\\bootmain\\launcher.bat"'), launch.shim.content)
+check('提权命令里的 /c 只带垫片路径（内层命令一律走垫片文件，别塞回命令行）',
+  launch.args.join(' ').includes(`@('/c','${SHIM}')`) && !launch.args.join(' ').includes('&&')
+  && !launch.args.join(' ').includes('2>&1'), launch.args.join(' ').slice(0, 240))
+const quoted = napcatLaunchCommand("D:\\O'Brien\\napcat.bat", { shimFile: "D:\\O'Brien\\qq-napcat-launch.cmd" })
 check('路径含单引号时 PowerShell 单引号成对转义（否则脚本解析失败）',
-  quoted.ok === true && quoted.args[4].includes("'D:\\O''Brien'"), quoted.args[4].slice(0, 200))
+  quoted.ok === true && quoted.args[4].includes("D:\\O''Brien\\qq-napcat-launch.cmd")
+  && quoted.shim.content.includes("cd /d \"D:\\O'Brien\""),
+  `${quoted.args[4].match(/FilePath = .*?;/)?.[0]} ｜ ${quoted.shim.content.split('\r\n')[2]}`)
 check('restartNapcatLogin 是 supervisor 的方法', typeof createSupervisor({ ...config, cwd: dir, napcatBat: 'C:\\NapCat\\bootmain\\launcher.bat' }, {}).restartNapcatLogin === 'function')
 check('napcatRestartCommand 空路径 → 拒绝', napcatRestartCommand('').ok === false)
 
