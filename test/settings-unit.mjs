@@ -731,8 +731,8 @@ const planStart = planNapcatAction('start', {
   bat: 'C:\\NapCat\\bootmain\\launcher.bat', running: false, loaders: [], exists: () => true,
   logFile: 'C:\\QQAI\\qq-napcat-launch.log', shimFile: 'C:\\QQAI\\qq-napcat-launch.cmd',
 })
-check('快捷启动：没在跑时给出提权启动命令（非管理员分支补 Verb=RunAs）',
-  planStart.ok === true && planText(planStart).includes("$p.Verb = 'RunAs'")
+check('快捷启动：没在跑时给出提权启动命令（两条分支都套 RunAs —— 才能脱离宿主进程树）',
+  planStart.ok === true && planText(planStart).includes("Verb = 'RunAs'")
   && planText(planStart).includes('launcher.bat'),
   planText(planStart).slice(-140))
 check('快捷启动：已经在跑时不去重复拉一个，并指路「重新登录」',

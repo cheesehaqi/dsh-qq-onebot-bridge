@@ -100,6 +100,10 @@
   垫片每一行都可读可审计；失败时日志里有原话，接口还会把日志**最后一行**带进回执。
   真机端到端实测（走插件自己的路由）：`POST /qqai/napcat/start → ok=true started=true`，
   垫片日志里有心跳行与 `Administrator mode detected.`，6099 起来、二维码生成。
+  ⚠️ **一个已知边界**（真机实测，别误以为 RunAs 能"脱离宿主"）：宿主本来就是管理员时，RunAs 不需要提权、
+  也就不经 AppInfo，加载器仍是宿主的子孙 ⇒ **宿主一退出，NapCat 会跟着一起死**。
+  想真正脱离得另找宿主外的启动者（计划任务 / WMI `Win32_Process.Create`）——留作后续可选项；
+  当前行为下**宿主重启后点一次「启动 NapCat」**即可。
 - 🔴 **真机事故三：桌面端点「QQ助手账号」没反应（读 `app.asar` 定的案）。**
   桌面端主窗口对"开新窗口"是这么处理的：
   `setWindowOpenHandler(({url}) => { if (["http:","https:"].includes(protocol)) shell.openExternal(url); return { action: "deny" } })`

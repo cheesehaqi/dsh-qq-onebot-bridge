@@ -458,10 +458,11 @@ const SHIM = 'C:\\QQAI\\qq-napcat-launch.cmd'
 const shimText = (plan) => `${(plan.args ?? []).join(' ')}\n${plan.shim?.content ?? ''}`
 const launch = napcatLaunchCommand('C:\\NapCat\\bootmain\\launcher.bat', { shimFile: SHIM, logFile: 'C:\\QQAI\\qq-napcat-launch.log' })
 check('napcatLaunchCommand 用 PowerShell 提权启动', launch.ok === true && launch.command === 'powershell.exe' && launch.args.includes('-Command'), JSON.stringify(launch))
-// 2026-10-04 起：命令先判断自己是不是管理员——已经是就直起（RunAs 在管理员进程里不会弹 UAC），
-// 不是才补 Verb='RunAs'。所以这里断言"确实会提权 + 两条分支各有标记"，而不是字面量 `-Verb RunAs`。
-check('napcatLaunchCommand 会提权（非管理员分支补 Verb=RunAs），并标出分支',
-  launch.args.join(' ').includes("$p.Verb = 'RunAs'") && launch.args.join(' ').includes('QAI-RUNAS')
+// 2026-10-04 起：**两条分支都套 `Verb='RunAs'`**——不只是为了提权，更因为 RunAs 会把进程从我们的
+// 进程树里摘出去（AppInfo 拉起），否则宿主一退出 NapCat 会被一起带走（真机踩过）。
+// 标记（QAI-ELEVATED / QAI-RUNAS）现在只表示"宿主本来是不是管理员"。
+check('napcatLaunchCommand 会提权（RunAs）并标出宿主分支',
+  launch.args.join(' ').includes("Verb = 'RunAs'") && launch.args.join(' ').includes('QAI-RUNAS')
   && launch.args.join(' ').includes('QAI-ELEVATED') && launch.args.join(' ').includes('IsInRole'),
   launch.args.join(' ').slice(-180))
 check('★提权命令只把垫片路径交给 cmd（不允许再塞复杂内层命令 —— 真机上引号会被打乱、压根不执行）',
