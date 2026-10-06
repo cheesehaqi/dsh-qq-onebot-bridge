@@ -1,192 +1,104 @@
 # 更新日志 / Changelog
-
 ## v0.6.3（2026-10-06）— 账号入口 + 面板里一键启动 NapCat / Account entry & one-click NapCat launch
 
-> 承接 v0.6.2 之后真机追问："控制台那个「打开扫码页」到底在哪、DSH 设置页里怎么没有账号登录？"
-> ——面板底部原来只有「更新日志 / 调试文档 / 调试台」三个入口，**机器人账号本身反倒没有入口**，
-> 而 NapCat 的 WebUI 又因为自带 token，直接甩一个 `127.0.0.1:6099` 过去只会看到「token 无效」。
+### 新增
 
-- **DSH 设置页 · 「QQ助手」面板新增「相关链接」组，整组放在最上边**，第一条就是
-  **「QQ助手账号（登录 / 扫码）」**。
-  位置是用户 2026-10-04 当晚**七条指示**才定下来的（前三条我都理解偏了；后面几条是在这组内部来回挪，
-  一并记在这里免得再动）：
-  ① "应该把账号登陆调到最上方"（我先只把账号那一条放到底部「相关链接」的第一位）→
-  ② "**不对不对应该在QQ助手的下边**"（我把它拆成独立一段、挪到标题下面，底部另留三条）→
-  ③ "**还是挪回到之前的位置吧，直接把相关链接整体拉到最上边**"（⇒ 收回拆分，整组一条不拆、整组挪到标题正下方）→
-  ④ "**再把调试台和更新日志换一下位置**" →
-  ⑤ "更新日志改到相关链接的最底下" →
-  ⑥ "嗯，还是把更新日志位置改回去吧" →
-  ⑦ "**调试台改到调试文档下方**"。
-  **最终口径**：`account → changelog → readme-debug → console`（账号第一、**调试台压在最底下**），
-  整组渲染在标题正下方、开关分组之前
-  （客户端组件从 `Footer` 改名为 `Links`、位置从末尾挪到 `qqai-head` 之后；载荷里没有额外的 `account`
-  字段，账号入口就是 `links[0]`）。浅渲染三条断言钉住：整组在第一个分组之前、组内顺序（账号→更新日志→调试文档→调试台）、
-  账号入口整页只出现一次（防"组里 + 页脚各来一条"）。
-  它指向宿主自己的 **`GET /qqai/account`**：服务端读 `bootmain/config/webui.json` 里的 token 后
-  **302 到 `http://127.0.0.1:<port>/webui/?token=<token>`**，点开就是已登录的 NapCat 页面，
-  **不用手抄密钥**。token 仍然**不进面板载荷**（与调试台入口同一条规矩：密钥只在 302 的 Location 里出现，
-  面板 JSON 里断言不含 token）。
-- **这个落点不是猜的**：读 NapCat 4.18.28 的前端 bundle（`static/assets/web_login-iVdMgBJV.js`）确认流程是
-  「`location.search` 取 `token` → 有就自动登录 → `SHA256(token + ".napcat")` → `POST /api/auth/login`
-  `{hash, totpCode}` → 存 `localStorage["token"]` → 之后 `Authorization: Bearer …`」；
-  再对本机 6099 实测：`/webui/?token=` 直接 200 出 SPA、`POST /api/auth/login {hash}` 返回
-  `{code:0,data:{Credential}}`、带该凭据调 `/api/auth/check` 返回 `success`。
-  因此**不需要**我们先算 hash，前端自己会算；落点必须**带尾斜杠**（`/webui` 会先吃一个 301）。
-  控制台侧的 `napcatWebui()` 也一并改成同一个形状（`/webui/?token=`），两边不再各写一种。
-- **账号入口有两道闸**（它会**把带 token 的地址交出去**，不能只靠"本机端口"）：① 只允许回环来源；
-  ② 同源守卫（`sameSiteGuard`）——否则任意第三方页面拿 `<a href>` 指过来就能把 token 读走。
-- 🔴 **真机事故：「点击账号没反应」——同源守卫把浏览器的正常点击判成了"来源不明"，返回 403。**
-  两个独立原因，都修了：
-  ① **守卫的"没有 Origin"分支写窄了**：浏览器点 `<a href="/qqai/account">` 发的是
-  **`Sec-Fetch-Site: same-origin` + 完全没有 `Origin`**（导航请求本来就不带 Origin），
-  而那条分支只放行 `''` 与 `none`，于是**正常点击 → 403**
-  （`{"ok":false,"reason":"拒绝来源不明的请求（sec-fetch-site: same-origin）"}`）。
-  这个坑**从 v0.6.0 就在**：面板里的「调试台」按钮同样是导航请求，也就是说**它一直点不动**，
-  只是没人点过。现在放行 `same-origin` / `none` / 空三种（语义都是"浏览器担保同源"或"用户自己敲的地址"），
-  仍然拒 `cross-site` 与 `same-site`（同站不同端口，比如本机别的服务）。
-  **为什么之前没测出来**：我的 smoke 手动补了 `Origin` 头，正好从另一条分支出去 —— 现在测试里
-  **专门构造真实浏览器的导航请求头**（`sec-fetch-site: same-origin`、`sec-fetch-mode: navigate`、**无 Origin**）
-  逐个钉死：导航 → 302 / 200、地址栏直达 → 302、curl → 302、`same-site` → 403、`cross-site` → 403。
-  ② **只有那行蓝色标签是链接**：右边那段灰色说明是普通 `<span>`，点在说明文字上什么都不会发生。
-  现在**整行是一个 `<a>`**（标签 + 状态 + 说明都在里面），点哪儿都能进，`cursor:pointer` + 悬停才出下划线。
-- **新增「快捷操作」：面板里直接启动 NapCat**（用户 2026-10-04："不能自己快捷启动吗？比如加到哪个控制选项中"）——
-  以前只能自己去右键"以管理员身份运行 launcher.bat"，而这台机器上**双击自提权是静默失败的**。
-  现在面板「相关链接」下面多一行：**`启动 NapCat`** 与 **`重新登录（扫码）`**，外加实时状态
-  `NapCat：运行中（127.0.0.1:6099）/ 未运行`（面板载荷新增 `napcat: { running, port }`，客户端据此禁用按钮）。
-  点一下 POST 到 `/qqai/napcat/start`（或 `/qqai/napcat/relogin`），服务端拉起提权进程。
-  三条硬规矩全部复用控制台那套（新增 `lib/napcat-launch.js`，控制台与面板**共用一份**，坑不再各踩一次）：
-  ① 必须提权（非提权的 launcher.bat 实测秒退）；② **启动脚本优先挑同目录的 `launcher.bat`**——
-  配置里这台机器写的是 `napcat.bat`，它只是 `NapCatWinBootMain.exe` + `pause`（不设 `NAPCAT_*`、不解析 QQ 路径），
-  实测秒退什么都不做，**控制台的「启动 NapCat」也一并跟着修好了**；
-  ③ 重新登录**只按加载器 PID** `/T /F`（拿不到 PID 就拒绝），绝不按镜像名杀——那会连用户自己的 QQ 一起杀掉。
-  安全口径：这是特权动作，三道门都要过（POST + `application/json`、同源守卫、只允许回环来源），
-  且 `ok:false` 的回执（"已经在运行了""没找到加载器"）当**解释**原样显示，不当异常抛掉。
-- 🔴 **真机事故二：「点了按钮，没有 UAC 弹窗，也没反应」**——两个原因，都修了：
-  ① **提权命令写死了 `-Verb RunAs`，但没考虑"宿主本来就是管理员"**：这台机器上宿主是从管理员终端起的
-     （真机实测 `am I admin: True`），管理员进程里 `Start-Process -Verb RunAs` **根本不弹 UAC**、直接执行——
-     用户看不到弹窗，以为没反应（其实 NapCat 已经起来了，实测 6099 立刻在听、`QQ.exe` 的父进程正是
-     `NapCatWinBootMain.exe`，即"NapCat 自己拉起 QQ"的正确形态）。
-     现在命令先 `IsInRole(Administrator)` 判断：**已是管理员 → 直接起（不打搅你）；不是 → 才补 `Verb='RunAs'`**，
-     两条分支各打一个标记（`QAI-ELEVATED` / `QAI-RUNAS`），接口把这个事实一并回给界面。
-  ② **旧实现把子进程输出丢了（`stdio: 'ignore'`），于是"提权被静默拒绝"时还显示"已请求启动"——假成功。**
-     真机现场：从资源管理器双击开的**桌面端不是管理员**，它发 `-Verb RunAs` 被这台机器静默拒绝，
-     powershell 立刻非零退出、什么都没发生，而面板照样说"已请求提权启动"。
-     现在 `spawnDetachedProcess` **抓 stdout/stderr、等它退出**，非零退出码/失败一律 `ok:false` 并把
-     powershell 的原话（如"此操作需要提升权限"）带给用户；成功时还会**等最多 8 秒去看 6099 到底起没起来**，
-     如实回"已经起来了"或"还没起来（多半是 QQ 没登录/已有别的 QQ 在跑）"——不再有静默分支。
-- **账号入口旁边补了前提说明**（用户 2026-10-04："这旁边加一个描述，比如需要先运行 NapCat"）：
-  那行说明现在是「机器人账号的扫码 / 登录状态页；**需要先运行 NapCat**（没起来就点上面的「启动 NapCat」），
-  点开就是带 token 的地址，不用手输」——免得点进去只看到连不上还不知道先该干什么。
-  顺带把**链接行的说明也走 `richText`**（以前只有开关说明会解析 `**加粗**`，链接的说明会把星号原样显示出来）。
-- **🔴 面板里直接内嵌二维码**（用户连着两次："没弹出二维码啊"）：那道码本来只印在 NapCat 自己的控制台里，
-  而我们的启动垫片把输出重定向进了日志 ⇒ 用户看到的窗口是**空的**，自然"没有二维码"。
-  现在新增 `GET /qqai/napcat/qr`（只允许回环 + 同源）把 `cache/qrcode.png` 直接交给页面，
-  面板载荷多了 `napcat.qr = { fresh, ageSeconds, url }`（**超过 5 分钟就不算新鲜**，跟着控制台 `QR_STALE_SECONDS` 的口径），
-  新鲜时「快捷操作」下面直接显示 176×176 的二维码 + 「刷新二维码」按钮，过期就自动收起并提示去点「重新登录」。
-- **🔒 隐私收紧（用户 2026-10-06："最终检测一波，排除BUG，还有尤其是隐私类的"）**：
-  ① **面板不再回显密钥**：NapCat 会把 `[WebUi] WebUi Token: …` 打进启动日志，而这个日志的"最后一行"
-     会被贴回面板 —— 万一那一刻正好是 token 行，密钥就进了浏览器（截图/录屏就跟着出去了）。
-     现在回显前统一打码（"键名+值"与 URL 里的 `?token=` 两种形态），并有断言钉住。
-  ② **收紧启动日志权限**：工作目录下的文件默认带 `BUILTIN\Users:(RX)`，本机任何账户都能读到那个能登录
-     NapCat 面板的 token（真机实测确认）。垫片现在会 `icacls /inheritance:r` 只留「当前用户 + Administrators + SYSTEM」，
-     失败也不影响启动。
-  ③ **仓库里不再出现机器人真昵称**：审计发现**机器人账号的真实昵称**曾出现在
-     `lib/onebot.js` 注释、`test/ops-bridge-unit.mjs` 用例与 CHANGELOG 里，**并且已经推到 GitHub**；
-     已全部换成中性占位「机器人昵称」。
-  ④ **新增两道自动闸**：把真机日志片段（桥的收信行 / NapCat 的 token 行 / WebUI 地址行 / NapCat 的运行日志片段）
-     列为禁止形状；私有昵称有三个来源——`DSH_QQ_PRIVATE_NICKNAMES` 环境变量、本机 profile 配置、
-     以及**本机私有文件** `<cwd>/qq-private-nicknames.txt`（一行一个，落在 `qq-*.txt` 忽略规则下）。
-     本机实测第一版只认前两者时返回**空集**，等于这道闸在本机根本不设防（真昵称就是这么漏进仓库的）——
-     加了文件来源之后，本机跑一次就会拿真昵称去比对仓库。
-     这两道闸上线当场就抓到**我自己刚写进源码与测试里的真 token**，已改成假值。
-  ⑤ `.gitignore` 补上 `qq-*.cmd` / `qq-*.bat`（垫片里有 NapCat 安装路径，日志里有 token）。
-  ✅ 复查结论：**密钥与真实 QQ 号从未进过任何提交**（工作树 / 已推送的 `origin/main` / 全历史 `-S` 搜索三处都干净），
-  `qq-control.json` 从未被跟踪、且被 `.gitignore` 覆盖。
-- **「启动 NapCat」旁边写明接下来会发生什么，并且二维码会自己出现**（用户 2026-10-04：
-  "应该在启动旁边加个提示，比如过会会出现二维码，而不是什么也没有"）：
-  按钮旁那句状态现在分三种——未运行「点「启动 NapCat」后等几秒，二维码会出现在下面」、
-  请求中「正在启动 NapCat…等几秒，二维码会出现在下面」、运行中「NapCat：运行中（…）· 二维码 N 秒前刷新」。
-  另外那个 cmd 窗口也不再是空的：垫片先 chcp 65001 再往窗口里写两行指路（输出写去了哪个日志、二维码在面板哪里看），\n  免得「窗口运行了但什么都没有」（用户反馈过两次）。\n  而且不只是提示：启动/重启**成功后开始盯二维码**（每 3 秒刷一次面板），
-  图一写出来就自动显示在下面并提示去扫；90 秒还没等到就停下说一句人话，不留用户对着空白发呆。
-- 🔴 **真机事故五：点「刷新二维码」整页白屏**（用户 2026-10-04："为啥点击刷新二维码会白屏"）——
-  **是我自己刚写进去的 bug**：那个刷新处理器写成 `setState({ qrStamp: Date.now() })`（**整对象替换**），
-  把 `data` 一起清掉了；下一帧渲染读 `data.napcat` 直接抛错，React 把整棵树卸掉 ⇒ 一片白，
-  连"哪里错了"都看不见。两层修法：
-  ① 改成函数式更新 `setState((prev) => ({ ...prev, qrStamp }))`（只动时间戳，保留 `data`），
-     `load()` 也改成保留 `qrStamp` 而不是整对象覆盖；
-  ② **面板外面套一层渲染边界 `PanelBoundary`**（React 的错误边界只能是 class 组件）——
-     以后这个插件再有渲染异常，面板位置只显示「QQ助手面板渲染出错：…」+ 重试按钮，**不会再拖白整个设置页**。
-  测试桩也跟着补了 `React.Component`，浅渲染器改成 `new` 出 class 组件再走 `render()`。
-- 🔴 **真机事故六：`重新登录` 报了成功，其实什么都没发生**（我自己在验证二维码时抓到的）——
-  判据用了「6099 在听」，而 NapCat 本来就在跑时这条**永远为真**；实际那次提权那一跳被系统悄悄拦下、
-  垫片根本没执行（日志里没有新的心跳行、加载器 PID 也没变）。两处修：
-  ① **成功判据改成"垫片心跳"**：垫片自己写的 `=== shim start … ===` 是"命令真的落地了"的唯一可靠证据，
-     没有新心跳就 `ok:false` 并明说「这次点击什么都没发生」；
-  ② **管理员宿主改走 WMI `Win32_Process.Create`**（真机上 `-Verb RunAs` 在已是管理员的宿主里
-     偶尔静默不执行）；顺带的好处是进程由 WmiPrvSE 拉起、**脱离宿主进程树**（宿主重启不再把 NapCat 带走），
-     非管理员宿主仍走 RunAs（AppInfo 拉起，同样是脱离的）。
-- **快捷操作排到「相关链接」上面**（用户 2026-10-04："把快捷操作拉到相关链接上边"）：
-  面板顶部的顺序现在是 **「快捷操作」→「相关链接」→ 开关分组**（理由也顺：NapCat 没起来时，
-  "先把它启动起来"比"点开账号页"更该先看到）。浅渲染加了顺序断言钉住这三点先后。
-- **控制台按钮改名**：`control/` 里「打开 NapCat 扫码页」→「**QQ助手账号**」
-  （禁用态文案同步成「QQ助手账号不可用（NapCat 未运行）」），与设置页面板入口同名；
-  端口标签也从「NapCat WebUI（扫码）」改成「NapCat WebUI（QQ助手账号 / 扫码）」。
-- 🔴 **真机事故四：快捷操作"点了没反应"的真正总根源 —— `detached: true` 会让子进程压根不执行命令。**
-  这是前几次"点了没反应"背后**共有的**那一层：`spawnDetachedProcess` 一直用
-  `{ detached: true, windowsHide: true, stdio: ['ignore','pipe','pipe'] }` 去起 powershell，
-  而在这台机器（Node 26 + Windows）上，**带 `detached` 时子进程 exit=0、stdout/stderr 全空、命令根本没有执行**
-  （用落盘标记验证过：连标记文件都没生成）；去掉 `detached` 立刻恢复正常。矩阵实测：
-  默认 / 只有管道 / windowsHide+管道 三种形状都拿得到输出，**detached+管道 与 detached+windowsHide+管道 都是"空且未执行"**。
-  当初加 `detached` 是担心子进程随宿主退出被收走——其实**提权那一跳是 AppInfo 服务拉起的**（不在我们的 Job 里），
-  自己那个 powershell 只是发令、一秒内就退出，不需要 detached。现在只保留 `unref()`，并加了一条单测钉死"不许再传 detached"。
-- 🔴 **同一轮还修掉两个"命令发出去了却什么都没发生"的原因**（都靠落盘证据定位，不靠猜）：
-  ① **提权后 `%cd%` 会变成 `C:\Windows\System32`**：`launcher.bat` 是用 `%cd%` 拼自己路径的
-     （`%cd%\NapCatWinBootMain.exe` 等）⇒ 它去找 `System32\NapCatWinBootMain.exe`，报一句
-     `is not recognized...` 就退出。而 `-WorkingDirectory` **不管用**（提权那一跳会把工作目录丢掉）。
-  ② **把复杂内层命令塞进 `cmd /c`、再经 `Start-Process -ArgumentList` 传参时，引号会被打乱**——
-     内层压根不执行，而 powershell 退出码还是 0，界面上完全看不出来。
-  现在改成：插件把脏活写进一个**垫片脚本** `<cwd>\qq-napcat-launch.cmd`
-  （心跳行 + 可选 taskkill + `cd /d` + `call launcher.bat` + 输出重定向到 `<cwd>\qq-napcat-launch.log`），
-  提权命令只做一件事：`cmd.exe /c <垫片路径>`（只传一个纯路径，零嵌套引号）。
-  垫片每一行都可读可审计；失败时日志里有原话，接口还会把日志**最后一行**带进回执。
-  真机端到端实测（走插件自己的路由）：`POST /qqai/napcat/start → ok=true started=true`，
-  垫片日志里有心跳行与 `Administrator mode detected.`，6099 起来、二维码生成。
-  ⚠️ **一个已知边界**（真机实测，别误以为 RunAs 能"脱离宿主"）：宿主本来就是管理员时，RunAs 不需要提权、
-  也就不经 AppInfo，加载器仍是宿主的子孙 ⇒ **宿主一退出，NapCat 会跟着一起死**。
-  想真正脱离得另找宿主外的启动者（计划任务 / WMI `Win32_Process.Create`）——留作后续可选项；
-  当前行为下**宿主重启后点一次「启动 NapCat」**即可。
-- 🔴 **真机事故三：桌面端点「QQ助手账号」没反应（读 `app.asar` 定的案）。**
-  桌面端主窗口对"开新窗口"是这么处理的：
-  `setWindowOpenHandler(({url}) => { if (["http:","https:"].includes(protocol)) shell.openExternal(url); return { action: "deny" } })`
-  ——**只有 http(s) 外链会被丢给系统浏览器，其余一律拒绝**。而面板里的账号/调试台入口是**相对地址**
-  （`/qqai/account`），在桌面端（渲染基址 `dsh-app://app/`）解析出来是 `dsh-app://app/qqai/account`：
-  协议不是 http(s)、又不许开 Electron 窗口 ⇒ **什么都没发生**（平台自己的链接都是绝对 http(s)，所以它们能开）。
-  修法：两个入口都支持 **`?format=json`**——回一个 `{ ok, url }`（账号）或 `{ ok, running, url, command }`（调试台），
-  客户端**只在桌面宿主里**（`location.protocol === 'dsh-app:'`）改走"取 JSON → `window.open(绝对 http 地址)`"，
-  那个地址是 http，桌面端便会交给系统浏览器；网页版保持原来的 302 导航不动。
-  守卫不变：`?format=json` 与 302 走同一套回环 + 同源检查（跨站仍 403）。
-  顺带**核对并保留**了同源守卫里 `sec-fetch-site: same-origin` 单独放行那一条：我一度想收紧成"以 Origin 为准"，
-  核对后没有改——真实浏览器发不出"Origin=站点外 + same-origin 标记"这种自相矛盾的请求
-  （`Sec-Fetch-Site` 是按发起方 URL 算的、页面改不了），而那条正是**反向代理部署**（Host 被改写、Origin 是公网域名）
-  需要的口子；测试里把这条语义显式钉了一条断言。
-- **顺手修掉一个测试卫生问题**：账号入口原来漏传调用方解析出来的插件根，于是单测里读到了**真机的**
-  `qq-control.json`（断言输出里带出了本机 NapCat token）。现在 `pluginRoot` 与 `readFile` 都由调用方注入，
-  单测全在临时目录里跑。
-- 新增 82 条断言（`settings-unit` 86 → **169**）：落点形状（`/webui/?token=` + 明文 token）、
-  读不到配置时退回裸 `/webui/`、`webui.json` 没有 token 时只给裸地址但端口仍按 `qq-control.json`、
-  `GET /qqai/account` → 302、跨站 403、面板载荷不含 token，**「相关链接」的位置与顺序**四条
-  （整组在第一个分组之前、账号入口是 `links[0]`、组内顺序 账号→更新日志→调试文档→调试台、账号入口整页只出现一次）、
-  "载荷里没有多余的 `account` 字段"一条，**真实浏览器请求头形状**五条、**整行可点**两条、
-  **桌面端 `?format=json`** 三条（账号入口回绝对地址 / 调试台入口回 `{ok,running,command}` / 跨站仍 403）
-  与**客户端桌面分支**一条（认得出 `dsh-app:`、对相对入口改用 JSON + `window.open`），
-  以及**快捷操作**十九条（纯决策：`planNapcatAction` 的启动/已运行/切换 launcher.bat/
-  只按 PID 清理/没有 PID 就拒绝/没配脚本就拒绝/提权命令带管理员判断与分支标记；路由：真的拉起进程、
-  GET 405、text/plain 与跨站 403、已在运行不重复拉、载荷 `napcat.running` 跟着探测走、
-  **提权被拒时把 powershell 原话带回来**、**非零退出码也算失败**、启动后确认 6099 起没起来；
-  浅渲染：两个按钮 + 禁用态）；
-  `control-unit` 里几条把命令形状写死的断言
-  （supervisor 侧与控制台接口侧）跟着新的 splatting 写法更新（仍然只有一次 `Start-Process`）。
-  全量 **57 套 / 3851 断言全绿**。
+- **「QQ助手账号（登录 / 扫码）」入口**：面板「相关链接」组的第一条，指向宿主自己的 `GET /qqai/account`；
+  服务端读 `bootmain/config/webui.json` 里的 token 后 **302 到 `http://127.0.0.1:<port>/webui/?token=<token>`**，
+  点开就是已登录的 NapCat 页面，不用手抄密钥。token **不进面板载荷**（与调试台入口同一条规矩：
+  密钥只出现在 302 的 `Location` 里）。
+- **落点形状取自 NapCat 4.18.28 的前端实现 + 本机实测**：`location.search` 取 `token` → 自动登录 →
+  `SHA256(token + ".napcat")` → `POST /api/auth/login {hash, totpCode}` → `localStorage["token"]` →
+  之后带 `Authorization: Bearer …`。因此 hash 由前端计算、无需预生成；落点必须**带尾斜杠**
+  （`/webui` 会先吃一个 301）。控制台侧的 `napcatWebui()` 同步改成同一形状，两边不再各写一种。
+- **「相关链接」整组固定在面板最上方**：组内顺序 `account → changelog → readme-debug → console`
+  （账号第一、调试台最底），渲染在标题正下方、开关分组之前；客户端组件由 `Footer` 改名为 `Links`。
+  载荷里没有多余的 `account` 字段（账号入口即 `links[0]`）。浅渲染三条断言钉住整组位置、组内顺序与"只出现一次"。
+  ⚠️ 维护提示：这一组是一个整体，**不要拆开、也不要单独调整其中某一条的顺序**。
+- **「快捷操作」：面板里启动 NapCat / 重新登录（扫码）**：`POST /qqai/napcat/start` 与 `/qqai/napcat/relogin`，
+  决策逻辑放在新增的 `lib/napcat-launch.js`，控制台与面板共用一份。三条硬规矩：
+  ① 必须提权（非提权的 `launcher.bat` 实测秒退）；② **启动脚本优先取同目录的 `launcher.bat`**——
+  配置里的 `napcat.bat` 只是拉起加载器 + `pause`（不设 `NAPCAT_*`、不解析 QQ 路径），实测秒退什么都不做；
+  ③ 重新登录**只按加载器 PID** `/T /F`（拿不到 PID 直接拒绝），绝不按镜像名杀——那会连用户自己的 QQ 一起杀掉。
+  特权动作三道门都要过：POST + `application/json`、同源守卫、只允许回环来源；
+  `ok:false` 的回执（"已经在运行了""没找到加载器"）当**解释**原样显示，不当异常抛掉。
+- **面板内嵌二维码**：新增 `GET /qqai/napcat/qr`（只允许回环 + 同源）把 `cache/qrcode.png` 交给页面；
+  载荷新增 `napcat.qr = { fresh, ageSeconds, url }`（超过 5 分钟视为过期，口径同控制台 `QR_STALE_SECONDS`）。
+  新鲜时「快捷操作」下直接显示 176×176 的二维码 + 「刷新二维码」按钮，过期则自动收起并提示去点「重新登录」。
+- **启动后自动等待二维码**：启动 / 重启成功后客户端每 3 秒刷新一次面板，二维码一写出就显示并提示扫码；
+  90 秒仍未出现则停下并给出一句说明。按钮旁的状态文案同步写明"等几秒，二维码会出现在下面"。
+- **账号入口补上前提说明**：「机器人账号的扫码 / 登录状态页；**需要先运行 NapCat**（没起来就点上面的
+  「启动 NapCat」）…」；链接行的说明也开始走 `richText`（此前只有开关说明会解析 `**加粗**`，
+  链接说明会把星号原样显示出来）。
+- **控制台按钮改名**：`control/` 的「打开 NapCat 扫码页」→「**QQ助手账号**」
+  （禁用态文案、端口标签同步更新）。
+
+### 修复
+
+- **浏览器点击入口返回 403（同源守卫）**：浏览器点 `<a href="/qqai/account">` 发出的是导航请求
+  （`Sec-Fetch-Site: same-origin`、**不带 `Origin`**），而守卫的"没有 Origin"分支只放行 `''` 与 `none`，
+  正常点击因此被判成"来源不明"。该问题自 v0.6.0 起存在（「调试台」按钮同为导航请求）。
+  现在放行 `same-origin` / `none` / 空三种，仍然拒 `cross-site` 与 `same-site`；
+  测试改为**构造真实浏览器的导航请求头**（`sec-fetch-mode: navigate`、无 `Origin`）逐条覆盖。
+  另外，链接行此前只有蓝色标签是 `<a>`、右侧灰色说明是 `<span>`，点说明无反应——**现在整行是一个 `<a>`**。
+- **桌面端点击入口无反应**：桌面端主窗口只把 http(s) 外链交给系统浏览器，其余一律拒绝
+  （`setWindowOpenHandler` → `shell.openExternal` / `deny`）。面板入口是相对地址，在桌面端解析成
+  `dsh-app://app/qqai/account`，既不是 http(s)、也不允许开 Electron 窗口，于是什么都不发生。
+  两个入口因此都支持 **`?format=json`**（账号回 `{ ok, url }`，调试台回 `{ ok, running, url, command }`），
+  客户端**仅在桌面宿主**（`location.protocol === 'dsh-app:'`）改走"取 JSON → `window.open(绝对 http 地址)`"；
+  网页版保持原来的 302 导航。守卫不变（跨站仍 403）。
+- **「启动 NapCat」点了没有任何反应——三个根因，逐条修复**：
+  ① **子进程不得带 `detached: true`**：本机（Node 26 + Windows）实测，带 detached 时子进程 `exit=0`、
+     stdout/stderr 全空、**命令根本没有执行**（落盘标记都未生成）；去掉后立即恢复。形状矩阵验证：
+     默认 / 仅管道 / `windowsHide`+管道三种都有输出，`detached`+管道两种组合全部"空且未执行"。
+     detached 的原意是避免子进程随宿主退出被回收，但提权那一跳由 AppInfo 服务拉起、本来就不在宿主 Job 内，
+     发令用的 powershell 一秒内即退出，因此并不需要它；现在只保留 `unref()`，并加断言禁止再传。
+  ② **提权后 `%cd%` 会变成 `C:\Windows\System32`**：`launcher.bat` 用 `%cd%` 拼自身路径，
+     于是去找 `System32\NapCatWinBootMain.exe` 并报一句 `is not recognized...` 就退出；
+     `-WorkingDirectory` 在这一跳不生效。
+  ③ **复杂内层命令经 `cmd /c` + `Start-Process -ArgumentList` 传参会打乱引号**：内层不执行，而退出码仍是 0。
+  现在把上述脏活写进**可审计的垫片脚本** `<cwd>\qq-napcat-launch.cmd`（心跳行 + 可选 taskkill + `cd /d` +
+  `call launcher.bat` + 输出重定向到 `<cwd>\qq-napcat-launch.log`），提权命令只执行 `cmd.exe /c <垫片路径>`
+  （单一纯路径、零嵌套引号）。垫片额外 `chcp 65001` 并向窗口打印两行指路（输出写到哪个日志、二维码在面板哪里看）。
+- **「重新登录」误报成功**：成功判据原本是"6099 在听"，而 NapCat 已在运行时该条件恒真——即使提权那一跳被拦下、
+  垫片没有执行，界面也会报成功。现在以**垫片心跳**（垫片自写的 `=== shim start … ===`）为准：
+  没有新心跳即返回 `ok:false`，并明确说明"这次点击什么都没发生"。管理员宿主改用
+  **WMI `Win32_Process.Create`** 启动（`-Verb RunAs` 在已是管理员的宿主里偶发静默不执行）；
+  其附加收益是进程由 WmiPrvSE 拉起、**脱离宿主进程树**，非管理员宿主仍走 RunAs（经 AppInfo 拉起，同样脱离）。
+- **提权失败被吞掉**：`spawnDetachedProcess` 原用 `stdio: 'ignore'`，提权被拒时界面仍显示"已请求启动"。
+  现在捕获 stdout/stderr 并等待退出：非零退出码/失败一律 `ok:false`，并把 PowerShell 的原话带回界面；
+  成功时再等最多 8 秒确认 6099 是否真的起来，如实回报"已经起来了"或"还没起来"。
+- **点「刷新二维码」整页白屏**：刷新处理器写成 `setState({ qrStamp })`（**整对象替换**）会一并清掉 `data`，
+  下一帧渲染读取 `data.napcat` 抛错，React 卸载整棵树。现已改为函数式更新（只改时间戳、保留 `data`），
+  `load()` 同样保留 `qrStamp`；并新增渲染边界 **`PanelBoundary`**（React 错误边界只能是 class 组件），
+  今后渲染异常只在面板位置显示错误说明与重试按钮，不再影响整个设置页。测试桩同步补上 `React.Component`。
+- **测试卫生**：账号入口此前未接收调用方解析出的插件根，单测会读到真机的 `qq-control.json`
+  （断言输出里带出本机 NapCat token）。现在 `pluginRoot` 与 `readFile` 均由调用方注入，单测全部在临时目录运行。
+
+### 隐私
+
+- **面板不再回显密钥**：启动日志中会出现 `[WebUi] WebUi Token: …`，而接口会把日志最后一行贴回面板；
+  现在回显前统一打码（"键名+值"与 URL 里的 `?token=` 两种形态），并有断言钉住。
+- **收紧启动日志权限**：工作目录下的文件默认带 `BUILTIN\Users:(RX)`，本机任何账户都能读到其中的 NapCat token
+  （实测确认）。垫片现在执行 `icacls /inheritance:r`，只保留「当前用户 + Administrators + SYSTEM」；
+  `icacls` 失败不影响启动。
+- **仓库不再包含机器人账号的真实昵称**：该昵称曾出现在 `lib/onebot.js` 注释、`test/ops-bridge-unit.mjs`
+  用例与 CHANGELOG 中，并已进入公开历史（提交 `bdb3bd8`，按维护者决定未改写历史）；
+  现已全部替换为中性占位「机器人昵称」。
+- **新增两道自动检查**：真机日志片段（桥的收信行 / NapCat 的 token 行 / WebUI 地址行 / 运行日志片段）
+  列为禁止形状；私有昵称可从 `DSH_QQ_PRIVATE_NICKNAMES`、本机 profile 配置，或本机私有文件
+  `<cwd>/qq-private-nicknames.txt`（受 `qq-*.txt` 忽略规则保护）注入比对。
+- `.gitignore` 补充 `qq-*.cmd` / `qq-*.bat`（垫片含 NapCat 安装路径，日志含 token）。
+- 复查结论：**密钥与真实 QQ 号从未进入任何提交**（工作树、已推送的 `origin/main`、全历史搜索三处均无）；
+  `qq-control.json` 从未被跟踪，且被 `.gitignore` 覆盖。
+
+### 测试
+
+- `settings-unit` 86 → **178** 条断言：落点形状（`/webui/?token=` + 明文 token）、读不到配置时的回退、
+  `GET /qqai/account` → 302 与跨站 403、载荷不含 token、「相关链接」的位置与顺序、真实浏览器请求头形状、
+  整行可点、桌面端 `?format=json` 与客户端桌面分支、快捷操作的决策与路由（含提权被拒、非零退出码、
+  心跳判据、垫片内容）、二维码路由与面板内嵌、密钥打码与日志权限、`spawnDetachedProcess` 不传 `detached`。
+- 全量 **57 套 / 3851 断言全绿**。
 
 ## v0.6.2（2026-10-04）— 功能说明补全 / Every switch explains itself
 
@@ -233,13 +145,13 @@
   依赖标记的措辞也从「需外部服务 / 需密钥」改成 **「需自备服务 / 需自备密钥」**（"自备"两个字是关键），
   「需词表文件」同样改成「需自备词表」。新增 3 条断言钉住这些说法。
 
-- **更正一处我说错的依赖口径**（真机指出："是不是可以更改语音转文字的方式，因为现在 DSH 自带这个功能了"）：
+- **依赖口径更正**（DSH 已自带语音转文字）：
   查了 DSH 0.2.0-rc.2 的实现——**语音转文字 DSH 确实自带**，是一组实验性包
   （`dsh-experimental-speech-to-text` + `-sensevoice` 本地 ONNX + `-api-speech-to-text` + `-client-ui-voice-input`，
   由 `dsh-experimental-voice-input-bundle` 一次性插入，默认 provider 是 `sensevoice-local`；宿主侧服务名 `speechToText`，
   `resolve(request)` → `transcribe(spec, signal)`，要 **16 kHz 单声道 PCM16 WAV**，返回 `{ text, audioSeconds, inferenceSeconds }`）。
   它**需要自己在该 profile 里启用**，且首次使用会下载模型——所以口径应是「DSH 自带（实验性，需启用）」，
-  而不是我先前写的"不自带"。现在：`sttEnabled` 的面板说明与 schema 描述都改成了这个口径，
+  而不是此前写的"不自带"。现在：`sttEnabled` 的面板说明与 schema 描述都改成了这个口径，
   「语音与媒体」的组级提示也把 TTS/生图（真不自带）与 STT（自带但要启用）分开写；
   **TTS / 生图仍是"DSH 与本插件都不自带"**（措辞收窄，不再把 STT 一起算进去）。
   断言相应拆成三条：TTS/生图说"不自带"、STT 说"DSH 自带 + 需启用"、schema 描述口径一致（含一条防串词的检查：
@@ -266,7 +178,7 @@
 
 ## v0.6.1（2026-10-04）— 开关配色修正 / Switch colours fixed
 
-> 真机反馈：**"关了以后感觉按钮消失了一样"**。查下来是我的 OFF 态做错了——轨道用了跟卡片同色的
+> 真机反馈：**"关了以后感觉按钮消失了一样"**。原因是 OFF 态的轨道用了与卡片同色的
 > `--dsw-alias-bg-layer-2`（近白）、圆点用的是白色 `--dsw-alias-label-primary-foreground`，
 > 浅色主题下白底白点，等于隐形。
 
@@ -332,7 +244,7 @@
 
 > 提交后跑了两轮**独立对抗性审查**（只读，禁止改文件/动 git/起进程），它用**可执行的最小复现**证明了下面这些真问题。
 > 每条都补了回归断言，断言用的就是审查给出的复现用例——而且这份"覆盖声明"本身被**回退矩阵**验过：
-> 把每处加固**逐条改回旧写法**，套件必须变红。第一轮矩阵里有一条（多行字符串那条）暴露出**我的夹具其实没覆盖到**
+> 把每处加固**逐条改回旧写法**，套件必须变红。第一轮矩阵里有一条（多行字符串那条）暴露出**测试夹具其实并未覆盖到**
 > （字符串内容行没以 `tsEnabled:` 那种形式开头），改掉夹具后才真正生效；矩阵现在 **8/8 全部被捕获**。
 
 | # | 问题（审查复现） | 现在的行为 |
@@ -495,7 +407,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 真机现象（16:01）：用户发 `/设管理17xxxxxxxx`（**中间没有空格**）——命令正则要求空白分隔，于是**匹配不上**，消息被当成聊天**交给了模型**（trace：`[agent] 会话续接 → 已转交 agent`），白烧一个模型回合，用户看到的现象是"设管理失败了"。
 
 - 这类写法现在会被识别出来并回一句明确的用法提示（`应该写成「/设管理 …」`），**并且不交给模型**——模型手里有工具，把一个像命令的串丢给它是有风险的。trace 里写明"命令一律空白分隔，没有交给模型"。
-- 词表 `OPS_ARG_WORDS`（哪些命令需要参数）**必须与命令正则同步**：漏一个词就等于那个命令粘了参数后照样落到模型。新增静态守卫盯着它（`static-unit`），写这条守卫时它当场抓出我把标签「设置管理员」误当成命令词。
+- 词表 `OPS_ARG_WORDS`（哪些命令需要参数）**必须与命令正则同步**：漏一个词就等于那个命令粘了参数后照样落到模型。新增静态守卫盯着它（`static-unit`），该守卫上线时即发现标签「设置管理员」被误当成命令词。
 - 带空格的正常写法完全不受影响（有断言钉住）。
 ### 写操作失败不再把原始报错糊到群里（真机现场抓到）
 
@@ -923,7 +835,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 
 - **`schemastery` 改用作用域名 `@deepseek-ai/schemastery`**：`lib/index.js`、`lib/bridge.js` 原本写的是裸名 `import z from 'schemastery'`，而 `package.json` 只声明了 `@deepseek-ai/schemastery`——**裸名是另一个包**（未带作用域的 `schemastery@3.18.0`，官方为 `@deepseek-ai/schemastery@3.18.1`），只有在"同 profile 里别的插件恰好把它 hoist 到共享 node_modules"时才解析得到（本机就是被 `dsh-mnemon` 的依赖 hoist 兜住的）。DSH 并没有"裸名别名注入"机制，官方包全部使用作用域名；干净环境必然加载失败
 - **peer 版本区间补上 `^0.1.5-rc.1`**：预发布区间不会跨补丁线，`^0.1.2-rc.1` 不匹配 `0.1.5-rc.1` / `0.1.5-rc.2`，在 DSH 0.1.5-rc.1 上会出现 peer 解析问题（`--omit=peer` 能绕过，但根因在声明）
-- **静态回归防线**（`test/static-unit.mjs` 新增三项）：lib/ 里每个第三方 import 必须在 `package.json` 的 dependencies/peerDependencies/optionalDependencies 中声明；官方依赖禁止退化成裸名（`@deepseek-ai/x` 的 basename 不得作为 import 规格名出现）；并校验规格名扫描确实抓到官方依赖，避免正则失效导致假通过。这类"在我机器上能跑"的依赖问题以后直接测挂
+- **静态回归防线**（`test/static-unit.mjs` 新增三项）：lib/ 里每个第三方 import 必须在 `package.json` 的 dependencies/peerDependencies/optionalDependencies 中声明；官方依赖禁止退化成裸名（`@deepseek-ai/x` 的 basename 不得作为 import 规格名出现）；并校验规格名扫描确实抓到官方依赖，避免正则失效导致假通过。这类"只在特定机器上能跑"的依赖问题会被直接测挂
 - **文档纠错与补全**：README 中"裸名 `schemastery` 由 DSH 以别名注入"的说法**是错的**，已删除并改写为正确的部署事实；同时补充本地目录安装说明——`dsh plugin add <目录>` 走 pnpm 的 `link:`，不会安装被链接包自己的依赖，需先在插件目录执行 `npm install --omit=dev`（`ws`），从插件市场安装则会随依赖一起装好
 
 ### 验证
