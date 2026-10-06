@@ -1,7 +1,9 @@
 # 更新日志 / Changelog
-## v0.6.3（2026-10-06）— 账号入口 + 面板里一键启动 NapCat / Account entry & one-click NapCat launch
+## v0.6 系列（2026-10-04 ～ 2026-10-06）
 
-### 新增
+### v0.6.3（2026-10-06）— 账号入口 + 面板里一键启动 NapCat / Account entry & one-click NapCat launch
+
+#### 新增
 
 - **「QQ助手账号（登录 / 扫码）」入口**：面板「相关链接」组的第一条，指向宿主自己的 `GET /qqai/account`；
   服务端读 `bootmain/config/webui.json` 里的 token 后 **302 到 `http://127.0.0.1:<port>/webui/?token=<token>`**，
@@ -33,7 +35,7 @@
 - **控制台按钮改名**：`control/` 的「打开 NapCat 扫码页」→「**QQ助手账号**」
   （禁用态文案、端口标签同步更新）。
 
-### 修复
+#### 修复
 
 - **浏览器点击入口返回 403（同源守卫）**：浏览器点 `<a href="/qqai/account">` 发出的是导航请求
   （`Sec-Fetch-Site: same-origin`、**不带 `Origin`**），而守卫的"没有 Origin"分支只放行 `''` 与 `none`，
@@ -75,7 +77,7 @@
 - **测试卫生**：账号入口此前未接收调用方解析出的插件根，单测会读到真机的 `qq-control.json`
   （断言输出里带出本机 NapCat token）。现在 `pluginRoot` 与 `readFile` 均由调用方注入，单测全部在临时目录运行。
 
-### 隐私
+#### 隐私
 
 - **面板不再回显密钥**：启动日志中会出现 `[WebUi] WebUi Token: …`，而接口会把日志最后一行贴回面板；
   现在回显前统一打码（"键名+值"与 URL 里的 `?token=` 两种形态），并有断言钉住。
@@ -92,7 +94,7 @@
 - 复查结论：**密钥与真实 QQ 号从未进入任何提交**（工作树、已推送的 `origin/main`、全历史搜索三处均无）；
   `qq-control.json` 从未被跟踪，且被 `.gitignore` 覆盖。
 
-### 测试
+#### 测试
 
 - `settings-unit` 86 → **178** 条断言：落点形状（`/webui/?token=` + 明文 token）、读不到配置时的回退、
   `GET /qqai/account` → 302 与跨站 403、载荷不含 token、「相关链接」的位置与顺序、真实浏览器请求头形状、
@@ -100,7 +102,7 @@
   心跳判据、垫片内容）、二维码路由与面板内嵌、密钥打码与日志权限、`spawnDetachedProcess` 不传 `detached`。
 - 全量 **57 套 / 3851 断言全绿**。
 
-## v0.6.2（2026-10-04）— 功能说明补全 / Every switch explains itself
+### v0.6.2（2026-10-04）— 功能说明补全 / Every switch explains itself
 
 > 真机反馈：**"有些功能说明不是很全啊，就比如 AI 生图，就写了串英文，都没写需要额外的软件或模型"**。
 > 查下来是面板 59 个开关里有 21 行提示是**空的**（只有中文标签 + 英文配置键），
@@ -176,7 +178,7 @@
 
 全量 **57 套 / 3765 断言全绿**。
 
-## v0.6.1（2026-10-04）— 开关配色修正 / Switch colours fixed
+### v0.6.1（2026-10-04）— 开关配色修正 / Switch colours fixed
 
 > 真机反馈：**"关了以后感觉按钮消失了一样"**。原因是 OFF 态的轨道用了与卡片同色的
 > `--dsw-alias-bg-layer-2`（近白）、圆点用的是白色 `--dsw-alias-label-primary-foreground`，
@@ -194,13 +196,13 @@
 
 全量 **56 套 / 3728 断言全绿**。
 
-## v0.6.0（2026-10-04）— 轻量化设计 / Lightweight
+### v0.6.0（2026-10-04）— 轻量化设计 / Lightweight
 
 > 这一版的"轻"落在三处：**能关的东西一眼看得见**（DSH 设置里新增「QQ助手」面板，常用开关点一下就启停）、
 > **不为它多装任何东西**（零新增依赖，客户端只用宿主自带的 react）、**改动面最小**（只碰 profile 里本插件那一个
 > config 块，原子写 + 自动备份）。另外把 v0.5.9 发布后真机跑出来的一串问题收口：@ 识别、命令粘参、报错糊脸、掉线无声。
 
-### 新功能：DSH 设置 → 「QQ助手」
+#### 新功能：DSH 设置 → 「QQ助手」
 
 - **一个页面管住常用开关**：7 组、59 个开关（从 224 个配置键 / 92 个布尔键里精选）——
   对话基础 · 群运营工具箱 · 娱乐与互动 · 语音与媒体（日常四组直接铺开），
@@ -225,7 +227,7 @@
   **跑着**就 302 到**带 token** 的地址（token 只在服务端从 `qq-control.json` 读出，**不进面板载荷**，
   单测有一条断言专门钉"载荷里没有 token"），**没跑**就回一页"怎么启动"——不再是死链。
 
-### 轻量化的具体做法（附 DSH 侧的依据）
+#### 轻量化的具体做法（附 DSH 侧的依据）
 
 - **客户端 bundle 手写、不引构建器**：`client/client.js` 就是一段 `window.__ModuleLoader__.load({ id, factory })`，
   `factory` 里只 `require('react')`（平台允许免图依赖的种子之一），`exports.inject = ['slots']`，
@@ -240,7 +242,7 @@
 - **只挂载在能挂的宿主上**：用 `ctx.inject(['webServer'], …)`，TUI 等没有 webServer 的宿主里这段**根本不执行**，
   QQ 桥照常工作（只是没有那一页）；挂载失败也只记一条 warn，绝不影响桥。
 
-### 对抗性审查后的加固（两轮，共 6 个 P1，全部带可复现证据）
+#### 对抗性审查后的加固（两轮，共 6 个 P1，全部带可复现证据）
 
 > 提交后跑了两轮**独立对抗性审查**（只读，禁止改文件/动 git/起进程），它用**可执行的最小复现**证明了下面这些真问题。
 > 每条都补了回归断言，断言用的就是审查给出的复现用例——而且这份"覆盖声明"本身被**回退矩阵**验过：
@@ -271,7 +273,7 @@
 POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 rename 把权限带宽）；
 客户端此前**没有渲染文档承诺的「非默认」徽标** → 现在渲染了。
 
-### 真机事故与修复（发布前抓到，必须记下来）
+#### 真机事故与修复（发布前抓到，必须记下来）
 
 > **现象**：装好 v0.6.0 后重启官方桌面端，**整个应用起不来**，弹窗写着
 > `web boot: 1 entry did not activate` / `dsh-qq-onebot-bridge: import failed: exports is not defined`。
@@ -306,7 +308,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
   `profile = desktop` / `patchFile = …\profiles\desktop\cordis.patch.yml`，7 组 59 开关；CLI 宿主仍按 `--profile` 走。
   新增 4 条断言钉住这两种传法（含末尾带斜杠的路径）。
 
-### 测试
+#### 测试
 
 - 新增 `settings-unit`（**86 条**）：纯逻辑（分组快照、patch 文本的读/改/插入/幂等/拒绝非布尔/没有本插件条目时如实拒绝）+
   路由契约（用假 webServer 捕获注册、直接调 handler：GET 形状、POST 只允许白名单布尔键、405、写后 `pending` 如实为真、
@@ -318,7 +320,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
   `__ModuleLoader__` 包裹、插件入口确实把面板挂到 webServer 上）。
 - 全量 **56 套 / 3724 断言全绿**。
 
-### 已知边界（不藏着）
+#### 已知边界（不藏着）
 
 - 面板页需要在**宿主带 webServer** 时才有入口；首次装好/升级后要**重启一次宿主**让路由挂上（之后改开关就是热重载）。
 - 改开关会让 DSH 热重载该插件条目 → **QQ 桥会短暂重连**（一两秒）；若宿主关了热重载，则重启宿主后生效。
@@ -326,7 +328,9 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
   所以那一页看不到这些开关——这是刻意的取舍，不是漏做。
 - 真机待验证：浏览器里首次打开该页的实际观感与深浅色；面板与 `dshmarket` 同页共存时的导航顺序（`order: 45`）。
 
-## v0.5.9（2026-10-03）— 兼容 DSH 0.2 与官方桌面端 / DSH 0.2 & desktop client
+## v0.5 系列（2026-09-13 ～ 2026-10-03）
+
+### v0.5.9（2026-10-03）— 兼容 DSH 0.2 与官方桌面端 / DSH 0.2 & desktop client
 
 > 起因是一次**静默停摆**：DSH 运行时升到 **0.2.0-rc.2** 之后，profile 因为插件的 peer 范围只声明到
 > `^0.1.x` 而**直接拒载**——`dsh: skipping profile bundle "dsh-qq-onebot-bridge": … is incompatible with dsh 0.2.0-rc.2`，
@@ -334,7 +338,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 > 只在 profile 启动输出与插件管理器的操作日志中）。官方新出的桌面端（Electron 版
 > `DeepSeek Harness.exe`，跑 `~/.dsh/profiles/desktop`）用的是**同一个运行时版本**，所以两边一起修。
 
-### 兼容
+#### 兼容
 
 - **peer 范围放行 `^0.2.0-rc.2`**：六个 `@deepseek-ai/dsh-*` 都加上（旧范围保留），CLI/web 宿主与官方桌面端**都能直接加载，不再需要 `dsh plugin allow-version` 豁免**。
   - 真机验证：先 `revoke-version` 撤掉豁免（`version-exemptions` 回到 `{}`），`dsh --profile web --dump-config` **不再 skip**、插件在树里；再另起一个宿主实例，**6700 正常监听**、`qq-runtime.json`/`qq-trace.jsonl` 立即刷新（= 桥真的起来了）。
@@ -347,12 +351,12 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - `stop()` 对"从未监听成功"的实例同样安全，重试路径反复 start/stop 不会泄漏 Server。
 - 一台机器**只允许一个实例托管 QQ 桥**：两个 profile 都装是对的（谁先起谁服务），另一个如实说明并在端口释放后接管；想固定由某一个托管，就把另一个 profile 的 `port` 改成不同值。
 
-### 文档
+#### 文档
 
 - README（中英）新增「官方桌面端（DSH Desktop）」一节：桌面端跑的是应用独占管理的 `desktop` profile、与 CLI **同版本运行时**、装法与配置位置（`~/.dsh/profiles/desktop/cordis.patch.yml`，不要写进仓库），以及"一台机器只托管一个 QQ 桥"的口径。
 - **控制台「打开扫码页」不再撞「token 无效」**（真机踩到）：那个按钮原来指向 `http://127.0.0.1:6099`，而 NapCat 的 WebUI **自己也有 token**（存在 `bootmain/config/webui.json`）——不带 token 点进去只会被 NapCat 拒。新增 `GET /api/napcat/webui`：从 `napcatQr` 推出同一份配置目录去读 token，返回可直接打开的地址；接口与控制台其它接口一样受 token + 同源校验保护，响应只有 `ok/url/reason` 三个字段（token 不写运行快照、不进诊断包、不落日志），读不到就如实说明原因。UI 在 6099 监听时自动把带 token 的地址填进按钮。
 
-### 修掉 4 条静默分支（违反硬约束①，全面检测时抓到）
+#### 修掉 4 条静默分支（违反硬约束①，全面检测时抓到）
 
 在真机上收到"回复没有语音"的现象后按 trace 排查，发现 **TTS 的三条分支（没配 key / 没配参考音频 / 合成或发送失败）只写 `debugLog`，trace 与控制台里一个字都没有**——用户无从判断"为什么没语音"。同类还查出三处：
 
@@ -361,7 +365,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **每日日报**：没有可用连接时记 `stage:'report'` + 真实原因。
 - **推送通知**：`notifyEnabled=true` 但没配 `notifyPushUrl`/`notifyToken` 时记一条 `level:'warn'`——配置类错误运行期不会变，**每个进程只提示一次**，不会灌满 trace。
 
-### 独立对抗性审查（针对 v0.5.9 两个提交）发现并修掉的问题
+#### 独立对抗性审查（针对 v0.5.9 两个提交）发现并修掉的问题
 
 - **P1 · `start()` 会把正在监听的 socket 变成孤儿**：v0.5.9 那版"关闭上一次没绑上的实例"只处理了失败分支，于是**重复调用 `start()`**（超时重试路径）会另起一个 Server → EADDRINUSE，同时把**真正在监听的那个**丢掉：端口一直被占、桥却没起来，日志还反过来赖"端口被另一个进程占用"；`stop()` 之后端口仍然占着（审查用探针实测复现）。现在 `start()` **幂等**（已监听直接返回 `ok:true, already:true`，绝不去关健康实例）、同一 tick 的并发调用**复用同一个 Promise**、失败分支就地关掉没绑上的实例、**超时不再等于失败**（先看 `address()`，慢机器上刚绑成功也算 ok）。新增四条回归断言（含"`stop()` 之后端口能重新绑定"）——旧实现下这几条会直接红。
 - **P2 · 重试回调漏 catch + 半初始化**：`setTimeout` 里的 `void tryServe()` 没有 catch（Node CLI 宿主上未处理 rejection 是致命的）；`bridgeStarted` 在 `bridge.start()` 之后才置位，中途抛错会让 dispose 不再管它。现在 `.catch(logger.error)` + `try/finally` 置位。
@@ -372,11 +376,11 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **P3 · UI 每 4 秒把带 token 的链接覆盖掉**（既有缺陷，v0.5.9 的修复差点被它吃掉）：状态渲染里另有一行把 `napcatLink.href` 写成不带 token 的地址。已删除该行，链接只由"扫码页按钮"那段统一负责。
 - **P3 · 文档**：删掉"给另一个 profile 改个端口"这条**危险建议**（两个实例共用同一份 `cwd`，同时读写会互相覆盖状态文件、注入还会发两遍），改成"只在一个 profile 里启用 / 连 `cwd` 一起分开"；并补上"手动装本地目录必须同时加进 `dsh.profile.bundles`，否则只装依赖不会工作"（本机实测）。
 
-### 修掉一个假信号：空闲被误报成"桥没了"
+#### 修掉一个假信号：空闲被误报成"桥没了"
 
 运行快照（`qq-runtime.json`）原本**只在有活动时**写（节流 2 秒），于是机器人空闲十几分钟后文件就陈旧了；而控制台的存活判断是 `ageSeconds < 900`——一个完全健康的桥会被显示成**「无快照」**。现在 `start()` 会装一个 **60 秒心跳**（unref，注册在 `this.timers` 里，`stop()` 自动清掉）持续刷新快照：**"快照陈旧"从此真的代表"桥不在了"**，而不是"只是没人说话"。测试把 `runtimeHeartbeatMs` 调小来证明"零流量时文件也在动、`stop()` 之后立刻不动"。
 
-### 修掉「群里 @ 了机器人却不回消息」（真机现场抓到，最要命的一条）
+#### 修掉「群里 @ 了机器人却不回消息」（真机现场抓到，最要命的一条）
 
 真机现象：在群里 @ 机器人发命令，**一个字都不回**，而 trace 里只有一句 `群聊未 @ 机器人`。
 
@@ -387,7 +391,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **真机验证**：改完重启桥，注入一条与用户完全相同的消息（`atMe=false`、正文 `@机器人昵称 /禁言名单`）→ trace 出现 `[mention] ok=true 文本 @ 命中机器人名「机器人昵称」`，命令被正确识别（`[ops] 禁言名单…`）。
 - 配置键 223 → **224**（`mentionAliases`）。
 
-### 机器人掉线不再无声（真机现场抓到）
+#### 机器人掉线不再无声（真机现场抓到）
 
 真机现象：15:28 桥收到 `bot_offline`，但**谁都不知道**——trace 里只有一句 `未处理的 notice：bot_offline/`，控制台的「机器人」胶囊靠 6700 的 ESTABLISHED 连接数判断（socket 还挂着时照样显示在线），用户看到的现象就是"发消息没人理"。
 
@@ -395,21 +399,21 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **顺手修掉一个真 bug**：`diagnose.mjs` 的「机器人已连上桥」一直在读 `snapshot.botOnline`，而插件**从来没写过这个字段**——验收台上这一项**永远是红的**（明细永远显示"无 ESTABLISHED 连接"）。现在插件写它，且"未知"时回落到 6700 的连接数；`bot_offline` 时即使 socket 还挂着也不算在线。
 - 控制台「机器人」胶囊把两个来源合起来看，并把离线原因写进 title。
 
-### 看管理员：`/管理员名单` + 控制台显示"机器人自己是不是管理员"
+#### 看管理员：`/管理员名单` + 控制台显示"机器人自己是不是管理员"
 
 起因是 `/设管理` 那次真实失败：用户填的号不在群里，NapCat 只回 `retcode 1200 get Uid Error`——**得先能看见"该填谁"和"机器人有没有权限"**，这两件事以前都得靠猜。
 
 - **新增只读命令 `/管理员名单`**：读一次群成员列表，只列**群主 + 管理员**（群主在前，同档按等级降序），机器人自己那行标「（我）」——一眼看出 `/设管理` 能不能成；一个管理员都没有时如实说明（不编造）。走只读查询同一条红线：注入/回放回合**不访问 QQ** 并说明原因，私聊里明确"只能在群里用"。（接线时踩到一次：命令词必须同时加进 `#handleOpsCommand` 的**入口白名单**，否则整条命令被提前 return 掉——现在有测试盯着。）
 - **运行快照新增 `botAdmin`**：机器人在各群的管理员状态，来源只有 NapCat 的 `group_admin` 通知，**超过 10 分钟保鲜期就标 stale**（不把过期信息当事实）。
 - **控制台「群配置」面板**每个群多一段「机器人：是本群管理员 / 不是本群管理员（写命令会被权限自愈拦下）/ 未知」，并且**只有管理员状态、还没有会话的群也会列出来**——否则"机器人在这个群里不是管理员"根本看不到。
-### 命令粘住参数不再悄悄交给模型（真机现场抓到）
+#### 命令粘住参数不再悄悄交给模型（真机现场抓到）
 
 真机现象（16:01）：用户发 `/设管理17xxxxxxxx`（**中间没有空格**）——命令正则要求空白分隔，于是**匹配不上**，消息被当成聊天**交给了模型**（trace：`[agent] 会话续接 → 已转交 agent`），白烧一个模型回合，用户看到的现象是"设管理失败了"。
 
 - 这类写法现在会被识别出来并回一句明确的用法提示（`应该写成「/设管理 …」`），**并且不交给模型**——模型手里有工具，把一个像命令的串丢给它是有风险的。trace 里写明"命令一律空白分隔，没有交给模型"。
 - 词表 `OPS_ARG_WORDS`（哪些命令需要参数）**必须与命令正则同步**：漏一个词就等于那个命令粘了参数后照样落到模型。新增静态守卫盯着它（`static-unit`），该守卫上线时即发现标签「设置管理员」被误当成命令词。
 - 带空格的正常写法完全不受影响（有断言钉住）。
-### 写操作失败不再把原始报错糊到群里（真机现场抓到）
+#### 写操作失败不再把原始报错糊到群里（真机现场抓到）
 
 真机现象（15:50）：群里发 `/设管理 10009`（一个**不在群里的号**），机器人回的是
 
@@ -422,7 +426,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 新增 `#actionErrorReason()`：把 NapCat 的报错翻译成中文真原因——`retcode 1200 / get Uid Error` → "NapCat 解析不到这个号的 uid——他很可能不在这个群里（或不是真实 QQ 号）。请用 @ 选中群内成员，或写他真实的 QQ 号"；权限类 retcode（1400/1401/1403/1404）→ "机器人可能不是本群管理员（或群内权限不足）"；其它 → 截断后的原文（最多 160 字）。
 - 三条 v0.5.8 写命令（设/撤管理、邀请策略、加群方式）走 `#runOpsAction()`：失败时回中文真原因 + **写一条 `stage:'ops', level:'warn'` 的 trace**，绝不抛给兜底。
 - **兜底也改说人话**：`#onQqMessage` 的 catch 以前直接把 `error.message` 贴进群，现在同样过翻译——这一条覆盖了全部 ~28 个 `gate.run` 调用点，不只是这三条命令。
-### 真机逐条验证六条 v0.5.8 群命令（干跑，零出站）
+#### 真机逐条验证六条 v0.5.8 群命令（干跑，零出站）
 
 用控制台的注入通道把六条命令逐条喂进真实链路（`injectEnabled=true`，桥每 2 秒轮询；`injectDryRun=true` 所以一个出站帧都没发）。六条**全部走到各自的 `[ops]` 分支**，白名单与权限判定通过，回复被拦下并完整记进 trace（`注入回合的回复已被拦截（dry-run，未发送）：…` 后面就是用户本会看到的原文）：
 
@@ -439,7 +443,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 抓到并修掉：设/撤共用「设置管理员」标签 → 现在按方向给 `设置管理员` / `撤销管理员`（`ops-bridge-unit` 新增 J8/J9 钉死）。
 - **仍未做**：真实执行（真要调 NapCat 的写操作）。干跑只能验识别/权限/计划/文案/零出站；真实参数由 `ops-bridge-unit` 的线路级断言（J1/J3）覆盖，真机执行需在群里发命令，或临时关掉 `injectDryRun` 并重启宿主。
 
-### 测试
+#### 测试
 
 - `onebot-api-unit` 44 → **61**：端口冲突四条（`ok:false`、错误码 `EADDRINUSE`、走 `server-error` 而**不抛 uncaughtException**、冲突之后原实例照常工作）+ "同一个 server 连续两次 start() 结论一致" + **幂等/孤儿化回归四条**（已监听时重复 `start()` 返回 `already:true`、同一 tick 并发复用同一个 Promise、`stop()` 后端口能重新绑定、并发路径同样释放端口）——最后四条在审查发现的旧实现下会直接红 + **文本 @ 七条**（`mentionsByName`/`stripMentionName` 的命中、字面量、无 @ 不认、空值安全、摘除后命令回到行首、名字不匹配原样返回）。
 - `ops-bridge-unit` 96 → **185**：v0.5.8 六条命令的线路级断言 + **文本 @ 七条**（配置别名 → 命令照常执行、放行原因进 trace、命中不了仍忽略且零出站、忽略原因是"群聊未 @"、未配别名时学到的昵称同样能认、学习只读一次、缓存生效 + 设/撤标签分开）。
@@ -450,13 +454,13 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - `static-unit` 17 → **21**：新增守卫三条——六个 `dsh-*` peer 一个不少、声明了支持的运行时线、**每条声明的线都被 peer 范围覆盖**（以 `package.json` 的 `dsh.supportedRuntimeLines` 为唯一真源）。
 - 全量 **55 套 / 3633 断言全绿**。
 
-## v0.5.8（2026-09-14）— 群权限补全 · 申请补拉 · 权限自愈 / Admin & requests
+### v0.5.8（2026-09-14）— 群权限补全 · 申请补拉 · 权限自愈 / Admin & requests
 
 > 这一版继续"先用真机探针把参数摸准，再动代码"：4 个新动作的参数形状全部来自静态读本机 NapCat 包
 > （QQ 9.9.32-50969 / NapCat 4.18.19），而且**有两个能力被探针挡下来了**——见「按住的」一节。
 > ⚠️ 这 4 项尚未在登录状态的真机上跑过（本机 NapCat 当时未登录），验证清单见文末。
 
-### 新增
+#### 新增
 
 - **管理员设置 `/设管理 @某人` · `/撤管理 @某人`**（`set_group_admin`）：探针挖出一个会咬人的细节——`enable` **省略时 NapCat 按 `false` 处理**（`!!undefined === false`），也就是"字段没写全"会**静默把人撤成普通成员**。所以 `planGroupAdmin` 强制要求显式布尔值，缺了直接报错，并且**永远把 `enable` 发给 API**；测试专门钉住"`enable === false` 时字段必须存在"。
 - **邀请策略 `/邀请策略 关闭|需审核|免审核|百人以下`**（`set_group_member_invite_policy`）：映射到探针读到的四个字面量 `disabled` / `require_approval` / `no_approval` / `no_approval_under_100`。
@@ -466,11 +470,11 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
   - 关键一环是探针挖出来的：`set_group_add_request` 的 `flag` 在实现里是 `find(i => i.seq === flag)`，而 `get_group_system_msg` 的 `request_id` 正是 `+seq`——所以**主动拉回来的申请真的能审批**，不是只能看。
 - **权限自愈（`group_admin` 事件）**：机器人自己被设/撤管理员时记账（`群号 → true/false`，来源只有这个事件，不知道的群绝不猜），可选在群里说明（`adminWatchEnabled`）；已知被撤管理员后，写命令（批量踢/待办/文件/传图/群名/群权限/历史可见…以及 `/mute` `/kick` `/公告` 这些老管理命令）**直接给中文真话并零调用**，而不是让 API 去撞墙报一句模糊错误。恢复管理员后自动解除。
 
-### 修掉一个真缺陷（注入红线）
+#### 修掉一个真缺陷（注入红线）
 
 - **注入/回放回合 `/同意` 会真的批准人**：`set_group_add_request` 的参数里只有 `flag`，没有 `group_id`/`user_id`，落不进 scoped dry-run 的拦截条件——与 v0.5.1 修的 `/ocr`、`/好友` 是同一类洞（当时那条 P1 没覆盖审批路径）。现在 `#handleVerifyCommand` 与 `#resolveJoin` 都显式判断离线回合，直接拒绝执行并写 trace；新测试 `O1`–`O5` 用"注入回合 0 出站 + 队列条目仍在（没有被静默消费）"钉住它，其中 `O5` 专门覆盖**第二层防线**（申请人答对验证题的自动放行路径不经过命令处理，只能靠 `#resolveJoin` 自己兜）。
 
-### 独立审计发现并修掉的隐私问题（**发布前拦下**）
+#### 独立审计发现并修掉的隐私问题（**发布前拦下**）
 
 一轮独立隐私审计（只读、扫工作树 + **全部 git 对象**）在**已提交的代码里**抓到三处：
 
@@ -490,14 +494,14 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 
 > 历史残留的处理说明：悬空对象可用 `git gc --prune=now` 清除；**已进入可达提交的**那处路径只能靠改写历史（会改所有提交哈希）。这两件事都会删除数据，按本项目规矩**不在未确认前自行执行**。
 
-### 顺手修掉的其它问题（自查发现）
+#### 顺手修掉的其它问题（自查发现）
 
 - **控制台「群配置页」漏接新开关**：运行快照的 `features` 是显式白名单、面板开关表也是静态列表，两边都没加 v0.5.8 的键 → 面板会永远显示"关"。两处都补上（`opsAdminEnabled`/`opsInvitePolicyEnabled`/`opsAddOptionEnabled`/`requestSyncEnabled`/`adminWatchEnabled`），并加断言钉住"快照里有、面板里有"。
 - **补拉回来的申请会被当成"答题"**：这类条目没有验证题（申请人当时不在线），他随后私聊说句话会被误判成答题、回一句空的「答案不对哦」。现在只认真正发过题目的条目。
 - **文档口径**：仓库根目录那个**被跟踪**的 `cordis.patch.yml` 是安装用的 bundle patch，与 README 让用户改的 profile 配置文件**同名**——用户若改错文件填密钥就会提交进仓库。已在 README（中英）与根文件里都加了醒目的"别填这里"提示。
 - `.gitignore` 补齐 `qq-*.md`/`qq-*.bin`/`qq-*.html`（规则既然按扩展名兜底，就不该只兜一半）。
 
-### 独立对抗性审查发现并修掉的问题（P1/P2）
+#### 独立对抗性审查发现并修掉的问题（P1/P2）
 
 同一轮还跑了一次独立对抗性代码审查（只读、禁改文件/动 git），它抓到的真问题：
 
@@ -509,7 +513,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **配置说明不实**（P2）：`requestSyncCount` 原文声称"NapCat 按最近 N 条搜索 flag"——实际 `set_group_add_request` 根本不发 count、NapCat 内部写死 100，所以拉超过 100 条只会拉回**批不了**的条目；说明已改正、取值上限夹到 100。另外六个新命令都还要求 `groupOpsEnabled`（总开关先答"工具箱未启用"），四个新开关的说明都补上了这一句。
 - **P3 级**：`/退群` 被"权限自愈"用假理由拦住（`set_group_leave` 不需要管理员）；管理员变动播报没走 `allowGroups` 白名单（与欢迎语/戳一戳/防撤回口径不一致）；"我已被撤管理员"这条判断没有保鲜期（万一下一条事件没收到就会永久拦住写命令）→ 现在 10 分钟后按"不知道"处理，交给 API 去试；`verifyEnabled=false` 时 `/申请` 改成就地预览**不入队**（否则条目 24 小时后才过期、队列被占满而"处理"命令又不存在）；`/加群方式 5` 给了答案会被静默忽略、`/拒绝 all` 不报失败原因——都改成如实说明。
 
-### 测试
+#### 测试
 
 - `ops-unit` 106 → **149**、`ops-bridge-unit` 96 → **160**、`onebot-api-unit` 33 → **44**、`privacy-unit` 33 → **36**、`perf-unit` 66 → **67**；全量 **55 套 / 3557 断言全绿**。
 - 新断言覆盖：`enable` 显式性与"缺 enable 必须报错"、邀请策略四个字面量、`add_type` 只有 4/5 带问题/答案、名册名次、申请归一化（checked 过滤 / 去重 / 三类 kind / 可疑好友 approveOnly）与各路计数口径、审批 flag == `request_id`、注入回合 0 出站（两层防线 + `injectDryRun:false` 的反向断言）、权限自愈的记账与拦截、运行快照与控制台开关表同步、`/撤管理` 反向提权回归。
@@ -517,20 +521,20 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **变异测试**：把注入闸门临时拿掉后 `O1`/`O3` 确实变红（不是恒真断言），随后恢复。
 - 顺手修掉 `commands-unit` 的一处**计时抖动**：走 agent 的断言原来死等 40ms，全量跑时偶发假红（随后连跑 3 次全绿）；现在改成"见到回复就返回、最多等 400ms"，连跑 3 次稳定。
 
-### 按住的（探针说"别猜"）
+#### 按住的（探针说"别猜"）
 
 - **不做 `/群搜索`**：`set_group_search` 的两个参数 `no_code_finger_open` / `no_finger_open` 在 NapCat 里连 schema 描述都是「未知」，官方 API 文档也没写语义。给用户一个"传 0/1 的魔法数字"命令是错的，宁可等真机确认。
 - **可疑好友申请只能同意**：探针读到 `set_doubt_friends_add_request` 的 handler **完全忽略 `approve`**（源码注释「该字段没有语义 仅做保留 强制为True」）。`/拒绝` 对这类条目会被显式拒绝执行并在文案里说明，不假装拒绝成功。
 
-### 配置
+#### 配置
 
 - 新增 6 个开关/参数键（总数 217 → 223）：`opsAdminEnabled`、`opsInvitePolicyEnabled`、`opsAddOptionEnabled`、`requestSyncEnabled`、`requestSyncCount`、`adminWatchEnabled`，全部默认关闭；`/打卡名册` 归入既有 `opsReadEnabled`，不新增开关。注意这四个新命令开关都要求 `groupOpsEnabled` 总开关也打开（说明里已写明）。
 
-### 待真机验证（本机 NapCat 未登录，跑不了）
+#### 待真机验证（本机 NapCat 未登录，跑不了）
 
 `/设管理`、`/撤管理`、`/邀请策略`、`/加群方式`、`/打卡名册`、`/申请` 各来一次，重点看：`/打卡名册` 的 `rank`/`time` 字段是否与探针一致、`/申请` 拉回来的 `request_id` 能否被 `/同意` 接受、被撤管理员时是否真的走"真话"分支。
 
-## v0.5.7（2026-09-14 发布）— 文档：总览只列两个大版本 / Docs only
+### v0.5.7（2026-09-14 发布）— 文档：总览只列两个大版本 / Docs only
 
 > **纯文档改动，无代码变更**（`test/static-unit.mjs` 的守卫随文档惯例一起回到原样）。
 
@@ -539,22 +543,22 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - `test/static-unit.mjs` 守卫回到"恰好五版 + 首版必须是 `package.json` 当前版本"，README 不会悄悄停在旧版本上。
 - 验证：static-unit **17/17**、privacy-unit **33/33**；其余套件与本版无关（无代码改动，未重跑全量）。
 
-## v0.5.6（2026-09-14 发布）— 真机可用性修复 + 完整审计 / Real-machine fixes and an audit
+### v0.5.6（2026-09-14 发布）— 真机可用性修复 + 完整审计 / Real-machine fixes and an audit
 
 > 本版没有新功能，只有"让它真的能用"和"把隐患修掉"。起因是排障时发现控制台三个按钮**看起来能用、其实用不了**，随后做了一轮独立对抗性审查，把发现的严重问题一并修掉。
 
-### 三个"假可用"（都在你这台机器上实测复现）
+#### 三个"假可用"（都在你这台机器上实测复现）
 
 - **「启动 NapCat」跑错了脚本**：配置指向 `bootmain\napcat.bat`，而那个脚本只有 `chcp 65001` + `.\NapCatWinBootMain.exe` + `pause`——**不带参数、不设注入环境变量、不提权**，实测打印一行 `argv[0]:…` 后**以 exit 0 秒退**，什么都不做（6099 没开、没有任何 QQ 进程）。现在改为**提权启动**（`Start-Process … -Verb RunAs`）并调用真正的 `launcher.bat`，提示语写明"请在 UAC 点『是』，二维码刷新后 2 分钟内扫掉"。
 - **「打开扫码页」是死链**：它只是指向 6099 的链接，而 6099 是 NapCat 进程起来后才存在的。现在未监听时**禁用按钮并显示原因**（"扫码页不可用（NapCat 未运行）"）。
 - **满屏「token 无效」**：页面从地址栏取 token，不带 `?token=` 打开就等于空 token，于是每个面板都报错。现在**地址里没 token 时直接弹中文横幅**：token 存在 `qq-control.json`、**宿主 3080 的 token 每次重启都会变**、两者不能混用。
 
-### 新增：登录二维码面板 + 重启登录流程
+#### 新增：登录二维码面板 + 重启登录流程
 
 - `GET /api/qr` 直接返回二维码图片（dataUrl）+ **这张码是几秒前生成的** + 过期提醒（QQ 的码约 1–2 分钟失效；实测文件写过一次后 8 分钟不再变化，光看"文件在不在"会误判）
 - 「重启登录流程」按钮：提权重启整条登录链路
 
-### 独立对抗性审查发现的问题（全部已修，每条都有回归断言）
+#### 独立对抗性审查发现的问题（全部已修，每条都有回归断言）
 
 - **【严重】重启流程按镜像名 `taskkill /F /IM QQ.exe`，会把用户自己的 QQ 一起杀掉**——真机上就有一个**非提权的个人 QQ** 在跑；护栏还只要"6099 有人监听"就放行（别的程序占用 6099 也算）。
   修法：改为**按加载器 PID 清理**（`taskkill /PID <pid> /T /F`，子进程连带结束），命令里**不再出现 `QQ.exe` 或 `/IM`**；6099 不再作为放行依据；**拿不到加载器 PID 直接拒绝**。
@@ -566,11 +570,11 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **控制台把 `jobs.webhook`/`jobs.autoHeal` 整对象透传**（今天不泄露只因 writer 有白名单）。控制台侧现自己挑字段。
 - **自愈命令原文进了 trace 的 reason**（含本机绝对路径与用户名），而 trace 会被 `/api/trace` 与诊断包带走。现在 reason 只留**可执行文件 basename + 参数个数**。
 
-### 顺带修掉的观察项
+#### 顺带修掉的观察项
 
 `qrStatus` 区分「读不到（EBUSY/EACCES）」与「不存在」；`qr()` 校验 **PNG 魔数**（否则任意文件都能被当图片回给前端）；ops 规划器改用 `Object.hasOwn`（`kind:'constructor'` 曾命中原型拿到**函数**）；`planSendLike` 遇 `Symbol` 不再抛错。
 
-### 隐私复核（本轮一并做了）
+#### 隐私复核（本轮一并做了）
 
 - 受控文件 128 个：真实 QQ 号 / 本机绝对路径 / token 形态 / 邮箱 **全 0**
 - **git 历史**（79 提交 / 632 blob）扫真实 id：**0 命中**（首次扫描报的"各 1 处"是**假阳性**——`git grep` 的报错输出被当成匹配行，复核后按 0 报）
@@ -578,17 +582,17 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 鉴权：新增路由全在 token 校验之后；21 例绕过尝试（`//api/`、大小写、URL 编码、`__proto__` 路由、重复 token…）全部失败
 - 导出：`publicConfig` 只有路径、不含控制台 token；**未脱敏诊断包天然含真实 QQ 号与消息原文——对外分享必须用脱敏通路（页面默认已勾选）**
 
-### 测试
+#### 测试
 
 - 增量：`control-unit` 121 → **152**、`perf-unit` 61 → **66**、`ops-unit` 94 → **106**、`engage-unit` 109 → **111**
 - 全量 **55 套 / 3434 断言全绿**
 - 唯一未验证项（诚实声明）：`Start-Process -Verb RunAs` 与 `-WorkingDirectory` 的真实组合行为会弹 UAC，审查按禁令未实测
 
-## v0.5.5（2026-09-14 发布）— 控制台看得见 / Console visibility
+### v0.5.5（2026-09-14 发布）— 控制台看得见 / Console visibility
 
 > 本版主题：**把控制台从「能启停、能看日志」变成「看得懂」**。四阶段计划的最后一块：群配置页、定时任务面板、性能面板、回放 diff、注入场景库。全部是**只读+可回放**的能力，控制台依旧不写配置文件、不替桥做决定。
 
-### 性能面板（`GET /api/perf`）
+#### 性能面板（`GET /api/perf`）
 
 - 端到端延迟 = 同一条 traceId 的「最后一条事件 − 第一条事件」；给出整体与**分会话**的 P50/P95/最慢/平均
 - **阶段耗时画像**：直接用 trace 里已有的 `ms`（lib/trace.js 记的是「距上一条 mark 的耗时」），不新造埋点
@@ -596,44 +600,44 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 返回一句人话结论（`最近 N 条消息：P50 x ms，P95 y ms`），没有数据时说"还没有可统计的消息"而不是显示 `NaN`
 - `percentiles()` 只认数字与数字字符串：`Number(null) === 0` 会把"没有数据"混进分位数（实测踩过）
 
-### 定时任务面板（`GET /api/jobs`）
+#### 定时任务面板（`GET /api/jobs`）
 
 - 播报任务：下次触发时间（人话：`30 秒后`/`2 分钟后`）、上次原因、成功/失败次数、**「一直在失败」标记**
 - 入站 webhook：来源与收/丢计数；掉线自愈：命令**是否**配置、冷却、上限、最近一小时尝试次数
 - 注入队列：待消费行数、已消费、dry-run 状态、轮询间隔
 - 数据来自桥写进运行快照的新 `jobs` 块：**只有描述性字段**，自愈命令原文与任何 token 都不进快照（有断言守住）
 
-### 群配置页（`GET /api/groups`）
+#### 群配置页（`GET /api/groups`）
 
 - 每个群一行：白名单状态（从快照 `replay.allowGroups` 判定，不可知时显示"未知"而不是猜）、会话 ID 与状态、最近回合时间、挂在该群上的定时任务
 - **16 项生效开关**一览 + 实时计数（表情统计条数 / 运营计数项 / 待确认批量踢 / 正在输入的会话）
 - 面板明说：开关的真源是插件配置（profile 的 `cordis.patch.yml`），这里显示的是**生效值**
 
-### 注入场景库（17 个内置场景）
+#### 注入场景库（17 个内置场景）
 
 - `GET /api/scenarios` 列清单；`POST /api/inject` 支持 `{ scenario, params }`（不带 `scenario` 时行为不变，仍收裸 spec）
 - 每个场景声明**需要哪些参数**与**专门验哪条链路**，缺参数时点名缺什么（例如 `场景「群里 @我 说话」缺少参数：groupId、userId`），不猜默认值
 - 覆盖：群里 @我 / 普通聊天（验 `replyOnlyWhenMentioned` 门控）/ 撤回 / 戳一戳 / 入群 / 表情回应 / 入群申请 / 加好友申请 / 私聊文本 / 私聊图片 / `@我 发图 + /ocr` / 转发卡片（带 `forwardText` 保证确定性）/ 管理员 `/kick` / `/群打卡` / `/批量踢` 第一步 / 敏感词 / 超长消息
 - 纯模块只产出 spec（形状与 `lib/inbox.js` 的 `expandInjection` 一致），写队列仍走既有 `api.inject`
 
-### 回放 diff（`POST /api/replay-diff`）
+#### 回放 diff（`POST /api/replay-diff`）
 
 - 同一批录到的消息跑**两次**回放：基线 vs 你写的配置覆盖（`{"keywordEnabled": true}` 这类），机械比出三类差异：**决策变了**（会回复 ↔ 静默）、**静默原因变了**、**回复文本变了**
 - 回复文本变化带**相似度**（字符 bigram 的 Dice 系数），避免措辞微调被误判成行为变化；只有一侧有结果时标 `unknown`（而不是"变了"）
 - 缺 `variant` 直接拒绝并给例子，且**不会白跑两次回放**（有断言：拒绝时 `api.replay` 调用次数不增加）
 
-### 测试
+#### 测试
 
 - 新增 2 套：`perf-unit`（61，分位数边界、链分组、阶段/失败画像、任务与群视图、纯模块红线）、`scenario-unit`（49，场景清单完整性、逐场景 spec 形状、缺参数拒绝、文本相似度、diff 分类）
 - `control-unit` 99 → 121（三个新 GET 端点的真实 HTTP 断言 + 场景注入 + 两次回放与拒绝路径）
 - 全量 **55 套 / 3384 断言全绿**（v0.5.4 为 53 套 / 3252）
 - 过程中由测试逼出的真 bug：`percentiles()` 把 `null`/`''` 当 0 计入分位数；三个新 GET 路由漏了 `await`，序列化 Promise 得到空对象（页面会全空白）
 
-## v0.5.4（2026-09-14 发布）— 群运营工具箱 / Group ops toolbox
+### v0.5.4（2026-09-14 发布）— 群运营工具箱 / Group ops toolbox
 
 > 本版主题：**把群运营的日常动作做成一等公民**——原生签到、群待办、@全体余量、禁言名单、批量踢、群资料、入群与发言策略、文件整理、相册上传，外加一份本地统计的运营周报。全部默认关闭（总开关 `groupOpsEnabled`），写操作一律过 ActionGate，注入/回放回合一律不写 QQ。
 
-### 真机探针先行（本版纠正了三个会做错的地方）
+#### 真机探针先行（本版纠正了三个会做错的地方）
 
 读本机安装的 NapCat 实现包（`bootmain/napcat.mjs`，QQ 9.9.32-50969）逐一核对 action 名与参数 schema，结论写进 `lib/ops.js` 头部并由 `test/ops-unit.mjs` 钉住：
 
@@ -642,7 +646,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **相册上传确实存在，但名字是 `upload_image_to_qun_album`**（不是 `upload_qun_album`）；配套 `get_qun_album_list` / `get_group_album_media_list`。
 - **`set_group_member_permissions` 是局部更新**：探针文档明确写「未传入的项目保持不变」。所以 `/群权限` 只提交**显式写出**的项——把没提到的项塞成 `false` 会静默关掉用户没打算关的权限。
 
-### 新增命令
+#### 新增命令
 
 | 命令 | 开关 | action | 说明 |
 |---|---|---|---|
@@ -660,35 +664,35 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 | `/历史可见 开\|关` | `opsPolicyEnabled` | `set_group_new_member_history_visibility` | 管理员 |
 | `/周报` | `opsReportEnabled` | 本地统计 | 最近 N 天（`opsReportDays`，默认 7）的消息/入群/退群/踢出/禁言/打卡/待办/文件整理/相册上传计数 + 最忙的一天；**纯本地读，不访问 QQ** |
 
-### 命令命名踩到的两个坑（都在代码里留了注释）
+#### 命令命名踩到的两个坑（都在代码里留了注释）
 
 - `/群资料` 已被既有**基础群信息**查询占用（走 `get_group_info`）→ 扩展版改名 `/群详细`。
 - `/成员权限` 会被既有 `/成员` 命令**整条吃掉**（该命令为了好用，刻意支持 `/成员张三`、`/成员@12345` 这种紧贴写法，且有测试保护）→ 改名 `/群权限`。这两个坑都是实测才暴露的，不是设计出来的。
 
-### 周报计数（`qq-ops.json`）
+#### 周报计数（`qq-ops.json`）
 
 消息、入群、退群、禁言/解禁、打卡、待办、批量踢、文件整理、相册上传都会计数，按天分桶、保留 30 天、跨重启累加（`OpsCounters` 有 snapshot/restore，坏文件不影响启动）。
 
-### 新增配置键（默认值）
+#### 新增配置键（默认值）
 
 `groupOpsEnabled`(false) `nativeSignEnabled`(false) `opsReadEnabled`(true) `opsKickEnabled`(false) `opsKickBatchSize`(20) `opsTodoEnabled`(false) `opsFileEnabled`(false) `opsAlbumUploadEnabled`(false) `opsProfileEnabled`(false) `opsPolicyEnabled`(false) `opsReportEnabled`(false) `opsReportDays`(7) `opsCountersFile`("") —— 配置键总数 204 → **217**，`test/static-unit.mjs` 的双向校验（含"没有死开关"）全部通过。所有子开关都在总开关之下：`groupOpsEnabled=false` 时任何群运营命令都只回一句中文说明。
 
-### 测试
+#### 测试
 
 - 新增 2 套：`ops-unit`（94，纯模块：规划器参数形状、分批不丢人、渲染器、周报计数与快照、零依赖红线）、`ops-bridge-unit`（96，桥层：**每个新 API 一条"注入回合 0 出站"断言**、两步确认与超时、分批、相册按名解析、局部更新语义、计数跨重启）
 - 全量 **53 套 / 3252 断言全绿**（v0.5.3 为 51 套 / 3062）
 
-## v0.5.3（2026-09-14 发布）— 点一下就完事 / One tap
+### v0.5.3（2026-09-14 发布）— 点一下就完事 / One tap
 
 > 本版主题：**轻互动**。戳一戳、正在输入、表情回应、点赞、标记已读——用真实存在的能力把"群里的小动作"做成一等公民。全部默认关闭；所有写操作过 ActionGate + 出站配额；**注入/回放回合一律不写 QQ**（`injectDryRun: false` 的真发模式除外）。
 
-### 先做真机探针，再动代码（本版最重要的结论是否定的）
+#### 先做真机探针，再动代码（本版最重要的结论是否定的）
 
 - 按钮类能力**没有靠猜**：直接读本机安装的 NapCat 实现包（`bootmain/napcat.mjs`，QQ 9.9.32-50969），逐个确认 action 名、参数 schema 与入站事件字段，结论写进 `lib/engage.js` 文件头并由 `test/engage-bridge-unit.mjs` 逐条钉住
 - **探针结论：这个构建发不了内联按钮**——`"keyboard"` / `"button"` 段名在整个 bundle 里出现 **0 次**（`"text"`/`"json"`/`"markdown"`/`"poke"` 等真实段名都在），OB11 段枚举里只有 `click_inline_keyboard_button`（点**别人**发的按钮）。所以本版**没有做**按钮面板，而是把「点一下就完事」落到真实可用的四种轻互动上
 - 确认可用：`group_poke` / `friend_poke` / `send_poke`、`set_input_status`、`set_msg_emoji_like`、`get_emoji_likes`、`fetch_emoji_like`、`send_like`、`mark_group_msg_as_read` / `mark_private_msg_as_read` / `mark_msg_as_read`；入站 `notice.group_msg_emoji_like`（`message_id`/`likes`/`is_add`/`message_seq`）、`notice.notify/poke`、`notice.notify/input_status`
 
-### 互动能力（`engageEnabled` 总开关 + 每个能力独立子开关，全部默认关）
+#### 互动能力（`engageEnabled` 总开关 + 每个能力独立子开关，全部默认关）
 
 - **主动戳一戳** `/戳 @某人`（管理员）：`pokeCommandEnabled`，白名单 + ActionGate + 每小时配额 `pokePerHour`（默认 5）三层；命令一律**空白分隔**，`/戳12345` 不认
 - **被戳回戳**：`pokeBackEnabled` 时被戳**真的戳回去**（`group_poke`/`friend_poke`），可配 `pokeBackText` 同时回一句话；仍受既有 `pokeEnabled` 总开关与冷却约束（`pokeEnabled=false` 时 trace 会明确点名）
@@ -698,33 +702,33 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **点赞**：`sendLikeEnabled` → `/点赞 [@某人]`，一次 `sendLikeTimes`（默认 10，QQ 客户端上限），每目标每天 `sendLikePerDay`（默认 3）
 - **标记已读**：`markReadEnabled` → 收到消息顺手 `mark_*_msg_as_read`（按**会话**标记，不按单条消息），每分钟 `markReadPerMinute` 限流
 
-### 红线（v0.4「一切皆可调试」六条硬约束在本版的落点）
+#### 红线（v0.4「一切皆可调试」六条硬约束在本版的落点）
 
 - **`set_msg_emoji_like` 只带 `message_id`、没有任何会话键**，scoped dry-run 拦不住它 → 桥里自己判 `__injected`/`__replayed` 并给出真实 reason；`test/engage-bridge-unit.mjs` 逐条断言注入回合 **0 出站**
 - 注入回合里 `/赞榜` 是**纯本地读**，照常回答且 trace 写明"只读本地 JSON，不访问 QQ"；`/谁赞了` 不调 QQ、回落本地并说明原因
 - 每个开关的"关着"分支都有真实 reason（`主动戳未启用（engageEnabled=true，pokeCommandEnabled=false）`），配额拒绝也带数量：`戳一戳 已达每小时上限（5/5 次）`
 - 注入口径与既有 `injectDryRun` 一致：默认干跑拦截，`injectDryRun: false`（"注入并真发"）时照常执行
 
-### 顺手修掉的两个真缺陷（都是 v0.5.2 的，且都属于"静默失效"）
+#### 顺手修掉的两个真缺陷（都是 v0.5.2 的，且都属于"静默失效"）
 
 - **状态持久化从来没生效过**：桥对 `JsonStore` 调用的是不存在的 `load()`/`save()`（真实 API 是 `read()`/`write()`），异常被 `try/catch` 吞掉，于是**播报去重与统计跨重启丢失**、且毫无提示。已修全部调用点，并补上跨重启回归（`unattended-unit` D21 / `engage-bridge-unit` G1–G4）
 - **互动配额恢复打空**：`#loadEngageState()` 在配额对象构造**之前**被调用，`restore` 抛错同样被吞掉 → 每小时配额跨重启失效。已调整顺序并加可选链防御
 - 附带：运行快照在记账后不刷新（控制台的表情计数永远停在启动时的 0）→ 记账后按既有 2s 节流补写一次
 
-### 新增配置键（默认值）
+#### 新增配置键（默认值）
 
 `engageEnabled`(false) `pokeBackEnabled`(false) `pokeBackText`("") `pokeCommandEnabled`(false) `pokePerHour`(5) `typingEnabled`(false) `emojiLikeEnabled`(false) `emojiLikeId`("128077") `emojiLikeMentionOnly`(true) `emojiLikePerHour`(20) `reactionStatsEnabled`(false) `reactionStatsFile`("") `sendLikeEnabled`(false) `sendLikeTimes`(10) `sendLikePerDay`(3) `markReadEnabled`(false) `markReadPerMinute`(10) —— 配置键总数 187 → **204**，`test/static-unit.mjs` 的双向校验（schema ↔ 代码读取，含"没有死开关"）全部通过。
 
-### 测试
+#### 测试
 
 - 新增 2 套：`engage-unit`（109，纯模块：planner 参数形状、表情统计去重/撤回/排行/落盘、配额三档窗口、榜单渲染、零依赖与"不自己发 QQ"红线）、`engage-bridge-unit`（90，桥层：五类新 API 各一条"注入回合 0 出站"、命令空白分隔、配额与闸门、两种注入模式、跨重启持久化）
 - 全量 **51 套 / 3062 断言全绿**（v0.5.2 为 49 套 / 2860）
 
-## v0.5.2（2026-09-14 发布）— 无人值守 / Unattended
+### v0.5.2（2026-09-14 发布）— 无人值守 / Unattended
 
 > 本版主题：**无人值守**。三件事——外部事件能主动进群、定时内容自己发、掉线了自己爬起来。全部默认关闭，写操作与出站一律走既有的闸门/限流/trace 体系。
 
-### 入站 webhook（`webhookEnabled`，默认关）
+#### 入站 webhook（`webhookEnabled`，默认关）
 
 - 独立 HTTP 端点（默认只绑 `127.0.0.1:8798`），`POST /hook/<来源名>` → 渲染成一条 QQ 消息发到配置的会话
 - 三种 `format` 适配器：`github`（push / pull_request / issues / issue_comment / workflow_run 含 CI 成功失败 / release）、`uptime-kuma`（心跳 0 宕机 / 1 恢复 / 2 待定 / 3 维护）、`generic`（任意 JSON + `{a.b.c}` 占位符模板，取不到值填 `（无）`）
@@ -733,34 +737,34 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 每来源滑动一分钟限频 `webhookRatePerMinute`（默认 30），超限 **429**；`status()` 暴露每个来源的 `received` / `dropped` / `lastAt`（只暴露名字与计数，**不含 token/secret**）
 - 每次事件都写 trace：收到、渲染失败、发送被拦（限流或注入回合）都有中文 reason
 
-### 定时播报（`broadcastEnabled` + `broadcastJobs`，默认关）
+#### 定时播报（`broadcastEnabled` + `broadcastJobs`，默认关）
 
 - 三种任务：`rss`（自带 RSS 2.0 / Atom / RDF 解析器，**零第三方依赖**；按 guid/link 去重，跨宿主重启不重复；支持 `keyword` 过滤与 `maxItems`）、`weather`（Open-Meteo，免费无 key；WMO 天气码译成中文 + emoji）、`mc`（复用既有 Server List Ping）
 - 排期两种写法：`at: "HH:MM"`（可配 `weekdays`，0=周日，最多向后找 8 天）或 `everyMinutes`（下限 5，优先于 `at`）；定时器延迟夹取到 `[0, 2^31-1]`，间隔类按"上次计划时间 + 间隔"递推，**执行耗时不会让排期漂移**
 - 去重与统计（`seen` / `lastAt` / `lastReason` / `runs` / `failures`）落盘 `qq-broadcast.json`，`stop()` 时保存、启动时恢复
 - 失败必留中文 `lastReason` 且**不发送空消息**；`/播报` 列任务与下次时间、webhook 状态与收/丢计数，`/播报 测试 <任务 id>` 立即触发一次（管理员）
 
-### 掉线自愈（`autoHealEnabled` + `autoHealCommand`，默认关）
+#### 掉线自愈（`autoHealEnabled` + `autoHealCommand`，默认关）
 
 - QQ 客户端断开时按配置命令把它拉起来：**只启动、绝不杀进程**（杀进程仍归控制台，那边有专门护栏），`detached + shell + stdio:'ignore' + unref`，不阻塞宿主也不连坐子进程
 - 冷却 `autoHealCooldownSeconds`（默认 300s）+ 每小时上限 `autoHealMaxPerHour`（默认 3）；**命中冷却或上限都会写 trace 说明原因**，不静默；`autoHealEnabled=true` 却没配命令也照样留 reason
 - 与既有 `notifyEnabled` 出站告警互补：告警负责"告诉你掉了"，自愈负责"拉回来"
 
-### 新增配置键（默认值）
+#### 新增配置键（默认值）
 
 `webhookEnabled`(false) `webhookPort`(8798) `webhookSources`([]) `webhookRatePerMinute`(30) `webhookMaxBodyBytes`(65536) `broadcastEnabled`(false) `broadcastJobs`([]) `broadcastStateFile`("") `autoHealEnabled`(false) `autoHealCommand`("") `autoHealCooldownSeconds`(300) `autoHealMaxPerHour`(3) —— 配置键总数 175 → **187**，`test/static-unit.mjs` 的双向校验（schema ↔ 代码读取）全部通过。
 
-### 测试
+#### 测试
 
 - 新增 4 套：`feed-unit`（144，RSS/Atom/RDF、CDATA、实体、时间解析、截断）、`webhook-unit`（114，含真实 HTTP 往返：鉴权/413/429/405/400/500 与 status 计数）、`broadcast-unit`（189，假 timers 推进到点触发、间隔不漂移、去重、快照往返）、`unattended-unit`（桥层：webhook 真发到群、`/播报` 管理、自愈冷却与上限、**注入回合 0 出站**）
 - 全量 **49 套 / 2860 断言全绿**（v0.5.1 为 45 套 / 2306）
 - 过程中由测试逼出的真 bug 随手修掉：`formatFeedItems` 的 `limit` 参数算了没用、feed 标题张冠李戴（channel 无 title 时取了第一条 item 的标题）、`stripHtml` 先解实体再删标签导致 `&lt;大新闻&gt;` 被吃掉、CDATA 整段被标签正则吞掉、413 因 abortive close 拿不到状态码、`renderWebhook` 遇 BigInt 序列化抛错
 
-## v0.5.1（2026-09-13 发布）— 审查修复 / Audit fixes
+### v0.5.1（2026-09-13 发布）— 审查修复 / Audit fixes
 
 > 本版是 v0.5.0 的补丁：发布后做了一轮**对抗性审查 + 隐私审计**，抓出并修掉 8 个缺陷（3 个 P1、5 个 P2）。没有新功能。
 
-### 修复
+#### 修复
 
 - **`/成员 <昵称>` 对没设群名片的成员永远查不到**（P1）：`String(item?.card ?? item?.nickname ?? '')` 在 `card: ''` 时得到空串，`''.includes('小红')` 恒为 false——而"成员没设群名片"是默认形态。改为"去空白后回落到昵称"（与 `lib/members.js` 的显示名规则同源）
 - **转发卡片展开为空时仍起一个空模型回合**（P1）：`forwardExpandEnabled=false`、`get_forward_msg` 返回空、或调用失败这三种情况下，`hasForwards` 豁免让流程继续走到 agent，模型收到一个**内容为空的 user turn**（白烧 token，还可能在群里自说自话）。现在在 handoff 前复查 `effectiveText`，为空则 drop 并写明"转发卡片展开后没有可读内容"
@@ -771,25 +775,25 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **`/取` 的两处隐私/资源问题**（P2）：私聊投递失败时会把**本机绝对路径**发进群里（泄露部署者的用户名与目录结构），现在只回文件名、完整路径仅进本机日志；`qq-files/` 也纳入保留期清理（原文：只清 `qq-images`/`qq-replies`，下载目录永不清理）。另外投递注定被闸门拒时不再先下载（50 MiB 上限 × 反复 `/取` 可以撑满磁盘）
 - 细节：单条消息最多展开 3 张转发卡片时，trace 现在会说明"另有 N 张卡片未展开"（原先静默丢弃）；`groupFileListLimit` 的说明补上"同时也限制 `/相册` 显示条数"（实际行为如此，原文只写群文件）
 
-### 测试
+#### 测试
 
 - 新增 `test/inject-assets-unit.mjs`（28 条）：起**真实** OneBotServer + 真 WebSocket 客户端，走**真实注入通道**，逐条验证 7 个新命令"注入回合 0 出站帧 + 回复理由诚实"，并用正对照证明 6 个出站动作在非 dry-run 下**确实**发出（没有正对照，A 段就是空测试）
 - `seeing-unit` 71→86、`find-unit` 59→72：把上述 5 个修复逐个钉住；并做了**反向验证**（把 `lib/bridge.js` 换回修复前版本，新断言各挂 8 条），确认不是恒真断言
 - `privacy-unit` 32→33：新增"文件名里也不能有真实 QQ 号"，并修掉它自己的一个假阳性——`.gitignore` 匹配器把目录规则 `qq-*/` 去掉末尾斜杠后当文件规则用，导致 `qq-badwords.txt`（插件会写出的敏感词表）被误判为"已忽略"。同时补齐跨行 YAML 列表的私有号采集
 - `.gitignore` 补上 `qq-*.txt`（`qq-badwords.txt` 原文未被任何规则覆盖：`.json/.jsonl/.log` 命中、`.txt` 全都不命中）
 
-## v0.5.0（2026-09-13 发布）— 看得见 · 找得回 / See it, find it
+### v0.5.0（2026-09-13 发布）— 看得见 · 找得回 / See it, find it
 
 > 本版主题：**看得见 · 找得回**。一半是把"已经封装好、却从没接上线"的能力接通（合并转发、群成员、群资料、群历史、表情回应），一半是补上"群里的东西能找回来"（群文件、相册、OCR、历史检索 + 按天归档）。同时修掉一个**违反 v0.4 第一条硬约束**的洞：合并转发卡片此前在传输层被静默丢弃。
 
-### 合并转发展开（先修洞，再加功能）
+#### 合并转发展开（先修洞，再加功能）
 
 - **问题**：`parseMessage` 只认 text/at/reply/record/image/file，没有 `forward` 分支；于是"只发一张聊天记录卡片"的消息在 `#onFrame` 就因"text/records/images/files 全空"被 `return` 掉——**不产生 message 事件、trace 里连一条记录都没有**。而 `get_forward_msg` 的封装注释一直写着"used to expand recalled cards"，这条路径从没接上
 - 现在：`parseMessage` 识别 `[CQ:forward]` 与数组形式的 `forward` 段；`#onFrame` 不再因此早退；桥内新增 `#expandForwards`，用 `get_forward_msg` 取节点并交给新的纯模块 `lib/forward.js` 规范化 + 排版成 `[转发聊天记录] 昵称: 内容`（默认最多 50 条 / 4000 字，只展开一层不递归，`forwardExpandEnabled` 可关）
 - **同时修掉一个自引入的门控逃逸**：空文本分支原本让 `else if` 链整体跳过，于是"群里没 @ 机器人的转发卡片"会绕过 @ 门（也绕过私聊的 `acceptPrivate` 门）——白调一次 OneBot、白跑一个模型回合。现在空文本路径自己过这两道门并写 reason（由桥层测试 `seeing-unit` 抓出）
 - 回放/注入（dry-run）不访问 QQ：注入可直接带 `forwardText` 喂一份正文；录制白名单新增 `forwards` / `forwardText`，注入规格新增 `forwards` / `forwardText`
 
-### 接通既有能力（封装早就在，只是没人调用）
+#### 接通既有能力（封装早就在，只是没人调用）
 
 - `/成员` 列群成员（身份/等级/头衔/禁言中排序）、`/成员 @某人|昵称|QQ号` 看详情（入群时间/最后发言/禁言状态）；agent 工具 `qq_member_info`（群聊专用）
 - `/群信息`（群名/群号/人数上限/群主/建群时间）
@@ -798,7 +802,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - agent 工具 `qq_react`：给消息贴表情回应（`set_msg_emoji_like`）而不是发一条消息，写操作过闸门；默认作用于本回合收到的消息
 - `/退群 确认`（**默认关闭**，必须显式二次确认，走闸门；`DEFAULT_ACTION_LIMITS` 新增 `set_group_leave` 限额）
 
-### 群资产
+#### 群资产
 
 - `/文件`、`/文件 <文件夹名>`：列群文件与文件夹（`get_group_root_files` / `get_group_files_by_folder`）
 - `/取 <文件名>`：`get_group_file_url` 取链后下载到 `cwd/qq-files/`，**只发到发起人私聊**（群里只留一句提示，不往群里丢文件）；精确/前缀/模糊匹配，文件名经 `sanitizeDownloadName` 消毒（去路径、去 Windows 非法字符、保留名加前缀、120 字上限保留扩展名）
@@ -806,14 +810,14 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - `/ocr`：对本条或引用的图片调用 NapCat `ocr_image` 读出文字（不消耗模型）
 - 排版与匹配逻辑集中在新的纯模块 `lib/assets.js`
 
-### 历史归档与检索
+#### 历史归档与检索
 
 - 每条白名单会话的真实消息按天归档到 `cwd/qq-history/YYYY-MM-DD.jsonl`（新模块 `lib/archive.js`，用记录自身的 `ts` 算本地日期，避免东八区凌晨落错分片）；**注入/回放的假事件不入档**，`/` 开头的命令也不入档
 - `/找 关键词`：大小写不敏感、空格分隔多词为 AND、只搜当前会话、可配天数与条数；agent 工具 `qq_search_history` 同源同口径
 - 保留期默认 90 天，过期分片在宿主启动时**移入** `qq-trash/<日期>/`（`prune` 只移不删，与图片清理同一套"never destroy"约定）
 - 控制台新增「群资产 · 历史检索」卡片与 `GET /api/archive`（无 `q` 返回概览、带 `q` 走检索，复用插件同一套解析），`control-unit` 增加真实 HTTP 往返断言
 
-### 修复（本版自测抓出的 6 个真缺陷）
+#### 修复（本版自测抓出的 6 个真缺陷）
 
 1. **门控逃逸**：空文本 + 转发卡片绕过 @ 门与 `acceptPrivate` 门（`seeing-unit` 抓出）
 2. `/文件`、`/文件 <文件夹>`、`/相册` 把格式化函数的**返回对象**直接插进模板串，群里看到的是 `[object Object]`（`find-unit` 抓出）
@@ -822,32 +826,34 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 5. 启动 prune 的回收目录日期套了两层（外层还是 UTC 日期，与内层本地日期错位）（`find-unit` 抓出）
 6. **前缀撞车**：`/取` 把既有的 `/取消精华` 吃掉（`commands-unit` 抓出，与历史 `/vote-end` 同一类坑）；`/文件` 同样收紧为"必须空白分隔"
 
-### 验证
+#### 验证
 
 - 单测 44 套 / 2247 断言全绿（新增 `forward-unit` 111、`members-unit` 104、`history-unit` 81、`archive-unit` 86、`assets-unit` 132、桥层 `seeing-unit` 71、桥层 `find-unit` 59，`control-unit` 95→99）
 - 真机（宿主 3080 / 控制台 8799）：注入带 `forwardText` 的转发帧 → trace 出现 `forward` 阶段成功事件、模型回合收到完整两条记录；`/成员`、`/群信息`、`/找`、`/文件`、`/相册`、`/ocr` 六条新命令在真机分发正确；`/api/archive` 概览与检索均返回真实数据；UI 新卡片渲染正常
 
-## v0.4.1（2026-09-13 发布）— 依赖解析与安装修复 / Dependency resolution & install fixes
+## v0.4 系列（2026-09-12 ～ 2026-09-13）
+
+### v0.4.1（2026-09-13 发布）— 依赖解析与安装修复 / Dependency resolution & install fixes
 
 > 本版修社区反馈的安装问题（[issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)）：干净环境下插件加载即 `ERR_MODULE_NOT_FOUND: Cannot find package 'schemastery'`，连带把成因相同的安装/声明问题一起收口。
 
-### 修复
+#### 修复
 
 - **`schemastery` 改用作用域名 `@deepseek-ai/schemastery`**：`lib/index.js`、`lib/bridge.js` 原本写的是裸名 `import z from 'schemastery'`，而 `package.json` 只声明了 `@deepseek-ai/schemastery`——**裸名是另一个包**（未带作用域的 `schemastery@3.18.0`，官方为 `@deepseek-ai/schemastery@3.18.1`），只有在"同 profile 里别的插件恰好把它 hoist 到共享 node_modules"时才解析得到（本机就是被 `dsh-mnemon` 的依赖 hoist 兜住的）。DSH 并没有"裸名别名注入"机制，官方包全部使用作用域名；干净环境必然加载失败
 - **peer 版本区间补上 `^0.1.5-rc.1`**：预发布区间不会跨补丁线，`^0.1.2-rc.1` 不匹配 `0.1.5-rc.1` / `0.1.5-rc.2`，在 DSH 0.1.5-rc.1 上会出现 peer 解析问题（`--omit=peer` 能绕过，但根因在声明）
 - **静态回归防线**（`test/static-unit.mjs` 新增三项）：lib/ 里每个第三方 import 必须在 `package.json` 的 dependencies/peerDependencies/optionalDependencies 中声明；官方依赖禁止退化成裸名（`@deepseek-ai/x` 的 basename 不得作为 import 规格名出现）；并校验规格名扫描确实抓到官方依赖，避免正则失效导致假通过。这类"只在特定机器上能跑"的依赖问题会被直接测挂
 - **文档纠错与补全**：README 中"裸名 `schemastery` 由 DSH 以别名注入"的说法**是错的**，已删除并改写为正确的部署事实；同时补充本地目录安装说明——`dsh plugin add <目录>` 走 pnpm 的 `link:`，不会安装被链接包自己的依赖，需先在插件目录执行 `npm install --omit=dev`（`ws`），从插件市场安装则会随依赖一起装好
 
-### 验证
+#### 验证
 
 - 干净环境复现与回归：无 hoist 裸包的沙箱里，修复前 `ERR_MODULE_NOT_FOUND: Cannot find package 'schemastery' imported from lib/index.js`；修复后插件入口正常加载（152 个配置键）
 - 37 套单测 / 1596 断言全绿（新增 3 项静态防线）；本机 `node_modules` 里手工建的"裸名→作用域名"别名 junction 已移除，本地解析口径与干净环境一致，避免再次掩盖同类问题
 
-## v0.4.0（2026-09-12 发布）— 一切皆可调试 / Everything Debuggable
+### v0.4.0（2026-09-12 发布）— 一切皆可调试 / Everything Debuggable
 
 > 本版主题：**一切皆可调试**。出问题时不用猜——每条消息都有 traceId，每个"没回复"都有原因，任何一条历史消息都能离线重跑，假事件能喂进真实管线，而且这 6 条约束在控制台里随时可验收（阶段 1→4：可观测地基 → 控制台调试层 → 录制/回放/注入 → 硬约束验收台）。
 
-### 独立控制台（control/）
+#### 独立控制台（control/）
 
 - **独立进程、独立端口**：`control/bin/qq-control.mjs` 自带 HTTP 服务，只绑 `127.0.0.1:8799`（可 `--port` 改），不依赖 DSH 桌面端或 web 宿主——宿主挂了控制台照常可用
 - **端口单一真源** `control/lib/config.mjs`：`qq-control.json` 统一管理控制台 8799 / 宿主 3080 / OneBot 6700 / NapCat 6099 / GPT-SoVITS 9880；node 可执行文件、`dsh bin.js`（自动扫 npx 缓存取最新）、NapCat 启动脚本与二维码路径、TTS 脚本、日志路径全部**自动探测 + 可覆盖**
@@ -858,7 +864,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **单页控制台** `control/ui.html`（无外部依赖、离线可用）：五端口状态灯、机器人/宿主在线徽标、QQ/NapCat/Python 进程与二维码新鲜度、按用途分组的操作按钮、三份日志（宿主 stdout/stderr、桥调试日志）自动跟随、路径配置表单；启动器 `control/启动控制台.bat`，也可 `npm run control`
 - 新增测试 `test/control-unit.mjs`（76 项）：netstat/tasklist 解析（含 IPv6、表头、ESTABLISHED）、端口摘要与中文标签、日志尾部与 3080 token 提取、二维码新鲜度、配置探测/覆盖/保存/提醒、杀进程护栏正反例、启动命令构造与端口占用拒绝、**真实 HTTP 往返**（UI、404、401 无/错 token、403 跨站 Origin、状态/日志/各 mutation、路径穿越拦截、非法 JSON、非法端口过滤）、`killTree`/`inspect`/`readUi` 容错
 
-### 录制 · 离线回放 · 事件注入（阶段 3：可回放 + 可注入）
+#### 录制 · 离线回放 · 事件注入（阶段 3：可回放 + 可注入）
 
 - **录制（新模块 `lib/inbox.js`，`recordInbound` 默认开）**：桥收到的每条消息/通知/请求按**可回放形状**追加到 `cwd/qq-inbox.jsonl`（单行 JSON：`{v,ts,kind,frame}`，只保留业务字段，socket/未知字段一律丢弃；文本截断 2000 字；2 MiB 上限、尾部保留 256 KiB 轮转）
   - `inboxRedact`（默认关）：落盘前把 6 位以上数字（QQ 号）脱敏，便于把录制文件发给别人排查
@@ -885,7 +891,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
   - `test/replay-live.mjs`（23）：真实桥代码的离线回放验收——关键词命中会回复、未 @ 会静默、私聊命令可用、安静时段给原因；断言 sandbox 隔离、dry-run、无 QQ 连接、无新增监听端口、源目录字节与 mtime 不变
   - `test/replay-live-host.mjs`（38，真机）：真实消息落盘 → 控制台列表 → 离线回放结论与线上一致（白名单来自线上快照、链路出现 `replay` 标记）→ 注入在轮询间隔内被消费、dry-run 拦下全部出站、注入帧不被二次录制 → 历史注入被明确跳过 → 注入回合的模型回复被拦下且原文未出现在任何出站里（模型 300s 内没回话时如实记为 WARN 而非假失败）
 
-### 硬约束验收台（阶段 4：验收）
+#### 硬约束验收台（阶段 4：验收）
 
 - **新模块 `control/lib/acceptance.mjs`（纯函数）**：把 6 条硬约束逐条用**机器上现有的产物**算成 `✅ 达标 / ⚠️ 有提示 / ❌ 不达标 / ❔ 证据不足`，附证据文本、修复提示与关键指标；结论分 `all-green / partial / unknown / broken` 四种
   - ① 无静默分支：最近 500 条事件里所有 `ok:false`（被拒/失败）事件必须带非空 reason，缺的按 stage 点名（空白字符串也算缺）
@@ -900,7 +906,9 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 新增测试 `test/acceptance-unit.mjs`（68）：6 条约束的达标/告警/不达标/证据不足分支（含"回放期间有 QQ 连接""dry-run 被关掉""消息级事件缺 traceId"等危险分支必须判不达标）、汇总口径与文本视图、真实 supervisor 汇总（临时目录里造事件/快照/录制/沙箱，验证口径与回收站不计数）、`/api/acceptance` 的真实 HTTP 往返与 token/Origin 门禁、**面板静态校验**（新卡片元素、新函数、跳转目标、内联 onclick 全部存在）
 - 阶段 4 完成意味着 6 条硬约束**全部落地且有测试与实时验收**：①无静默分支 ②traceId 贯穿 ③可回放 ④可体检 ⑤可导出 ⑥可注入
 
-## v0.3.9（2026-09-11）
+## v0.3 系列（2026-08-26 ～ 2026-09-11）
+
+### v0.3.9（2026-09-11）
 
 **群洞察与定时播报：活跃统计、群荣誉/公告/精华、每日群日报、重复提醒、MC 服务器状态**
 
@@ -918,7 +926,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
   - `test/commands-unit.mjs`（72）：用 mock DSH 上下文（假 agents 服务记录 followup/系统提示段/注册的工具，并模拟 assistant 回复）把**每条命令分支与每个会话工具**都跑一遍：会话创建与工具注册、agent 回发、`/summary /export /撤回 /new`、待办/投票/`/mute /unmute /kick+确认`/`/clear`、群管全套、戳一戳/入群欢迎/防撤回（含图片补发）、入群审批流、`qq_send_file`（上传 + 3 类拒绝路径）/`qq_send_image`/`qq_recall`、resume 成功与失败两条路径、签到/重复提醒/词库/小游戏/运势/骰子/统计/MC，以及 `stop()` 幂等
   - `test/live-e2e.mjs`（6）：**真宿主端到端**——拉起真实 `dsh web` 宿主，假 OneBot 客户端连 6700 验证 `/status`、本地运势、**真 agent 回合**（验证 `defineTool` schema 被宿主接受、`agents.create`、session 事件回发）、同一会话连续对话，以及只读命令在"返回结构异常"的假 OneBot 端下不崩；重启宿主后确认日志出现 `session resumed qq-…`（v0.3.6 会话续接在真实宿主生效）
 
-## v0.3.8（2026-09-11）
+### v0.3.8（2026-09-11）
 
 **防撤回 + 入群验证 + 敏感词/刷屏 + 群管 API 补齐**
 
@@ -936,7 +944,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **`/mute` `/unmute` 等既有群管命令也纳入写操作闸门**（限频 + 审计），不再直接调用 OneBot
 - 新增测试：`test/guards-unit.mjs`（12，防撤回/敏感词/刷屏全链路）、`test/verify-flow-unit.mjs`（15，请求队列/口令/答题/好友请求/队列上限）、`test/verify-unit.mjs`（45，队列与命令解析）、`test/stats-unit.mjs`（23，群活跃统计与荣誉文案，为 v0.3.9 打底）；`test/reminders.js` 增加重复提醒解析
 
-## v0.3.7（2026-09-11）
+### v0.3.7（2026-09-11）
 
 **零成本互动包（纯本地计算，不消耗模型）**
 
@@ -953,7 +961,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
   - `IdiomChain` 的判定原本要求「首字 = 上一句**首字**」（非标准接龙），已改为标准规则「首字 = 上一句**末字**」
 - 新增测试：`test/features-unit.mjs`（23，用 mock OneBot 服务器驱动真实 `QQBridge` 验证词库/运势/骰子/积分/接龙/猜数字/私聊关键词/`/撤回` 全链路），`test/games-unit.mjs` 按标准接龙规则重写关键用例
 
-## v0.3.6（2026-09-11）
+### v0.3.6（2026-09-11）
 
 **agent 主动能力 + 会话续接 + 写操作闸门**
 
@@ -972,7 +980,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **`/health` 扩展**：会话续接状态、写操作闸门拒绝次数与审计开关
 - 新增测试：`test/actions-unit.mjs`（28）、`test/send-unit.mjs`（35）、`test/onebot-api-unit.mjs`（32，起真实反向 WS 服务器+客户端验证全部写操作负载与 request/notice 事件）
 
-## v0.3.5（2026-09-04）
+### v0.3.5（2026-09-04）
 
 **生图功能（高拓展 provider 抽象）**
 - **`/画 <描述词>` 生图**（`imageGenEnabled` 默认关闭）：群聊需 @机器人（防白嫖），私聊直接可用；生成后自动落盘 `cwd/qq-images/` 并发回图片段
@@ -982,7 +990,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 成本/刷屏防护：`imageGenCooldownSeconds`（每会话冷却，默认 60s）+ `imageGenDailyLimit`（每日限额，默认 20）+ `imageGenMaxPromptChars`（描述词长度上限）
 - `/help` 菜单在开启时显示生图用法；新增 `test/imagegen-unit.mjs`（15 项），全套 113 项
 
-## v0.3.4（2026-09-01）
+### v0.3.4（2026-09-01）
 
 **第一梯队互动功能**
 - **`/help` 命令帮助**：`/help` / `帮助` / `菜单` 动态列出可用命令（按功能开关与管理员身份展示）
@@ -993,7 +1001,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - onebot.js 新增 `parseNotice` 与 notice 事件、消息透传 `senderName`
 - 新增测试 `test/checkin-unit.mjs`（19 项）+ `test/notice-unit.mjs`（9 项），全套 98 项
 
-## v0.3.3（2026-08-29）
+### v0.3.3（2026-08-29）
 
 **本地 TTS：GPT-SoVITS 零成本语音克隆**
 - `ttsProvider` 新增 `local`：接入本地 GPT-SoVITS api_v2 服务（默认 `http://127.0.0.1:9880`），零 API 成本、零云端依赖，3-10 秒参考音频即克隆音色（`ttsLocalRefAudio` + `ttsLocalPromptText`）
@@ -1002,7 +1010,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 新增 `buildLocalTtsRequest`（test/tts-unit.mjs 增至 12 项）
 - 附 `TTS控制.bat` 一键启停本地服务（单实例守护，监听 127.0.0.1:9880）
 
-## v0.3.2（2026-08-28）
+### v0.3.2（2026-08-28）
 
 **避开高峰期静默**
 - 避开高峰期（`quietHoursEnabled` **默认关闭**）：开启后在工作日的静默时段内，机器人不回复任何入站消息（不处理、不消耗模型调用，调试日志记录跳过原因）
@@ -1012,13 +1020,13 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - `/health` 新增避开高峰期状态行（开关/时段/周末豁免一目了然）
 - 新增 `test/quiet-unit.mjs`（时段解析 + 工作日/周末/边界判定，24 项）
 
-## v0.3.1（2026-08-28）
+### v0.3.1（2026-08-28）
 
 **状态通知 + GIF 抽帧**
 - 状态变更通知（`notifyEnabled` 默认关闭）：宿主直连推送服务（PushPlus 或任意 JSON webhook，`notifyPushUrl`/`notifyToken`），机器人上线/掉线/桥就绪时推送——掉线通知不经 QQ，机器人都断了也能送达；`notifyCooldownSeconds` 防抖（默认 300s）
 - GIF 动画表情抽帧（`gifFrameExtract` 默认开启）：识图前用 ffmpeg 把 gif 第一帧抽成 png（`ffmpegPath` 可配），动画表情对识图工具/模型的兼容性显著提升
 
-## v0.3.0（2026-08-26）
+### v0.3.0（2026-08-26）
 
 **语音回复（TTS）与实用小工具**
 - **语音回复 TTS**（`ttsEnabled` 默认关闭，需 key 与显式开启）：文字回复后自动跟一条语音（record 段）；默认配置 **Azure Speech**（晓晓 + `chat` 风格，`ttsAzureRegion`/`ttsVoice`/`ttsStyle`/`ttsMaxChars` 可调），也可一键切换 `ttsProvider: openai` 接任意 OpenAI 兼容 `/audio/speech`（OpenAI/Minimax/豆包…，`ttsBaseUrl`/`ttsModel`/`ttsVoice`）
@@ -1027,7 +1035,9 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **`/export` 聊天导出**：把本会话持久化记录导出为 markdown 文件（`cwd/qq-exports/`，`exportEnabled`）
 - 新增 `lib/tts.js`（Azure SSML / OpenAI 兼容双实现）+ `test/tts-unit.mjs`（6 项）；onebot.js 支持 file 段解析
 
-## v0.2.9（2026-08-26）
+## v0.2 系列（2026-08-20 ～ 2026-08-26）
+
+### v0.2.9（2026-08-26）
 
 **群管理套件**
 - `/summary`：基于持久化记忆让 agent 总结本会话最近聊天（谁说了什么、有没有@我）
@@ -1040,21 +1050,21 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - OneBotServer 新增 `setGroupBan`/`setGroupKick` 动作与 `ats` 透传
 - 新增 `test/grouptools-unit.mjs`（投票解析 + 待办持久化，10 项）
 
-## v0.2.8（2026-08-26）
+### v0.2.8（2026-08-26）
 
 **风控与稳定**
 - 回复限流（`rateLimitEnabled`，**默认关闭**）：开启后每会话在 `rateLimitWindowSeconds`（默认 60s）内最多回复 `rateLimitMaxReplies`（默认 10）条，超出静默丢弃并记日志
 - 消息去重（`dedupEnabled`，默认开启）：同一 message_id 在 `dedupWindowSeconds`（默认 300s）内重复投递（NapCat 重连重发）会被忽略，避免机器人重复回复
 - 生产配置里已附两组的注释示例，按需开启
 
-## v0.2.7（2026-08-26）
+### v0.2.7（2026-08-26）
 
 **维护性优化**
 - 调试日志自动轮转：`qq-bridge-debug.log` 超过 2 MiB 时仅保留末尾 128 KiB，不再无限增长
 - 图片保留期清理：宿主启动时自动删除 `qq-images/`、`qq-replies/` 中超过 `imageRetentionDays`（默认 14 天）的下载图片
 - 新增 `test/reminder-unit.mjs`：提醒时间解析的 13 项纯单元测试（相对/绝对时间、关键词策略、内容提取）
 
-## v0.2.6（2026-08-26）
+### v0.2.6（2026-08-26）
 
 **可配置识图方式**
 - 新增 `visionMode: tool | native` 配置：`tool`（默认）= 图片存盘后由 agent 用 `visionToolName` 工具查看（稳定路线）；`native` = 图片作为**原生多模态附件**注入消息（DSH 0.1.1+ 附件机制，模型直接看图；文本模型自动降级为占位说明）
@@ -1062,7 +1072,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 私聊识图与 @引用图片两种场景都支持两种模式
 - 生产默认保持 `tool` 模式；想体验原生多模态把 `visionMode` 改成 `native` 即可（当前原生多模态尚不稳定，自行取舍）
 
-## v0.2.5（2026-08-26）
+### v0.2.5（2026-08-26）
 
 **定时提醒**
 - 新增定时提醒：`30分钟后提醒我喝水`、`明天9点提醒我开会`、`后天 20:30 提醒我生日`
@@ -1073,7 +1083,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 支持相对时间（N秒/分钟/小时/天后）与绝对时间（今天/明天/后天 HH:mm、N点半/N点M分）
 - `OneBotServer` 新增 `currentSocket()`：提醒发送自动使用最新连接（NapCat 重连后不失效）
 
-## v0.2.4（2026-08-24）
+### v0.2.4（2026-08-24）
 
 **每会话持久化记忆**
 - 每个群/私聊的最近对话自动落盘到 `cwd/qq-memory/`（每会话一个 JSON，滚动窗口）
@@ -1081,21 +1091,21 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - `/new` 会同时清除该会话的持久化记忆
 - 新增配置：`memoryEnabled`（默认 `true`）、`memoryMaxEntries`（默认 `30`）
 
-## v0.2.3（2026-08-23）
+### v0.2.3（2026-08-23）
 
 **安全默认值（响应上架评审）**
 - 白名单语义改为「空 = 拒绝」：`allowUsers` 为空拒绝所有私聊，`allowGroups` 为空拒绝所有群消息
 - 部署者必须显式填入自己的 QQ 号与群号后才能使用
 - 配置描述、README（中英）、示例配置同步更新
 
-## v0.2.2（2026-08-21）
+### v0.2.2（2026-08-21）
 
 **私聊识图**
 - 私聊中用户发送的图片/动画表情（image/mface 段）自动下载到 `cwd/qq-images/` 并注入会话，agent 用 `describe_image` 查看后回应
 - 下载按 Content-Type 推断扩展名（GIF 动画表情不再误存为 .png）
 - 新增配置：`privateImageView`（默认 `true`）
 
-## v0.2.1（2026-08-20）
+### v0.2.1（2026-08-20）
 
 **稳定性修复**
 - 修复未处理的 Promise rejection（新增 `#safeReply` + 消息处理整体 try/catch）
@@ -1104,7 +1114,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - WS 连接 id 加计数器防碰撞
 - 依赖 junction 全部指向共享树（修复 `web\node_modules\ws` 被清理导致的启动崩溃）
 
-## v0.2.0（2026-08-20）
+### v0.2.0（2026-08-20）
 
 **插件化整合**
 - 全部 QQ AI 功能整合为独立插件：双向消息桥、每群/每私聊会话分组、语音转文字、引用解析、表情系统、白名单、`/new` `/status`
@@ -1112,7 +1122,9 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 私聊开启（`acceptPrivate: true`），agent 注入 chatScope 会话归属
 - 完整 README（中英）、LICENSE、示例配置、风险与合规说明、测试脚本
 
-## v0.1.1（2026-08-16）
+## v0.1 系列（2026-08-16）
+
+### v0.1.1（2026-08-16）
 
 **首个可用版本**
 - OneBot v11 反向 WebSocket 双向桥

@@ -114,7 +114,9 @@ check('所有具名 import 都能在目标模块找到导出', missingExports.le
 const pkg = JSON.parse(readFileSync(join(libDir, '..', 'package.json'), 'utf8'))
 check('package.json 版本与 CHANGELOG 顶部一致', (() => {
   const changelog = readFileSync(join(libDir, '..', 'CHANGELOG.md'), 'utf8')
-  const top = /^## v([0-9.]+)/m.exec(changelog.replace(/^#[^\n]*\n+/, ''))
+  // 标题层级：大版本 `## v0.6 系列`、小节版本 `### v0.6.3`。这里只认**三段式**版本号，
+// 免得把大版本标题（v0.6）当成最新版本。
+const top = /^#{2,3} v(\d+\.\d+\.\d+)/m.exec(changelog.replace(/^#[^\n]*\n+/, ''))
   return top !== null && top[1] === pkg.version
 })(), `package=${pkg.version}`)
 check('package.json main 指向 lib/index.js', pkg.main === 'lib/index.js')
