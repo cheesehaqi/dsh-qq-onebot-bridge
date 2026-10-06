@@ -1,6 +1,5 @@
 # 更新日志 / Changelog
-## v0.6 系列 —— 轻量化设计 / Lightweight（2026-10-04 ～ 2026-10-06）
-
+## v0.6 系列 —— 轻量化设计 / Lightweight
 ### v0.6.3（2026-10-06）— 账号入口 + 面板里一键启动 NapCat / Account entry & one-click NapCat launch
 
 #### 新增
@@ -328,8 +327,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
   所以那一页看不到这些开关——这是刻意的取舍，不是漏做。
 - 真机待验证：浏览器里首次打开该页的实际观感与深浅色；面板与 `dshmarket` 同页共存时的导航顺序（`order: 45`）。
 
-## v0.5 系列 —— 看得见 · 找得回 / See it, find it（2026-09-13 ～ 2026-10-03）
-
+## v0.5 系列 —— 看得见 · 找得回 / See it, find it
 ### v0.5.9（2026-10-03）— 兼容 DSH 0.2 与官方桌面端 / DSH 0.2 & desktop client
 
 > 起因是一次**静默停摆**：DSH 运行时升到 **0.2.0-rc.2** 之后，profile 因为插件的 peer 范围只声明到
@@ -831,8 +829,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 单测 44 套 / 2247 断言全绿（新增 `forward-unit` 111、`members-unit` 104、`history-unit` 81、`archive-unit` 86、`assets-unit` 132、桥层 `seeing-unit` 71、桥层 `find-unit` 59，`control-unit` 95→99）
 - 真机（宿主 3080 / 控制台 8799）：注入带 `forwardText` 的转发帧 → trace 出现 `forward` 阶段成功事件、模型回合收到完整两条记录；`/成员`、`/群信息`、`/找`、`/文件`、`/相册`、`/ocr` 六条新命令在真机分发正确；`/api/archive` 概览与检索均返回真实数据；UI 新卡片渲染正常
 
-## v0.4 系列 —— 一切皆可调试 / Everything Debuggable（2026-09-12 ～ 2026-09-13）
-
+## v0.4 系列 —— 一切皆可调试 / Everything Debuggable
 ### v0.4.1（2026-09-13 发布）— 依赖解析与安装修复 / Dependency resolution & install fixes
 
 > 本版修社区反馈的安装问题（[issue #1](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/issues/1)）：干净环境下插件加载即 `ERR_MODULE_NOT_FOUND: Cannot find package 'schemastery'`，连带把成因相同的安装/声明问题一起收口。
@@ -906,8 +903,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 新增测试 `test/acceptance-unit.mjs`（68）：6 条约束的达标/告警/不达标/证据不足分支（含"回放期间有 QQ 连接""dry-run 被关掉""消息级事件缺 traceId"等危险分支必须判不达标）、汇总口径与文本视图、真实 supervisor 汇总（临时目录里造事件/快照/录制/沙箱，验证口径与回收站不计数）、`/api/acceptance` 的真实 HTTP 往返与 token/Origin 门禁、**面板静态校验**（新卡片元素、新函数、跳转目标、内联 onclick 全部存在）
 - 阶段 4 完成意味着 6 条硬约束**全部落地且有测试与实时验收**：①无静默分支 ②traceId 贯穿 ③可回放 ④可体检 ⑤可导出 ⑥可注入
 
-## v0.3 系列 —— 语音回复与实用小工具 / TTS & utilities（2026-08-26 ～ 2026-09-11）
-
+## v0.3 系列 —— 语音回复与实用小工具 / TTS & utilities
 ### v0.3.9（2026-09-11）
 
 **群洞察与定时播报：活跃统计、群荣誉/公告/精华、每日群日报、重复提醒、MC 服务器状态**
@@ -1035,8 +1031,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - **`/export` 聊天导出**：把本会话持久化记录导出为 markdown 文件（`cwd/qq-exports/`，`exportEnabled`）
 - 新增 `lib/tts.js`（Azure SSML / OpenAI 兼容双实现）+ `test/tts-unit.mjs`（6 项）；onebot.js 支持 file 段解析
 
-## v0.2 系列 —— 插件化整合 / Plugin integration（2026-08-20 ～ 2026-08-26）
-
+## v0.2 系列 —— 插件化整合 / Plugin integration
 ### v0.2.9（2026-08-26）
 
 **群管理套件**
@@ -1122,8 +1117,7 @@ POSIX 下临时文件按 `0600` 创建（patch 里有 `apiKey`，不能让 renam
 - 私聊开启（`acceptPrivate: true`），agent 注入 chatScope 会话归属
 - 完整 README（中英）、LICENSE、示例配置、风险与合规说明、测试脚本
 
-## v0.1 系列 —— 首个可用版本 / First usable release（2026-08-16）
-
+## v0.1 系列 —— 首个可用版本 / First usable release
 ### v0.1.1（2026-08-16）
 
 **首个可用版本**
