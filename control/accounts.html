@@ -252,8 +252,7 @@
       <div class="nav" data-tab="files"><span class="ico">📁</span>文件管理</div>
       <div class="nav" data-tab="plugins"><span class="ico">🧩</span>插件管理</div>
       <div class="nav" data-tab="store"><span class="ico">🛍️</span>插件商店</div>
-      <div class="nav" data-tab="device"><span class="ico">🔧</span>设备与版本</div>
-      <div class="nav" data-tab="stats"><span class="ico">📊</span>运行统计</div>
+      <div class="nav" data-tab="stats"><span class="ico">📊</span>运行与设备</div>
       <div class="nav" data-tab="config"><span class="ico">⚙️</span>系统配置</div>
       <div class="nav" data-tab="test"><span class="ico">🧪</span>实时测试</div>
       <div class="nav" data-tab="log"><span class="ico">📝</span>操作记录</div>
@@ -367,27 +366,6 @@
       </div>
     </section>
 
-    <!-- 设备与版本 -->
-    <section class="section" id="tab-device">
-      <div class="grid">
-        <div class="card">
-          <h2>设备指纹备份</h2>
-          <p class="sub">NapCat 的 GUID 备份列表；换机器/重装前先备份，能少一次新设备验证。</p>
-          <dl class="kv"><dt>备份数量</dt><dd id="guidInfo">—</dd></dl>
-          <div class="row" style="margin-top:16px"><button id="btnGuid">查备份</button></div>
-        </div>
-        <div class="card">
-          <h2>接口可用性</h2>
-          <p class="sub">顶部信息条按这几个接口的返回判定；这里列出逐个状态。</p>
-          <dl class="kv">
-            <dt>NapCat 版本</dt><dd id="apiNapcat">—</dd>
-            <dt>QQ 版本</dt><dd id="apiQq">—</dd>
-            <dt>系统状态</dt><dd id="apiSys">—</dd>
-          </dl>
-        </div>
-      </div>
-    </section>
-
     <section class="section" id="tab-network"><div class="card wide">
       <h2>网络配置 <span class="badge" id="networkBadge">—</span></h2>
       <p class="sub">读 onebot11_*.json 的 servers（只读）<code style="margin-left:6px">/api/accounts/network</code></p>
@@ -419,12 +397,31 @@
       <div class="row" style="margin-top:14px"><button id="btn-store">刷新</button></div>
     </div></section>
 
-    <section class="section" id="tab-stats"><div class="card wide">
-      <h2>运行统计 <span class="badge" id="statsBadge">—</span></h2>
-      <p class="sub">读本地 trace 聚合<code style="margin-left:6px">/api/accounts/stats</code></p>
-      <div id="statsBody" class="empty">切换到这里会自动加载</div>
-      <div class="row" style="margin-top:14px"><button id="btn-stats">刷新</button></div>
-    </div></section>
+    <section class="section" id="tab-stats">
+      <div class="grid">
+        <div class="card">
+          <h2>设备指纹备份</h2>
+          <p class="sub">NapCat 的 GUID 备份列表；换机器/重装前先备份，能少一次新设备验证。</p>
+          <dl class="kv"><dt>备份数量</dt><dd id="guidInfo">—</dd></dl>
+          <div class="row" style="margin-top:16px"><button id="btnGuid">查备份</button></div>
+        </div>
+        <div class="card">
+          <h2>接口可用性</h2>
+          <p class="sub">顶部信息条按这几个接口的返回判定；这里列出逐个状态。</p>
+          <dl class="kv">
+            <dt>NapCat 版本</dt><dd id="apiNapcat">—</dd>
+            <dt>QQ 版本</dt><dd id="apiQq">—</dd>
+            <dt>系统状态</dt><dd id="apiSys">—</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="card wide" style="margin-top:16px">
+        <h2>运行统计 <span class="badge" id="statsBadge">—</span></h2>
+        <p class="sub">读本地 trace 聚合<code style="margin-left:6px">/api/accounts/stats</code></p>
+        <div id="statsBody" class="empty">切换到这里会自动加载</div>
+        <div class="row" style="margin-top:14px"><button id="btn-stats">刷新</button></div>
+      </div>
+    </section>
 
     <section class="section" id="tab-config"><div class="card wide">
       <h2>系统配置 <span class="badge" id="configBadge">—</span></h2>
@@ -562,7 +559,7 @@
   $('backLink').href = token ? `./?token=${encodeURIComponent(token)}` : './'
 
   // ---------- 侧栏 tab ----------
-  const titles = { home: '基础信息', accounts: '账号配置', network: '网络配置', logs: '猫猫日志', files: '文件管理', plugins: '插件管理', store: '插件商店', device: '设备与版本', stats: '运行统计', config: '系统配置', log: '操作记录', about: '关于', test: '实时测试' }
+  const titles = { home: '基础信息', accounts: '账号配置', network: '网络配置', logs: '猫猫日志', files: '文件管理', plugins: '插件管理', store: '插件商店', stats: '运行与设备', config: '系统配置', log: '操作记录', about: '关于', test: '实时测试' }
   /**
    * 切换分区（也支持 `#network` 这种 hash 直达）。
    * 为什么加 hash：调试时经常要把"某个页面"直接发给人或收藏起来，纯 JS 切页做不到。
@@ -1374,7 +1371,7 @@
   }
 
   /** 分区加载器表（键 = 侧栏 data-tab）。定义在各自 loader 之后，避免 TDZ。 */
-  const LOADERS = { network: loadNetwork, files: loadFiles, plugins: loadPlugins, store: loadStore, stats: loadStats, config: loadConfig, about: loadAbout, device: loadDevice }
+  const LOADERS = { network: loadNetwork, files: loadFiles, plugins: loadPlugins, store: loadStore, stats: loadStatsAndDevice, config: loadConfig, about: loadAbout }
   /** 调一个分区加载器；失败就把原因写进那个分区（否则只会"什么都不发生"）。 */
   const loadersafe = (tab) => {
     const body = $(tab + 'Body')
@@ -1387,6 +1384,9 @@
   }
 
   // 统计：数字 + 阶段条形 + 最近失败
+  /** 分区里同时有设备信息与运行统计，进入时两个都拉。 */
+  function loadStatsAndDevice() { loadStats(); loadDevice() }
+
   async function loadStats() {
     const btn = $('btn-stats'); busy(btn, true, '读取中…')
     const data = await api('/api/accounts/stats'); busy(btn, false)

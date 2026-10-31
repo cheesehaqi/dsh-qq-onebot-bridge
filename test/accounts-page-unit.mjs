@@ -69,5 +69,22 @@ check('★LOADERS 绑定时必须判空（少一个按钮不能拖死整页）',
   return /=== null\) continue|if \(!\w+\) continue|if \(\w+\) \{?/.test(loop[0])
 })())
 
+check('★LOADERS 引用的加载器都在它之前定义（const 写在后面会 TDZ，整页变死）', (() => {
+  const loadersAt = script.indexOf('const LOADERS =')
+  if (loadersAt < 0) return false
+  const block = script.slice(loadersAt, script.indexOf('}', loadersAt))
+  // 注意：要取「值」（加载器函数名），不是 key（分区名）
+  const names = [...block.matchAll(/:\s*([A-Za-z_$][\w$]*)/g)].map((m) => m[1])
+  const missing = names.filter((name) => {
+    const defConst = script.indexOf('const ' + name + ' =')
+    const defFunc = script.indexOf('function ' + name + '(')
+    // 函数声明会提升，位置无所谓；const 必须在此之前
+    if (defFunc >= 0 && (defConst < 0 || defFunc < defConst)) return false
+    return defConst < 0 || defConst > loadersAt
+  })
+  if (missing.length > 0) console.log('    引用过早/未定义：' + missing.join(', '))
+  return missing.length === 0
+})())
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)
