@@ -409,22 +409,33 @@ export function describeAccountState({ webui = null, status = null, accounts = [
  *   · token 一改，key 就变，旧凭证自动作废（不会拿旧凭证去撞新配置）。
  */
   /** 启动 NapCat 用哪个 QQ：优先 autoLoginAccount，其次配置目录里的 onebot11_<uin>.json。 */
-  const readPreferredUin = () => {
+export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = undefined } = {}) {
+  const readConfig = () => readWebUiConfig({ napcatBat, file: webUiFile })
+  /**
+   * 启动 NapCat 用哪个 QQ：优先 autoLoginAccount，其次配置目录（含 bootmain/config）里的 onebot11_<uin>.json。
+   * ⚠️ 必须定义在工厂内部：它依赖 readConfig；放模块作用域会 ReferenceError，并被 catch 静默吞成空串。
+   */
+  const readPreferredUin = (extraDirs = []) => {
     try {
       const config = readConfig()
-      if (config.exists !== true) return ''
-      const json = JSON.parse(readFileSync(config.path, 'utf8'))
-      if (typeof json.autoLoginAccount === 'string' && /^\d{5,12}$/.test(json.autoLoginAccount)) return json.autoLoginAccount
-      const dir = dirname(config.path)
-      const found = readdirSync(dir).find((name) => /^onebot11_(\d{5,12})\.json$/.test(name))
-      return found ? found.replace(/^onebot11_/, '').replace(/\.json$/, '') : ''
+      const dirs = []
+      if (config.exists === true) {
+        const json = JSON.parse(readFileSync(config.path, 'utf8'))
+        if (typeof json.autoLoginAccount === 'string' && /^\d{5,12}$/.test(json.autoLoginAccount)) return json.autoLoginAccount
+        dirs.push(dirname(config.path))
+      }
+      for (const extra of extraDirs) if (typeof extra === 'string' && extra !== '') dirs.push(extra)
+      for (const dir of dirs) {
+        try {
+          const found = readdirSync(dir).find((name) => /^onebot11_(\d{5,12})\.json$/.test(name))
+          if (found) return found.replace(/^onebot11_/, '').replace(/\.json$/, '')
+        } catch { /* 换下一个目录 */ }
+      }
+      return ''
     } catch {
       return ''
     }
   }
-
-export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = undefined } = {}) {
-  const readConfig = () => readWebUiConfig({ napcatBat, file: webUiFile })
   const credentials = new Map()   // key: `${url}|${token}` → { credential, at }
   let sysCache = { at: 0, data: null }   // 系统状态（SSE 要等一帧，缓存 20s 免得页面每次等 3 秒）
   const CREDENTIAL_TTL_MS = 50 * 60 * 1000
@@ -767,7 +778,7 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
        */
       const dir = dirname(napcatBat)
       const exe = join(dir, 'NapCatWinBootMain.exe')
-      const uin = readPreferredUin()
+      const uin = readPreferredUin([join(dir, 'config')])
       if (existsSync(exe) && uin !== '') {
         try {
           spawn(exe, [uin], { cwd: dir, detached: true, stdio: 'ignore' }).unref()
