@@ -14,6 +14,7 @@
 import { createServer } from 'node:http'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { tailLines } from './supervisor.mjs'
 import { FREEABLE_PORTS } from './config.mjs'
@@ -350,7 +351,15 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
       }
       // 文件管理：在**本机资源管理器**里打开 config 目录（不经浏览器，目录内容不暴露成 HTTP）
       if (request.method === 'GET' && path === '/api/accounts/open-folder') {
-        const dir = typeof api.accounts?.configDir === 'function' ? api.accounts.configDir() : ''
+        const base = typeof api.accounts?.configDir === 'function' ? api.accounts.configDir() : ''
+        // 允许打开 config 下的固定子目录（插件目录），其余一律走 base，避免任意路径
+        const which = url.searchParams.get('target') === 'plugins' ? 'plugins' : ''
+        let dir = base
+        if (which === 'plugins' && base !== '') {
+          const candidates = [join(base, 'plugins'), join(base, '..', 'plugins')]
+          // 都没有就退回 bootmain 根目录（插件目录由 NapCat 的插件系统在加载时创建）
+          dir = candidates.find((candidate) => existsSync(candidate)) ?? join(base, '..')
+        }
         if (dir === '') { json(response, 200, { ok: false, reason: '找不到 config 目录（webui.json 没解析出来）' }); return }
         if (existsSync(dir) === false) { json(response, 200, { ok: false, reason: '目录不存在：' + dir }); return }
         try {
