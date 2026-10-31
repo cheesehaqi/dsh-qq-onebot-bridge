@@ -1591,6 +1591,7 @@
     if (/data:image\/[a-z+]+;base64,/i.test(trimmed) && trimmed.length > 240) return true
     return false
   }
+  const QR_FOLD_MARK = '__QR_FOLD__:'
   const collapseQrArt = (lines) => {
     const out = []
     let folded = 0
@@ -1602,16 +1603,17 @@
         continue
       }
       if (inArt) {
-        out.push('（这里原本是一段终端二维码，共 ' + folded + ' 行，已折叠；要看可扫的图请到「登录 / 扫码」页）')
+        out.push(QR_FOLD_MARK + folded)
         folded = 0
         inArt = false
       }
       out.push(line)
     }
-    if (inArt) out.push('（这里原本是一段终端二维码，共 ' + folded + ' 行，已折叠；要看可扫的图请到「登录 / 扫码」页）')
+    if (inArt) out.push(QR_FOLD_MARK + folded)
     return out
   }
 
+  const escapeHtml = (value) => String(value).replace(/[&<>]/g, (ch) => ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : '&gt;')
   const renderLines = () => {
     const keyword = $('logSearch').value.trim().toLowerCase()
     const counts = { info: 0, warn: 0, error: 0 }
@@ -1621,6 +1623,8 @@
       counts[lv] += 1
       if (level !== 'all' && lv !== level) continue
       if (keyword !== '' && !line.toLowerCase().includes(keyword)) continue
+      // 相邻完全相同的行只留一条（实时帧与历史合并时常见），避免"同一行刷两遍"
+      if (kept.length > 0 && kept[kept.length - 1] === line) continue
       kept.push(line)
     }
     $('badgeInfo').textContent = 'Info ' + counts.info
@@ -1628,7 +1632,28 @@
     $('badgeError').textContent = 'Error ' + counts.error
     logText = kept.join('\n')
     const pre = $('logView')
-    pre.textContent = logText || (rawLines.length === 0 ? '（空）' : '（当前筛选没有匹配行）')
+    const qrCount = kept.filter((line) => line.startsWith(QR_FOLD_MARK)).length
+    let qrRendered = 0
+    if (qrCount > 0) {
+      // 有二维码：用 HTML 渲染（文本逐行转义），并在折叠位置放真正的图片
+      const stamp = Date.now()
+      pre.innerHTML = kept.map((line) => {
+        if (line.startsWith(QR_FOLD_MARK) === false) return escapeHtml(line)
+        const folded = Number(line.slice(QR_FOLD_MARK.length)) || 0
+        // 一张就够：后面的二维码打印合并成一行，避免"弹两次二维码"
+        if (qrRendered > 0) {
+          qrRendered += 1
+          return '<div class="sub" style="margin:4px 0 4px 8px">（第 ' + qrRendered + ' 次打印的二维码，已省略；上面那张是最新的）</div>'
+        }
+        qrRendered += 1
+        return '<div style="margin:8px 0;padding:10px;border:1px dashed var(--line);border-radius:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
+          + '<img src="/api/accounts/qr-image?token=' + encodeURIComponent(token) + '&v=' + stamp + '" alt="登录二维码" style="width:150px;height:150px;border-radius:8px;background:#fff;padding:6px">'
+          + '<div><b>这里是 NapCat 打印的终端二维码</b><div class="sub" style="margin:4px 0 0">它原本是 ' + folded + ' 行方块字符，已折叠；左边是同一时刻的图片版。</div>'
+          + '<div class="sub" style="margin:4px 0 0">扫码失败就点开「登录 / 扫码」页，那里可以刷新二维码。</div></div></div>'
+      }).join('\n')
+    } else {
+      pre.textContent = logText || (rawLines.length === 0 ? '（空）' : '（当前筛选没有匹配行）')
+    }
     $('logBadge').textContent = kept.length + '/' + rawLines.length + ' 行' + (level === 'all' ? '' : ' · ' + level)
     if (follow) pre.scrollTop = pre.scrollHeight
   }
