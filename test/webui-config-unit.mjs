@@ -16,7 +16,7 @@ const dir = mkdtempSync(join(tmpdir(), 'qq-webui-'))
 const configDir = join(dir, 'config')
 mkdirSync(configDir, { recursive: true })
 const file = join(configDir, 'webui.json')
-const original = { host: '127.0.0.1', port: 6099, token: 'secret-token-123', enable2FA: true, autoLoginAccount: '3030856788' }
+const original = { host: '127.0.0.1', port: 6099, token: 'secret-token-123', enable2FA: true, autoLoginAccount: '10001' }
 writeFileSync(file, JSON.stringify(original, null, 2), 'utf8')
 
 const api = createAccountsApi({ webUiFile: file })

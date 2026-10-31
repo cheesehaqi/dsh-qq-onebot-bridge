@@ -961,18 +961,6 @@
     } else toast(`重启失败：${data.message ?? data.kind}`, 'bad')
   }
 
-  async function loadGuid() {
-    const btn = $('btnGuid')
-    busy(btn, true, '读取中…')
-    const data = await api('/api/accounts/guid')
-    busy(btn, false)
-    if (data.ok !== true) { $('guidInfo').textContent = data.message ?? '取不到'; return }
-    const list = Array.isArray(data.data) ? data.data : (data.data ? [data.data] : [])
-    $('guidInfo').textContent = list.length === 0
-      ? '（没有备份）'
-      : `${list.length} 份：${list.slice(0, 3).map((x) => x?.name ?? x?.fileName ?? '…').join('、')}`
-  }
-
   // ---------- 2FA ----------
   async function submitTwofa() {
     const code = $('twofaCode').value.trim()
@@ -1722,7 +1710,13 @@
     $('btnLogRefresh').textContent = mode === 'live' ? '重连' : '刷新'
     $('napcatLogFile').classList.toggle('hidden', mode === 'live' || $('logSource').value !== 'napcat')
   }
-  for (const id of Object.keys(LOADERS)) $('btn-' + id).onclick = () => LOADERS[id]()
+  // 每个分区如果有「刷新」按钮就绑上；没有（比如"设备与版本"用的是"查备份"）就跳过，
+  // 绝不能因为少一个按钮把整段脚本打断（真机事故：null.onclick → 后面所有绑定失效）。
+  for (const id of Object.keys(LOADERS)) {
+    const refreshBtn = $('btn-' + id)
+    if (refreshBtn === null) continue
+    refreshBtn.onclick = () => LOADERS[id]()
+  }
     $('btnLogMode').onclick = () => {
     mode = mode === 'live' ? 'history' : 'live'
     applyMode()
@@ -1773,7 +1767,7 @@
   $('btnQr').onclick = loadQr
   $('btnQrRefresh').onclick = loadQr
   $('btnRestart').onclick = restart
-  $('btnGuid').onclick = loadGuid
+  $('btnGuid').onclick = loadDevice
   $('btnTwofa').onclick = submitTwofa
   $('twofaCode').addEventListener('keydown', (event) => { if (event.key === 'Enter') submitTwofa() })
 

@@ -63,5 +63,11 @@ check('分区容器里的可点元素都带 id（避免 getElementById 拿到 nu
   return true
 })())
 
+check('★LOADERS 绑定时必须判空（少一个按钮不能拖死整页）', (() => {
+  const loop = /for \(const id of Object\.keys\(LOADERS\)\)[\s\S]{0,260}/.exec(script)
+  if (loop === null) return false
+  return /=== null\) continue|if \(!\w+\) continue|if \(\w+\) \{?/.test(loop[0])
+})())
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)
