@@ -25,7 +25,7 @@
 
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, copyFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 /** NapCat WebUI 的端点（按源码固定；`method` 只是首选，失败会回退）。 */
@@ -700,6 +700,20 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       }
     },
     /** config 目录（给"在资源管理器里打开"用）。 */
+    /** 确保插件目录存在（config/plugins）：只 mkdir，不下载、不安装。 */
+    ensurePluginsDir() {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      if (dir === '') return { ok: false, kind: 'no-config', message: '找不到 config 目录' }
+      const target = join(dir, 'plugins')
+      if (existsSync(target)) return { ok: true, kind: 'ok', message: '插件目录已存在', dir: target, created: false }
+      try {
+        mkdirSync(target, { recursive: true })
+        return { ok: true, kind: 'ok', message: '已创建插件目录（重启 NapCat 后生效）', dir: target, created: true }
+      } catch (error) {
+        return { ok: false, kind: 'error', message: '创建失败：' + String(error?.message ?? error).slice(0, 120) }
+      }
+    },
     configDir() {
       const config = readConfig()
       return config.exists ? dirname(config.path) : ''

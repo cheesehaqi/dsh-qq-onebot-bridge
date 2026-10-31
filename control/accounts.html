@@ -390,6 +390,7 @@
       <div class="row" style="margin-top:14px">
         <button id="btn-plugins">刷新</button>
         <button class="primary" id="btn-openPlugins">打开 NapCat 目录 →</button>
+        <button id="btn-mkPlugins">新增插件目录</button>
         <button id="btn-pluginInstall">去 NapCat 安装 →</button>
       </div>
       <p class="sub" style="margin-top:10px">本机目前没有 plugins 目录（NapCat 的插件管理器未加载，所以上面显示 0 个）。想装插件：去 NapCat 自己的插件页上传；或把插件放进它创建好的插件目录后重启。我们不代下不代装，避免装错版本。</p>
@@ -1716,6 +1717,12 @@
     const data = await api('/api/accounts/open-folder?target=plugins')
     if (data.ok === true) { toast('已打开插件目录：' + data.dir, 'ok'); opLog('打开插件目录') }
     else toast('打不开：' + (data.message ?? data.reason ?? '未知'), 'bad')
+  }
+  const mkPluginsBtn = $('btn-mkPlugins')
+  if (mkPluginsBtn) mkPluginsBtn.onclick = async () => {
+    const data = await post('/api/accounts/plugins/mkdir', {})
+    if (data.ok === true) { toast(data.message + '：' + data.dir, 'ok'); opLog('新增插件目录') }
+    else toast('创建失败：' + (data.message ?? data.reason ?? '未知'), 'bad')
   }
   const installBtn = $('btn-pluginInstall')
   if (installBtn) installBtn.onclick = async () => {
