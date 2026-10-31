@@ -281,7 +281,8 @@
       <div class="grid">
         <div class="card">
           <div class="profile">
-            <div class="avatar">🐋</div>
+            <img class="avatar" id="nickAvatar" alt="QQ 头像" src="" style="display:none;object-fit:cover">
+            <div class="avatar" id="nickFallback">🐋</div>
             <div>
               <div class="nick" id="nick">未登录</div>
               <div class="uin" id="uin">—</div>
@@ -839,6 +840,18 @@
       $('vCore').textContent = status.data?.coreReady === true ? '已就绪' : '未就绪'
       if (state.loginInfo) {
         $('nick').textContent = state.loginInfo.nick || '（无昵称）'
+        const avatarImg = $('nickAvatar')
+        const avatarFallback = $('nickFallback')
+        const uin = state.loginInfo.uin
+        if (avatarImg && uin) {
+          const src = '/api/accounts/avatar?uin=' + encodeURIComponent(uin) + '&token=' + encodeURIComponent(token)
+          if (avatarImg.dataset.src !== src) {
+            avatarImg.dataset.src = src
+            avatarImg.onload = () => { avatarImg.style.display = ''; if (avatarFallback) avatarFallback.style.display = 'none' }
+            avatarImg.onerror = () => { avatarImg.style.display = 'none'; if (avatarFallback) avatarFallback.style.display = '' }
+            avatarImg.src = src
+          }
+        }
         $('uin').textContent = state.loginInfo.uin ? `QQ ${state.loginInfo.uin}` : '—'
       }
       const hideRetry = $('btnStatusRetry')

@@ -408,6 +408,31 @@ export function describeAccountState({ webui = null, status = null, accounts = [
  *   · 缓存 → 一次 2FA 之后一小时内所有操作都顺；
  *   · token 一改，key 就变，旧凭证自动作废（不会拿旧凭证去撞新配置）。
  */
+  /**
+   * QQ 头像：由**服务端**去 qlogo 取（浏览器不直连第三方，也就不会把 token 带出去）。
+   * 只缓存 1 小时；取不到就如实返回失败，页面回退成鲸鱼表情。
+   */
+  const avatarCache = new Map()   // uin → { at, contentType, buffer }
+  const AVATAR_TTL = 60 * 60 * 1000
+  const fetchAvatar = async (uin, doFetch) => {
+    const clean = String(uin ?? '')
+    if (/^\d{4,12}$/.test(clean) === false) return { ok: false, kind: 'bad-input', message: 'QQ 号格式不对' }
+    const cached = avatarCache.get(clean)
+    if (cached && Date.now() - cached.at < AVATAR_TTL) return { ok: true, kind: 'ok', ...cached }
+    try {
+      const url = 'https://q1.qlogo.cn/g?b=qq&nk=' + clean + '&s=160'
+      const response = await doFetch(url)
+      if (!response.ok) return { ok: false, kind: 'error', message: 'qlogo 返回 ' + response.status }
+      const buffer = Buffer.from(await response.arrayBuffer())
+      const contentType = response.headers.get('content-type') ?? 'image/jpeg'
+      const record = { at: Date.now(), contentType, buffer }
+      avatarCache.set(clean, record)
+      return { ok: true, kind: 'ok', ...record }
+    } catch (error) {
+      return { ok: false, kind: 'unreachable', message: '取头像失败：' + String(error?.message ?? error).slice(0, 80) }
+    }
+  }
+
   /** 启动 NapCat 用哪个 QQ：优先 autoLoginAccount，其次配置目录里的 onebot11_<uin>.json。 */
 export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = undefined } = {}) {
   const readConfig = () => readWebUiConfig({ napcatBat, file: webUiFile })
@@ -760,6 +785,11 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
      * 重启 NapCat：**先尝试让它自己重启**（走 WebUI 的 RestartNapCat）；
      * 如果它根本没在运行（unreachable），就直接把启动脚本拉起来 —— 否则这个按钮在最需要它的时候没用。
      */
+    /** 当前登录账号的头像（服务端代取 qlogo）。 */
+    async avatar(uin) {
+      const target = uin && String(uin) !== '' ? uin : (readPreferredUin() || '')
+      return fetchAvatar(target, fetchImpl ?? fetch)
+    },
     async restart() {
       const config = readConfig()
       if (!guard(config)) return { ok: false, kind: 'no-config', message: config.reason || '没有可用的 WebUI 配置' }

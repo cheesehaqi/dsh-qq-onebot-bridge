@@ -334,6 +334,20 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         }
         return
       }
+      // QQ 头像（服务端代取，浏览器不直连第三方）
+      if (request.method === 'GET' && path === '/api/accounts/avatar') {
+        const result = typeof api.accounts?.avatar === 'function'
+          ? await api.accounts.avatar(url.searchParams.get('uin') ?? '')
+          : { ok: false, reason: '当前控制台不支持头像' }
+        if (result.ok !== true) { json(response, 200, { ok: false, reason: result.message ?? '取不到头像' }); return }
+        response.writeHead(200, {
+          'content-type': result.contentType || 'image/jpeg',
+          'cache-control': 'private, max-age=3600',
+          'content-length': String(result.buffer.length),
+        })
+        response.end(result.buffer)
+        return
+      }
       // 文件管理：在**本机资源管理器**里打开 config 目录（不经浏览器，目录内容不暴露成 HTTP）
       if (request.method === 'GET' && path === '/api/accounts/open-folder') {
         const dir = typeof api.accounts?.configDir === 'function' ? api.accounts.configDir() : ''
