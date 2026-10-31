@@ -16,3 +16,7 @@
 
 # 生成物/大文件：GitHub 上标记为二进制，避免 diff 卡死
 *.min.js linguist-generated=true
+
+# Windows 批处理必须是 CRLF —— 存成 LF 时 cmd 会把行尾吃掉，报「xx 不是内部或外部命令」（真机踩过）
+*.bat text eol=crlf
+*.cmd text eol=crlf
