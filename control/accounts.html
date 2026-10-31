@@ -246,7 +246,6 @@
     <nav id="nav">
       <div id="navIndicator"></div>
       <div class="nav active" data-tab="home"><span class="ico">🏠</span>基础信息</div>
-      <div class="nav" data-tab="login"><span class="ico">🔑</span>登录 / 扫码</div>
       <div class="nav" data-tab="accounts"><span class="ico">👥</span>账号配置</div>
       <div class="nav" data-tab="network"><span class="ico">📡</span>网络配置</div>
       <div class="nav" data-tab="logs"><span class="ico">🪵</span>猫猫日志</div>
@@ -356,38 +355,6 @@
     </section>
 
     <!-- 登录/扫码 -->
-    <section class="section" id="tab-login">
-      <div class="grid">
-        <div class="card">
-          <h2>扫码登录 <span class="badge" id="qrBadge">未取</span></h2>
-          <p class="sub">二维码由本机 NapCat 生成，通常 1–2 分钟过期；过期点「刷新二维码」，不要反复刷。</p>
-          <div class="qrbox" id="qrBox"><div class="hint">还没取二维码。<br>点下面的按钮，用手机 QQ 扫。</div></div>
-          <div class="row" style="margin-top:14px">
-            <button class="primary" id="btnQr">取二维码</button>
-            <button id="btnQrRefresh">刷新二维码</button>
-            <span class="countdown" id="qrCountdown"></span>
-          </div>
-          <div class="row hidden" id="twofaRow" style="margin-top:12px">
-            <input id="twofaCode" inputmode="numeric" maxlength="6" placeholder="6 位验证码" style="flex:1;min-width:150px">
-            <button class="primary" id="btnTwofa">提交验证码</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>当前登录</h2>
-          <p class="sub">来自 <code>CheckLoginStatus</code> 与 <code>GetQQLoginInfo</code>。</p>
-          <div class="hero" style="display:flex;gap:14px;align-items:center;padding:16px;border-radius:14px;background:var(--bg);border:1px solid var(--line)">
-            <span class="dot" id="loginDot"></span>
-            <div>
-              <div style="font-size:18px;font-weight:700" id="loginState">还没查</div>
-              <div style="color:var(--muted);font-size:12.5px" id="loginMeta">点「刷新登录状态」</div>
-            </div>
-          </div>
-          <p class="sub" style="margin-top:14px">这里只做状态查询。NapCat 的启动/重启请用它自己的启动方式——从外部拉起并不可靠（启动器会挂着且不报错），所以这个按钮已经移除。</p>
-        </div>
-      </div>
-    </section>
-
     <!-- 账号配置 -->
     <section class="section" id="tab-accounts">
       <div class="card wide">
@@ -595,7 +562,7 @@
   $('backLink').href = token ? `./?token=${encodeURIComponent(token)}` : './'
 
   // ---------- 侧栏 tab ----------
-  const titles = { home: '基础信息', login: '登录 / 扫码', accounts: '账号配置', network: '网络配置', logs: '猫猫日志', files: '文件管理', plugins: '插件管理', store: '插件商店', device: '设备与版本', stats: '运行统计', config: '系统配置', log: '操作记录', about: '关于', test: '实时测试' }
+  const titles = { home: '基础信息', accounts: '账号配置', network: '网络配置', logs: '猫猫日志', files: '文件管理', plugins: '插件管理', store: '插件商店', device: '设备与版本', stats: '运行统计', config: '系统配置', log: '操作记录', about: '关于', test: '实时测试' }
   /**
    * 切换分区（也支持 `#network` 这种 hash 直达）。
    * 为什么加 hash：调试时经常要把"某个页面"直接发给人或收藏起来，纯 JS 切页做不到。
@@ -695,6 +662,9 @@
     }
     return last
   }
+
+  /** 目标元素可能已经被删掉（比如登录分区已移除），这里做静默跳过。 */
+  const setText = (id, value) => { const el = $(id); if (el) el.textContent = value }
 
   const KIND = { ok: '正常', 'no-config': '没有配置', unreachable: '连不上（NapCat 没在运行）', unauthorized: 'token 被拒', unsupported: '这个版本没有该接口', 'need-2fa': '需要 2FA', error: '出错' }
   const busy = (btn, on, label) => {
@@ -829,9 +799,9 @@
     if (status.ok === true) {
       const online = status.data?.isLogin === true
       const offline = status.data?.isOffline === true
-      dot.className = `dot ${online ? 'ok' : 'warn'}`
-      $('loginState').textContent = online ? '已登录在线' : offline ? '已登录但离线' : '未登录'
-      $('loginMeta').textContent = status.data?.loginError || (online ? '可以正常收发消息' : '用扫码或快速登录开始')
+      if (dot) dot.className = `dot ${online ? 'ok' : 'warn'}`
+      setText('loginState', online ? '已登录在线' : offline ? '已登录但离线' : '未登录')
+      setText('loginMeta', status.data?.loginError || (online ? '可以正常收发消息' : '用扫码或快速登录开始'))
       $('kState').textContent = online ? '在线' : offline ? '离线' : '未登录'
       $('vPhase').textContent = status.data?.loginPhase ?? '—'
       $('vCore').textContent = status.data?.coreReady === true ? '已就绪' : '未就绪'
@@ -857,21 +827,22 @@
       if (online && autoTimer !== null) { clearInterval(autoTimer); autoTimer = null; $('btnAutoRefresh').textContent = '自动刷新：关' }
       return status
     }
-    dot.className = 'dot bad'
+    if (dot) dot.className = 'dot bad'
     const transient = status.kind === 'unreachable' || status.kind === 'timeout'
-    $('loginState').textContent = transient ? 'NapCat 连不上（可能正在重启）' : (KIND[status.kind] ?? '查不到')
-    $('loginMeta').textContent = transient
+    setText('loginState', transient ? 'NapCat 连不上（可能正在重启）' : (KIND[status.kind] ?? '查不到'))
+    setText('loginMeta', transient
       ? '已自动重试 3 次（每次间隔 2 秒）仍失败：6099 没有响应。NapCat 启动中会这样，稍等十几秒点「重试」。'
-      : (status.message ?? '')
+      : (status.message ?? ''))
     $('kState').textContent = KIND[status.kind] ?? '查不到'
+    const metaHost = $('loginMeta')
     let retryBtn = $('btnStatusRetry')
-    if (!retryBtn) {
+    if (!retryBtn && metaHost) {
       retryBtn = document.createElement('button')
       retryBtn.id = 'btnStatusRetry'
       retryBtn.textContent = '重试'
       retryBtn.style.marginTop = '10px'
       retryBtn.onclick = () => refreshStatus(false)
-      $('loginMeta').parentElement.appendChild(retryBtn)
+      metaHost.parentElement.appendChild(retryBtn)
     }
     retryBtn.style.display = 'inline-block'
     if (!silent) toast(status.message ?? '查不到登录状态', 'bad')
@@ -892,44 +863,6 @@
     }
     tick()
     qrTick = setInterval(tick, 1000)
-  }
-  async function loadQr() {
-    const btn = $('btnQr')
-    busy(btn, true, '取码中…')
-    const data = await api('/api/accounts/qr')
-    busy(btn, false)
-    $('qrBadge').textContent = data.ok === true ? '待扫码' : (KIND[data.kind] ?? '失败')
-    if (data.ok !== true) {
-      if (data.kind === 'need-2fa') { $('twofaRow').classList.remove('hidden'); toast('这个 WebUI 开了 2FA，先填验证码', 'warn'); return }
-      $('qrBox').innerHTML = `<div class="hint" style="color:var(--danger)">${data.message ?? '取不到二维码'}</div>`
-      toast(data.message ?? '取不到二维码', 'bad')
-      return
-    }
-    const value = String(data.data?.qrcode ?? data.data?.qrcodeurl ?? '')
-    if (value === '') {
-      $('qrBox').innerHTML = '<div class="hint">NapCat 没给二维码（可能已登录）</div>'
-      $('qrBadge').textContent = '无'
-      return
-    }
-    // NapCat 给的是"二维码里编码的 URL"，不是图片本身；它同时会把图写到 cache/qrcode.png。
-    // 所以这里优先显示**控制台读出来的真图**（手机能直接扫），URL 作为兜底给可复制的文本。
-    const stamp = Date.now()
-    $('qrBox').innerHTML = '<img alt="登录二维码" src="/api/accounts/qr-image?token=' + encodeURIComponent(token) + '&t=' + stamp + '">'
-      + '<div class="hint" style="margin-top:8px">扫不出来就复制这行，用二维码生成器转一下：<br><code style="word-break:break-all">' + value.replace(/</g, '&lt;') + '</code></div>'
-    startCountdown()
-    opLog('取了登录二维码')
-    clearInterval(qrWatch)
-    let tries = 0
-    qrWatch = setInterval(async () => {
-      tries += 1
-      const status = await refreshStatus(true)
-      if (status.ok === true && status.data?.isLogin === true) {
-        clearInterval(qrWatch)
-        $('qrBadge').textContent = '已登录'
-        toast('登录成功 🎉', 'ok')
-      }
-      if (tries > 20) clearInterval(qrWatch)
-    }, 6000)
   }
 
   async function quickLogin(uin, btn) {
@@ -959,20 +892,6 @@
 
   // ---------- 重启 / GUID ----------
   // ---------- 2FA ----------
-  async function submitTwofa() {
-    const code = $('twofaCode').value.trim()
-    if (!/^\d{6}$/.test(code)) { toast('请输入 6 位数字验证码', 'warn'); return }
-    const btn = $('btnTwofa')
-    busy(btn, true, '提交中…')
-    const data = await post('/api/accounts/2fa', { code })
-    busy(btn, false)
-    if (data.ok === true) {
-      toast('验证码已接受', 'ok')
-      $('twofaRow').classList.add('hidden')
-      opLog('提交 2FA 验证码')
-      refreshStatus()
-    } else toast(`验证码没通过：${data.message ?? data.kind}`, 'bad')
-  }
 
   // ---------- 自动刷新 ----------
   let autoTimer = null
@@ -1786,11 +1705,7 @@
 
   $('btnReload').onclick = () => { loadMeta(); refreshStatus(true); opLog('刷新页面数据') }
   $('btnStatus').onclick = () => refreshStatus(false)
-  $('btnQr').onclick = loadQr
-  $('btnQrRefresh').onclick = loadQr
   $('btnGuid').onclick = loadDevice
-  $('btnTwofa').onclick = submitTwofa
-  $('twofaCode').addEventListener('keydown', (event) => { if (event.key === 'Enter') submitTwofa() })
 
   window.addEventListener('hashchange', () => {
     const tab = (location.hash || '').replace('#', '')
