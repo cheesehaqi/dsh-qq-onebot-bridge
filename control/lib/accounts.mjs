@@ -811,8 +811,8 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       const uin = readPreferredUin([join(dir, 'config')])
       if (existsSync(exe) && uin !== '') {
         try {
-          spawn(exe, [uin], { cwd: dir, detached: true, stdio: 'ignore' }).unref()
-          return { ok: true, kind: 'ok', message: 'NapCat 没在运行，已用 QQ ' + uin + ' 拉起（等十几秒再刷新）', launched: true, uin }
+          spawn('cmd.exe', ['/c', 'start', '', 'NapCatWinBootMain.exe', uin], { cwd: dir, detached: true, stdio: 'ignore' }).unref()
+          return { ok: true, kind: 'ok', message: 'NapCat 没在运行，已用 QQ ' + uin + ' 拉起（会弹一个控制台窗口，等十几秒再刷新）', launched: true, uin }
         } catch (error) {
           return { ok: false, kind: 'error', message: '拉起失败：' + String(error?.message ?? error).slice(0, 120) }
         }

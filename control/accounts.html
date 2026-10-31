@@ -383,10 +383,7 @@
               <div style="color:var(--muted);font-size:12.5px" id="loginMeta">点「刷新登录状态」</div>
             </div>
           </div>
-          <div class="row" style="margin-top:16px">
-            <button class="danger" id="btnRestart">重启 NapCat</button>
-          </div>
-          <p class="sub" style="margin-top:14px">重启会打断当前在线（正在跑的任务可能中断），页面会二次确认。</p>
+          <p class="sub" style="margin-top:14px">这里只做状态查询。NapCat 的启动/重启请用它自己的启动方式——从外部拉起并不可靠（启动器会挂着且不报错），所以这个按钮已经移除。</p>
         </div>
       </div>
     </section>
@@ -961,19 +958,6 @@
   }
 
   // ---------- 重启 / GUID ----------
-  async function restart() {
-    if (!confirm('重启 NapCat 会打断当前在线（正在跑的任务可能中断）。确定继续？')) return
-    const btn = $('btnRestart')
-    busy(btn, true, '重启中…')
-    const data = await post('/api/accounts/restart', {})
-    busy(btn, false)
-    if (data.ok === true) {
-      toast('已请求重启 NapCat，稍等它自己回来', 'ok')
-      opLog('请求重启 NapCat')
-      setTimeout(() => refreshStatus(true), 4000)
-    } else toast(`重启失败：${data.message ?? data.kind}`, 'bad')
-  }
-
   // ---------- 2FA ----------
   async function submitTwofa() {
     const code = $('twofaCode').value.trim()
@@ -1804,7 +1788,6 @@
   $('btnStatus').onclick = () => refreshStatus(false)
   $('btnQr').onclick = loadQr
   $('btnQrRefresh').onclick = loadQr
-  $('btnRestart').onclick = restart
   $('btnGuid').onclick = loadDevice
   $('btnTwofa').onclick = submitTwofa
   $('twofaCode').addEventListener('keydown', (event) => { if (event.key === 'Enter') submitTwofa() })
