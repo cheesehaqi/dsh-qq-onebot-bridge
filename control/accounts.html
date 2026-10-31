@@ -1,0 +1,1819 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>账号中心 · QQ AI 控制台</title>
+<!--
+  v0.7.11 账号中心 —— 本地网站（照 NapCat WebUI 的信息密度做的，但只放我们真的做了的东西）。
+
+  设计口径：
+    · 只连本机：数据只来自 127.0.0.1 的 NapCat WebUI；页面不引外网资源，断网可用；
+    · 不碰 token：webui.json 的 token 只在控制台服务端使用，页面只看到打码形态；
+    · 零依赖单页：不打包、不 CDN，跟着 control/ 一起分发。
+-->
+<style>
+  :root{
+    color-scheme:light dark;
+    --fg:#1f2328; --muted:#6a737d; --line:#e7e9ee; --bg:#f6f7fb; --card:#fff;
+    --pink:#ff7ab6; --pink-soft:#ffe8f3; --violet:#7c5cff; --violet-soft:#eee9ff;
+    --accent:#e75480; --ok:#12a150; --ok-soft:#e6f7ee; --warn:#b7791f; --warn-soft:#fff8e6;
+    --danger:#d92d20; --danger-soft:#ffeceb;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 12px 32px rgba(16,24,40,.06);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --fg:#e6edf3; --muted:#94a0ae; --line:#232a35; --bg:#0b0e14; --card:#111722;
+      --pink:#ff8cc4; --pink-soft:#2a1622; --violet:#9d87ff; --violet-soft:#1b1730;
+      --accent:#ff8cc4; --ok:#3ddc91; --ok-soft:#0d2419; --warn:#e2b03a; --warn-soft:#241c08;
+      --danger:#ff7b72; --danger-soft:#2b1414;
+      --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 32px rgba(0,0,0,.45); }
+  }
+
+  /* v0.7.11：手动主题（跟随系统 / 强制亮 / 强制暗）。选择存在 localStorage，刷新不丢。 */
+  html[data-theme="light"]{ --fg:#1f2328; --muted:#6a737d; --line:#e7e9ee; --bg:#f6f7fb; --card:#fff;
+    --pink:#ff7ab6; --pink-soft:#ffe8f3; --violet:#7c5cff; --violet-soft:#eee9ff;
+    --accent:#e75480; --ok:#12a150; --ok-soft:#e6f7ee; --warn:#b7791f; --warn-soft:#fff8e6;
+    --danger:#d92d20; --danger-soft:#ffeceb; }
+  html[data-theme="dark"]{ --fg:#e6edf3; --muted:#94a0ae; --line:#232a35; --bg:#0b0e14; --card:#111722;
+    --pink:#ff8cc4; --pink-soft:#2a1622; --violet:#9d87ff; --violet-soft:#1b1730;
+    --accent:#ff8cc4; --ok:#3ddc91; --ok-soft:#0d2419; --warn:#e2b03a; --warn-soft:#241c08;
+    --danger:#ff7b72; --danger-soft:#2b1414; }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:rgba(127,127,127,.14);
+    padding:1px 6px;border-radius:6px;font-size:12.5px}
+
+  /* 布局：左侧栏 + 右侧内容 */
+  .app{display:grid;grid-template-columns:240px minmax(0,1fr);width:100%;min-height:100vh}
+  aside{position:sticky;top:0;height:100vh;padding:18px 14px;background:var(--card);
+    border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;padding:4px 8px 16px}
+  .brand .logo{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:17px;
+    background:linear-gradient(135deg,var(--pink),var(--violet));color:#fff}
+  .brand small{display:block;font-weight:400;font-size:11px;color:var(--muted)}
+  nav{display:flex;flex-direction:column;gap:2px}
+  .nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;cursor:pointer;
+    color:var(--muted);font-size:13.5px;border:1px solid transparent}
+  .nav:hover{background:var(--bg);color:var(--fg)}
+  /* 活动项不再各自涂底色，改由一块"滑块"统一表示（切换时它会滑过去） */
+  .nav.active{ background:transparent; color:var(--accent); font-weight:600; border-color:transparent }
+  #nav{ position:relative }
+  /* 滑块本体：底色 + 左侧竖条**同一个元素**，切换时一起滑过去，不会出现两条线错位 */
+  #navIndicator{
+    position:absolute; left:0; top:0; width:0; height:0; border-radius:10px;
+    background:var(--pink-soft); border:1px solid transparent; pointer-events:none;
+    transition:top .28s cubic-bezier(.25,.8,.25,1), left .28s cubic-bezier(.25,.8,.25,1), width .28s cubic-bezier(.25,.8,.25,1), height .28s cubic-bezier(.25,.8,.25,1);
+    will-change:top, left, width, height; z-index:0
+  }
+  #navIndicator::before{
+    content:''; position:absolute; left:6px; top:50%; transform:translateY(-50%);
+    width:3px; height:calc(100% - 12px); min-height:8px; border-radius:2px;
+    background:linear-gradient(180deg,var(--pink),var(--violet));
+    opacity:0; transition:opacity .2s ease .05s
+  }
+  #navIndicator.visible::before{ opacity:1 }
+  #navIndicator.instant{ transition:none }
+  #nav .nav{ position:relative; z-index:1 }
+  .nav .ico{width:18px;text-align:center}
+  aside .grow{flex:1}
+  aside .foot{font-size:11.5px;color:var(--muted);padding:8px;line-height:1.5}
+
+  main{padding:22px 28px 64px;width:100%;min-width:0}
+  /* 超宽屏（>1800px）时给内容一个上限，避免一行文字拉太长；常规屏铺满 */
+  /* 原来这里给超宽屏加了单边 padding-right（内容限宽 1600），结果右侧空出一大条 → 已移除，内容铺满 */
+  .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+  .topbar h1{font-size:18px;margin:0}
+  .spacer{flex:1}
+  .pill{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;
+    border:1px solid var(--line);background:var(--card);font-size:12.5px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.bad{background:var(--danger)}
+
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+  @media (max-width:1024px){ .grid{grid-template-columns:1fr} }
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)}
+  .card.wide{grid-column:1/-1}
+  .card h2{margin:0 0 2px;font-size:14.5px;display:flex;align-items:center;gap:8px}
+  .card h2 .badge{font-size:11px;font-weight:500;color:var(--muted);border:1px solid var(--line);
+    border-radius:999px;padding:1px 8px;margin-left:auto}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 16px}
+
+  /* 账号卡片 */
+  .profile{display:flex;align-items:center;gap:14px}
+  .avatar{width:54px;height:54px;border-radius:16px;display:grid;place-items:center;font-size:24px;
+    background:linear-gradient(135deg,var(--violet-soft),var(--pink-soft));border:1px solid var(--line)}
+  .profile .nick{font-size:17px;font-weight:700}
+  .profile .uin{color:var(--muted);font-size:12.5px}
+  .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+  .metric{text-align:center;padding:12px 8px;border-radius:14px;background:var(--bg);border:1px solid var(--line)}
+  .metric .num{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+  .metric .lbl{font-size:11.5px;color:var(--muted)}
+
+  .gauges{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px;max-width:460px}
+  .gauge{display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px 14px;border-radius:14px;
+    background:var(--bg);border:1px solid var(--line)}
+  .gauge .ring{position:relative;line-height:0}
+  .gauge .ring .num{position:absolute;inset:0;display:grid;place-items:center;font-size:19px;font-weight:700;
+    font-variant-numeric:tabular-nums}
+  .gauge svg{transform:rotate(-90deg)}
+  .gauge .track{stroke:var(--line);fill:none}
+  .gauge .bar{fill:none;stroke-linecap:round;transition:stroke-dashoffset .4s ease}
+  .gauge .lbl{font-size:11.5px;color:var(--muted)}
+  .gauge .sub{font-size:11px;color:var(--muted);margin:0}
+  .kv{display:grid;grid-template-columns:96px 1fr;gap:9px 14px;margin:16px 0 0;font-size:13px}
+  .kv dt{color:var(--muted)} .kv dd{margin:0;word-break:break-all}
+
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;padding:8px 14px;border-radius:10px;border:1px solid var(--line);
+    background:var(--card);color:var(--fg);cursor:pointer;transition:.12s}
+  button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.primary{background:linear-gradient(135deg,var(--pink),var(--violet));border-color:transparent;color:#fff;font-weight:600}
+  button.primary:hover:not(:disabled){filter:brightness(1.05);color:#fff}
+  button.danger{border-color:var(--danger);color:var(--danger)}
+  button.danger:hover:not(:disabled){background:var(--danger-soft);color:var(--danger)}
+  button.ghost{background:transparent}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input{font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{color:var(--muted);font-weight:500;font-size:12px}
+  tr:last-child td{border-bottom:none}
+  .tag{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .tag.ok{color:var(--ok);border-color:var(--ok);background:var(--ok-soft)}
+  .tag.star{color:var(--accent);border-color:var(--accent);background:var(--pink-soft)}
+
+  .qrbox{display:grid;place-items:center;min-height:210px;border:1px dashed var(--line);
+    border-radius:16px;background:var(--bg);padding:16px;text-align:center}
+  .qrbox img{max-width:232px;width:100%;border-radius:10px;background:#fff;padding:8px}
+  .qrbox .hint{color:var(--muted);font-size:12.5px;max-width:32em}
+  .countdown{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12.5px}
+
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border:1px solid var(--line);
+    border-radius:999px;background:var(--bg);font-size:13px}
+  .chip button{padding:3px 10px;border-radius:999px;font-size:12px}
+
+  #toasts{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:60}
+  .toast{min-width:230px;max-width:390px;padding:11px 13px;border-radius:12px;border:1px solid var(--line);
+    background:var(--card);box-shadow:var(--shadow);font-size:13px}
+  .toast.ok{border-color:var(--ok);background:var(--ok-soft)}
+  .toast.bad{border-color:var(--danger);background:var(--danger-soft)}
+  .toast.warn{border-color:var(--warn);background:var(--warn-soft)}
+
+  .skeleton{height:14px;border-radius:7px;background:linear-gradient(90deg,var(--line),transparent,var(--line));
+    background-size:200% 100%;animation:sheen 1.2s infinite}
+  @keyframes sheen{from{background-position:200% 0}to{background-position:-200% 0}}
+  .empty{color:var(--muted);font-size:13px;text-align:center;padding:16px}
+  /* 这些容器初始带 .empty（居中），渲染出真内容后会被继承成居中 → 统一改回左对齐 */
+  #statsBody, #configBody, #aboutBody, #networkBody, #filesBody, #pluginsBody, #storeBody{ text-align:left }
+  /* 宽度链钉死：内容必须撑满 aside 之外的全部横向空间（真机上出现过"右边空一大块"） */
+  html, body{ width:100%; }
+  .app{ width:100%; }
+  main{ width:100%; max-width:none; box-sizing:border-box; }
+  .section{ width:100%; }
+  .grid{ width:100%; }
+  .card{ box-sizing:border-box; }
+  .card.wide{ grid-column:1 / -1; }
+  .section{display:none} .section.active{display:block}
+  .hidden{display:none!important}
+  @media (max-width:820px){
+    #navIndicator::before{ display:none }
+    .app{grid-template-columns:1fr}
+    aside{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center}
+    .brand{padding-bottom:8px} aside .grow{display:none} nav{flex-direction:row;flex-wrap:wrap}
+    main{padding:16px}
+  }
+
+  /* ---------- v0.7.11：动效（切换分区/卡片/按钮） ---------- */
+  /*
+   * 切换分区的动效（照 NapCat 那种"软"的感觉调）：
+   *   · 时间拉长到 0.46s、缓动用 ease-out-quart 而不是 ease-out —— 前段快、后段慢，收得稳；
+   *   · **不用 blur**（实测会晕），靠位移 + 缓动做"软"，不靠滤波；
+   *   · 卡片各自错开 60ms，视觉上有层次。
+   */
+  .section.active{ animation: fadeUp .46s cubic-bezier(.25,.8,.25,1) both }
+  @keyframes fadeUp{
+    from{ opacity:0; transform:translateY(14px) scale(.996) }
+    to{ opacity:1; transform:none }
+  }
+  .section.active .grid > .card{ animation: cardIn .5s cubic-bezier(.25,.8,.25,1) both }
+  .section.active .grid > .card:nth-child(1){ animation-delay:.03s }
+  .section.active .grid > .card:nth-child(2){ animation-delay:.09s }
+  .section.active .grid > .card:nth-child(3){ animation-delay:.15s }
+  .section.active .grid > .card:nth-child(n+4){ animation-delay:.21s }
+  @keyframes cardIn{
+    from{ opacity:0; transform:translateY(16px) }
+    to{ opacity:1; transform:none }
+  }
+  /* 卡片悬停再软一点（NapCat 的卡片悬停是"轻轻抬起"） */
+  .card{ transition:box-shadow .26s ease, transform .26s cubic-bezier(.25,.8,.25,1), border-color .2s ease }
+  .card:hover{ transform:translateY(-2px) }
+  /* 按钮：0.2s 换色 + 轻阴影，别弹跳 */
+  button{ transition:background .2s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease }
+  button:hover:not(:disabled){ box-shadow:0 2px 10px -6px var(--accent) }
+  button:active:not(:disabled){ transform:none; filter:brightness(.97) } to{ opacity:1; transform:none } }
+  .nav{ transition:background .16s ease, color .16s ease, border-color .16s ease, transform .12s ease }
+  .nav:active{ transform:scale(.985) }
+  .nav.active{ box-shadow:0 1px 0 rgba(0,0,0,.02), 0 6px 18px -10px var(--pink) }
+  .card{ transition:box-shadow .18s ease, transform .18s ease, border-color .18s ease }
+  .card:hover{ transform:translateY(-1px); box-shadow:0 2px 6px rgba(16,24,40,.05), 0 18px 40px -24px rgba(16,24,40,.28) }
+  button{ transition:background .15s ease, border-color .15s ease, color .15s ease, transform .1s ease, filter .15s ease }
+  button:active:not(:disabled){ transform:translateY(1px) }
+  .metric{ transition:background .18s ease, border-color .18s ease }
+  .metric:hover{ border-color:var(--pink) }
+  .chip{ transition:border-color .16s ease, transform .12s ease }
+  .chip:hover{ border-color:var(--violet); transform:translateY(-1px) }
+  .gauge .bar{ transition:stroke-dashoffset .55s cubic-bezier(.2,.7,.3,1) }
+  #toasts .toast{ animation:toastIn .18s ease-out both }
+  @keyframes toastIn{ from{ opacity:0; transform:translateY(8px) scale(.98) } to{ opacity:1; transform:none } }
+  /* 系统层面关掉动效时，一律不加动画（无障碍） */
+  @media (prefers-reduced-motion: reduce){
+    .section.active, .section.active .grid > .card{ animation:none }
+    .nav::before{ transition:none }
+    .card, .card:hover, .nav, button, .chip, .gauge .bar, #toasts .toast{ transition:none; animation:none; transform:none }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><span class="logo">🐋</span><span>账号中心<small>QQ AI · 本地</small></span></div>
+    <nav id="nav">
+      <div id="navIndicator"></div>
+      <div class="nav active" data-tab="home"><span class="ico">🏠</span>基础信息</div>
+      <div class="nav" data-tab="login"><span class="ico">🔑</span>登录 / 扫码</div>
+      <div class="nav" data-tab="accounts"><span class="ico">👥</span>账号配置</div>
+      <div class="nav" data-tab="network"><span class="ico">📡</span>网络配置</div>
+      <div class="nav" data-tab="logs"><span class="ico">🪵</span>猫猫日志</div>
+      <div class="nav" data-tab="files"><span class="ico">📁</span>文件管理</div>
+      <div class="nav" data-tab="plugins"><span class="ico">🧩</span>插件管理</div>
+      <div class="nav" data-tab="store"><span class="ico">🛍️</span>插件商店</div>
+      <div class="nav" data-tab="device"><span class="ico">🔧</span>设备与版本</div>
+      <div class="nav" data-tab="stats"><span class="ico">📊</span>运行统计</div>
+      <div class="nav" data-tab="config"><span class="ico">⚙️</span>系统配置</div>
+      <div class="nav" data-tab="test"><span class="ico">🧪</span>实时测试</div>
+      <div class="nav" data-tab="log"><span class="ico">📝</span>操作记录</div>
+      <div class="nav" data-tab="about"><span class="ico">ℹ️</span>关于</div>
+    </nav>
+    <div class="grow"></div>
+    <a class="nav" id="openNapcat"><span class="ico">🌐</span>打开 NapCat</a>
+    <div class="nav" id="themeBtn"><span class="ico">🎨</span><span id="themeText">主题：跟随系统</span></div>
+    <a class="nav" id="backLink" href="./"><span class="ico">↩</span>返回控制台</a>
+    <div class="foot">只连 127.0.0.1 的 NapCat<br>token 只在服务端使用</div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <h1 id="pageTitle">基础信息</h1>
+      <span class="pill" id="connPill"><span class="dot"></span><span id="connText">正在读配置…</span></span>
+      <span class="spacer"></span>
+      <span class="pill" id="verPill">NapCat — · QQ —</span>
+      <button class="ghost" id="btnReload">刷新</button>
+    </div>
+
+    <!-- 基础信息 -->
+    <section class="section active" id="tab-home">
+      <div class="grid">
+        <div class="card">
+          <div class="profile">
+            <div class="avatar">🐋</div>
+            <div>
+              <div class="nick" id="nick">未登录</div>
+              <div class="uin" id="uin">—</div>
+            </div>
+          </div>
+          <div class="metrics" style="grid-template-columns:repeat(2,1fr)">
+            <div class="metric"><div class="num" id="mAccounts">—</div><div class="lbl">本机账号</div></div>
+            <div class="metric"><div class="num" id="mApis">—</div><div class="lbl">接口可用</div></div>
+          </div>
+          <dl class="kv">
+            <dt>登录状态</dt><dd id="kState">—</dd>
+            <dt>自动登录</dt><dd id="kAuto">—</dd>
+            <dt>WebUI</dt><dd id="kUrl">—</dd>
+            <dt>2FA</dt><dd id="k2fa">—</dd>
+          </dl>
+        </div>
+
+        <div class="card">
+          <h2>版本与运行环境<span class="badge" id="badgeEnv">—</span></h2>
+          <p class="sub">全部来自本机 NapCat WebUI（只读）。</p>
+          <dl class="kv">
+            <dt>NapCat</dt><dd id="vNapcat">—</dd>
+            <dt>QQ</dt><dd id="vQq">—</dd>
+            <dt>登录阶段</dt><dd id="vPhase">—</dd>
+            <dt>核心就绪</dt><dd id="vCore">—</dd>
+          </dl>
+          <div class="row" style="margin-top:16px">
+            <button id="btnStatus">刷新登录状态</button>
+            <button id="btnAutoRefresh">自动刷新：关</button>
+          </div>
+        </div>
+
+        <div class="card wide">
+          <h2>运行状态 <span class="badge" id="badgeSys">—</span></h2>
+          <p class="sub">来自 NapCat 的 <code>GetSysStatusRealTime</code>（SSE，取一帧即断开；控制台缓存 20 秒）。</p>
+          <div class="gauges">
+            <div class="gauge">
+              <div class="ring"><svg width="112" height="112" viewBox="0 0 120 120">
+                <circle class="track" cx="60" cy="60" r="50" stroke-width="10"></circle>
+                <circle class="bar" id="cpuBar" cx="60" cy="60" r="50" stroke-width="10"
+                        stroke="url(#cpuGrad)" stroke-dasharray="314" stroke-dashoffset="314"></circle>
+                <defs><linearGradient id="cpuGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#ff7ab6"></stop><stop offset="100%" stop-color="#7c5cff"></stop>
+                </linearGradient></defs>
+              </svg><div class="num" id="cpuNum">—</div></div>
+              <div class="lbl">CPU 使用率</div>
+              <p class="sub" id="cpuSub">—</p>
+            </div>
+            <div class="gauge">
+              <div class="ring"><svg width="112" height="112" viewBox="0 0 120 120">
+                <circle class="track" cx="60" cy="60" r="50" stroke-width="10"></circle>
+                <circle class="bar" id="memBar" cx="60" cy="60" r="50" stroke-width="10"
+                        stroke="url(#memGrad)" stroke-dasharray="314" stroke-dashoffset="314"></circle>
+                <defs><linearGradient id="memGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#7c5cff"></stop><stop offset="100%" stop-color="#ff7ab6"></stop>
+                </linearGradient></defs>
+              </svg><div class="num" id="memNum">—</div></div>
+              <div class="lbl">内存占用</div>
+              <p class="sub" id="memSub">—</p>
+            </div>
+          </div>
+          <dl class="kv" style="margin-top:16px">
+            <dt>CPU</dt><dd id="sysCpu">—</dd>
+            <dt>内核 / 主频</dt><dd id="sysCores">—</dd>
+            <dt>内存总量</dt><dd id="sysMemTotal">—</dd>
+            <dt>系统</dt><dd id="sysArch">—</dd>
+          </dl>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- 登录/扫码 -->
+    <section class="section" id="tab-login">
+      <div class="grid">
+        <div class="card">
+          <h2>扫码登录 <span class="badge" id="qrBadge">未取</span></h2>
+          <p class="sub">二维码由本机 NapCat 生成，通常 1–2 分钟过期；过期点「刷新二维码」，不要反复刷。</p>
+          <div class="qrbox" id="qrBox"><div class="hint">还没取二维码。<br>点下面的按钮，用手机 QQ 扫。</div></div>
+          <div class="row" style="margin-top:14px">
+            <button class="primary" id="btnQr">取二维码</button>
+            <button id="btnQrRefresh">刷新二维码</button>
+            <span class="countdown" id="qrCountdown"></span>
+          </div>
+          <div class="row hidden" id="twofaRow" style="margin-top:12px">
+            <input id="twofaCode" inputmode="numeric" maxlength="6" placeholder="6 位验证码" style="flex:1;min-width:150px">
+            <button class="primary" id="btnTwofa">提交验证码</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>当前登录</h2>
+          <p class="sub">来自 <code>CheckLoginStatus</code> 与 <code>GetQQLoginInfo</code>。</p>
+          <div class="hero" style="display:flex;gap:14px;align-items:center;padding:16px;border-radius:14px;background:var(--bg);border:1px solid var(--line)">
+            <span class="dot" id="loginDot"></span>
+            <div>
+              <div style="font-size:18px;font-weight:700" id="loginState">还没查</div>
+              <div style="color:var(--muted);font-size:12.5px" id="loginMeta">点「刷新登录状态」</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:16px">
+            <button class="danger" id="btnRestart">重启 NapCat</button>
+          </div>
+          <p class="sub" style="margin-top:14px">重启会打断当前在线（正在跑的任务可能中断），页面会二次确认。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 账号配置 -->
+    <section class="section" id="tab-accounts">
+      <div class="card wide">
+        <h2>本机账号配置 <span class="badge" id="accountBadge">—</span></h2>
+        <p class="sub">来自 <code>bootmain/config</code> 的 <code>onebot11_&lt;QQ号&gt;.json</code> / <code>napcat_&lt;QQ号&gt;.json</code>；只读文件名，不改内容。</p>
+        <table>
+          <thead><tr><th>QQ 号</th><th>OneBot 配置</th><th>NapCat 配置</th><th>登录状态</th><th>自动登录</th><th style="text-align:right">操作</th></tr></thead>
+          <tbody id="accountRows"><tr><td colspan="6"><div class="skeleton" style="width:60%"></div></td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 设备与版本 -->
+    <section class="section" id="tab-device">
+      <div class="grid">
+        <div class="card">
+          <h2>设备指纹备份</h2>
+          <p class="sub">NapCat 的 GUID 备份列表；换机器/重装前先备份，能少一次新设备验证。</p>
+          <dl class="kv"><dt>备份数量</dt><dd id="guidInfo">—</dd></dl>
+          <div class="row" style="margin-top:16px"><button id="btnGuid">查备份</button></div>
+        </div>
+        <div class="card">
+          <h2>接口可用性</h2>
+          <p class="sub">顶部信息条按这几个接口的返回判定；这里列出逐个状态。</p>
+          <dl class="kv">
+            <dt>NapCat 版本</dt><dd id="apiNapcat">—</dd>
+            <dt>QQ 版本</dt><dd id="apiQq">—</dd>
+            <dt>系统状态</dt><dd id="apiSys">—</dd>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="tab-network"><div class="card wide">
+      <h2>网络配置 <span class="badge" id="networkBadge">—</span></h2>
+      <p class="sub">读 onebot11_*.json 的 servers（只读）<code style="margin-left:6px">/api/accounts/network</code></p>
+      <div id="networkBody" class="empty">切换到这里会自动加载</div>
+      <div class="row" style="margin-top:14px"><button id="btn-network">刷新</button></div>
+    </div></section>
+
+    <section class="section" id="tab-files"><div class="card wide">
+      <h2>文件管理 <span class="badge" id="filesBadge">—</span></h2>
+      <p class="sub">列 bootmain/config 目录（只读）<code style="margin-left:6px">/api/accounts/files</code></p>
+      <div id="filesBody" class="empty">切换到这里会自动加载</div>
+      <div class="row" style="margin-top:14px"><button id="btn-files">刷新</button>
+        <button class="primary" id="btn-openFiles">在资源管理器中打开 →</button>
+        <button id="btn-copyDir">复制目录路径</button>
+</div>
+    </div></section>
+
+    <section class="section" id="tab-plugins"><div class="card wide">
+      <h2>插件管理 <span class="badge" id="pluginsBadge">—</span></h2>
+      <p class="sub">启用 / 停用 / 卸载（卸载会删文件，二次确认）<code style="margin-left:6px">/api/accounts/plugins</code></p>
+      <div id="pluginsBody" class="empty">切换到这里会自动加载</div>
+      <div class="row" style="margin-top:14px"><button id="btn-plugins">刷新</button></div>
+    </div></section>
+
+    <section class="section" id="tab-store"><div class="card wide">
+      <h2>插件商店 <span class="badge" id="storeBadge">—</span></h2>
+      <p class="sub">只读列表；安装请在 NapCat 自己的商店里点<code style="margin-left:6px">/api/accounts/store</code></p>
+      <div id="storeBody" class="empty">切换到这里会自动加载</div>
+      <div class="row" style="margin-top:14px"><button id="btn-store">刷新</button></div>
+    </div></section>
+
+    <section class="section" id="tab-stats"><div class="card wide">
+      <h2>运行统计 <span class="badge" id="statsBadge">—</span></h2>
+      <p class="sub">读本地 trace 聚合<code style="margin-left:6px">/api/accounts/stats</code></p>
+      <div id="statsBody" class="empty">切换到这里会自动加载</div>
+      <div class="row" style="margin-top:14px"><button id="btn-stats">刷新</button></div>
+    </div></section>
+
+    <section class="section" id="tab-config"><div class="card wide">
+      <h2>系统配置 <span class="badge" id="configBadge">—</span></h2>
+      <p class="sub">webui.json + 端口状态<code style="margin-left:6px">/api/accounts/meta</code></p>
+      <div id="configBody" class="empty">切换到这里会自动加载</div>
+      <div class="row" style="margin-top:14px"><button id="btn-config">刷新</button></div>
+    </div></section>
+
+    <section class="section" id="tab-about"><div class="card wide">
+      <h2>关于 <span class="badge" id="aboutBadge">—</span></h2>
+      <p class="sub">版本 / 哈希 / 镜像<code style="margin-left:6px">/api/accounts/about</code></p>
+      <div id="aboutBody" class="empty">切换到这里会自动加载</div>
+      <div class="row" style="margin-top:14px"><button id="btn-about">刷新</button></div>
+    </div></section>
+
+    <section class="section" id="tab-test">
+      <div class="grid">
+        <div class="card">
+          <h2>发一条测试消息 <span class="badge" id="testBadge">dry-run</span></h2>
+          <p class="sub">写进注入队列，桥轮询后走<strong>真实管线</strong>；默认 dry-run —— 所有出站都会被拦下，不会真发到 QQ。</p>
+          <div class="row" style="margin-bottom:10px">
+            <select id="testKind" style="font:inherit;padding:7px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)">
+              <option value="message">消息 message</option>
+              <option value="notice">通知 notice</option>
+              <option value="request">请求 request</option>
+            </select>
+            <input id="testGroup" placeholder="群号（私聊留空）" style="width:150px">
+            <input id="testUser" placeholder="发消息的 QQ 号（必填）" style="width:190px">
+          </div>
+          <div class="row" style="margin-bottom:10px">
+            <input id="testText" placeholder="消息文本，例如：你好，做个自我介绍" style="flex:1;min-width:220px">
+            <label class="sub" style="margin:0;display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="testAtMe" checked> 群里 @ 机器人
+            </label>
+          </div>
+          <div class="row">
+            <button class="primary" id="btnTest">单发一次</button>
+            <button id="btnTestLive">即时调试（跟 15 秒）</button>
+            <button id="btnTestClear">清空注入队列</button>
+            <span class="sub" id="testState" style="margin:0"></span>
+          </div>
+          <p class="sub" style="margin-top:12px">看它被怎么处理：切到「运行统计」看阶段分布，或去调试台（8799 首页）的<strong>实时事件流</strong>逐条看决策链。</p>
+        </div>
+        <div class="card">
+          <h2>内置场景</h2>
+          <p class="sub">各验一条链路；缺参数会直接说缺什么。</p>
+          <div class="row" style="margin-bottom:10px"><select id="testScenario" style="flex:1;min-width:200px"></select></div>
+          <div class="row" style="margin-bottom:10px">
+            <input id="testScenGroup" placeholder="群号" style="width:130px">
+            <input id="testScenUser" placeholder="QQ 号" style="width:150px">
+            <input id="testScenTarget" placeholder="被操作 QQ（踢人用）" style="width:180px">
+          </div>
+          <div class="row"><button id="btnScenario">一键注入场景</button><span class="sub" id="scenState" style="margin:0"></span></div>
+        </div>
+      </div>
+
+      <div class="card wide hidden" id="debugCard" style="margin-top:16px">
+        <h2>即时调试 <span class="badge" id="debugBadge">空闲</span></h2>
+        <p class="sub">注入后<strong>持续跟 15 秒</strong>，每一步决策按时间顺序落在这里（dry-run，不会真发 QQ）。</p>
+        <div id="debugLog" style="margin:0;padding:12px;border-radius:12px;background:var(--bg);border:1px solid var(--line);height:calc(100vh - 500px);min-height:200px;overflow:auto;font:12.5px/1.6 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all">（点「即时调试」开始）</div>
+        <div class="row" style="margin-top:12px">
+          <button id="btnDebugStop">停止跟随</button>
+          <span class="sub" style="margin:0">点任意一行 → 下面展开这条消息的完整决策链</span>
+        </div>
+        <pre id="chainView" class="hidden" style="margin:12px 0 0;padding:12px;border-radius:12px;background:var(--card);border:1px solid var(--line);max-height:38vh;overflow:auto;font:12.5px/1.6 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all">（点上面任意一行看链路）</pre>
+      </div>
+
+      <div class="card wide" style="margin-top:16px">
+        <h2>最近事件 <span class="badge" id="testEventsBadge">—</span></h2>
+        <p class="sub">注入后桥每 2 秒轮询一次队列；这里自动跟随，能直接看到这条测试消息被怎么处理（读 <code>qq-trace.jsonl</code>）。</p>
+        <pre id="testEvents" style="margin:0;padding:12px;border-radius:12px;background:var(--bg);border:1px solid var(--line);height:calc(100vh - 470px);min-height:180px;overflow:auto;font:12.5px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all">（还没有事件）</pre>
+        <div class="row" style="margin-top:12px">
+          <button id="btnTestEvents">刷新</button>
+          <button id="btnTestFollow" class="primary">自动跟随：开</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 日志窗口 -->
+    <section class="section" id="tab-logs">
+      <div class="card wide">
+        <h2>日志 <span class="badge" id="logBadge">—</span></h2>
+        <p class="sub">左边是本机日志（控制台自己写的），右边是 NapCat 的日志；都只读，不会改动任何文件。</p>
+        <div class="row" style="margin-bottom:10px">
+          <select id="logSource" style="font:inherit;padding:7px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)">
+            <option value="napcat">NapCat 日志</option>
+            <option value="hostOut">宿主输出（qq-host-out.log）</option>
+            <option value="hostErr">宿主错误（qq-host-err.log）</option>
+            <option value="bridge">桥调试（qq-bridge-debug.log）</option>
+            <option value="trace">事件流（qq-trace.jsonl）</option>
+          </select>
+          <select id="napcatLogFile" style="font:inherit;padding:7px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-width:200px"></select>
+          <span class="tag" id="logModeTag">实时</span>
+          <button id="btnLogMode">切到历史</button>
+          <button id="btnLogRefresh">重连</button>
+          <button id="btnLogAuto" class="hidden">自动刷新：关</button>
+          <button id="btnLogCopy">复制</button>
+          <button id="btnLogDownload">下载</button>
+          <input id="logSearch" placeholder="关键词过滤" style="flex:1;min-width:140px">
+        </div>
+        <div class="row" style="margin-bottom:10px">
+          <span class="tag" id="badgeInfo">Info 0</span>
+          <span class="tag" id="badgeWarn">Warn 0</span>
+          <span class="tag" id="badgeError">Error 0</span>
+          <span style="flex:1"></span>
+          <button id="btnLevelAll" data-level="all" class="primary">全部</button>
+          <button id="btnLevelInfo" data-level="info">Info</button>
+          <button id="btnLevelWarn" data-level="warn">Warn</button>
+          <button id="btnLevelError" data-level="error">Error</button>
+          <button id="btnFollow" class="primary">跟随最新：开</button>
+        </div>
+        <pre id="logView" style="margin:0;padding:14px;border-radius:12px;background:var(--bg);border:1px solid var(--line);
+          height:calc(100vh - 360px);min-height:240px;overflow:auto;font:12.5px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all">还没有加载日志</pre>
+      </div>
+    </section>
+
+    <!-- 操作记录 -->
+    <section class="section" id="tab-log">
+      <div class="card wide">
+        <h2>操作记录</h2>
+        <p class="sub">只记这个页面点过什么（内存里，刷新即清），方便确认“我到底点没点”。</p>
+        <ol id="opLog" style="margin:0;padding-left:20px;color:var(--muted);font-size:13px">
+          <li class="empty" style="list-style:none;padding:0">还没有操作</li>
+        </ol>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toasts"></div>
+
+<script>
+(() => {
+  const token = new URLSearchParams(location.search).get('token') ?? ''
+  const $ = (id) => document.getElementById(id)
+  $('backLink').href = token ? `./?token=${encodeURIComponent(token)}` : './'
+
+  // ---------- 侧栏 tab ----------
+  const titles = { home: '基础信息', login: '登录 / 扫码', accounts: '账号配置', network: '网络配置', logs: '猫猫日志', files: '文件管理', plugins: '插件管理', store: '插件商店', device: '设备与版本', stats: '运行统计', config: '系统配置', log: '操作记录', about: '关于', test: '实时测试' }
+  /**
+   * 切换分区（也支持 `#network` 这种 hash 直达）。
+   * 为什么加 hash：调试时经常要把"某个页面"直接发给人或收藏起来，纯 JS 切页做不到。
+   */
+  /** 把高亮滑块挪到当前活动项（首次定位不要动画，避免开机"滑一下"）。 */
+  const moveIndicator = (tab, { instant = false } = {}) => {
+    const indicator = $('navIndicator')
+    const target = document.querySelector(`.nav[data-tab="${tab}"]`)
+    if (!indicator || !target) return
+    if (instant) indicator.classList.add('instant')
+    indicator.style.top = target.offsetTop + 'px'
+    indicator.style.left = target.offsetLeft + 'px'
+    indicator.style.width = target.offsetWidth + 'px'
+    indicator.style.height = target.offsetHeight + 'px'
+    if (instant) requestAnimationFrame(() => indicator.classList.remove('instant'))
+    indicator.classList.toggle('visible', target.offsetHeight > 0)
+  }
+
+  const activate = (tab, { updateHash = true } = {}) => {
+    const target = document.querySelector(`.nav[data-tab="${tab}"]`)
+    if (!target) return false
+    for (const other of document.querySelectorAll('.nav[data-tab]')) other.classList.toggle('active', other === target)
+    for (const section of document.querySelectorAll('.section')) section.classList.remove('active')
+    const panel = $(`tab-${tab}`)
+    if (!panel) return false
+    panel.classList.add('active')
+    $('pageTitle').textContent = titles[tab] ?? ''
+    if (updateHash && location.hash !== `#${tab}`) history.replaceState(null, '', `#${tab}`)
+    moveIndicator(tab)
+    return true
+  }
+
+  for (const item of document.querySelectorAll('.nav[data-tab]')) {
+    item.onclick = () => {
+      activate(item.dataset.tab)
+      if (item.dataset.tab === 'logs') openLogs()
+      if (LOADERS[item.dataset.tab]) {
+        try { loadersafe(item.dataset.tab) } catch (error) { console.error(error) }
+      }
+    }
+  }
+
+  // ---------- 通用 ----------
+  // 任何未捕获的运行时错误都露出来：页面"按不动"时至少能看到原因，而不是无限发呆。
+  window.addEventListener('error', (event) => {
+    const msg = event?.message ?? '未知错误'
+    try { toast('页面脚本出错：' + msg, 'bad') } catch { /* toast 还没就绪就算了 */ }
+    console.error('[accounts] uncaught:', event?.error ?? msg)
+  })
+  window.addEventListener('unhandledrejection', (event) => {
+    const msg = event?.reason?.message ?? String(event?.reason ?? '未知')
+    try { toast('请求/异步出错：' + msg, 'bad') } catch { /* 同上 */ }
+    console.error('[accounts] unhandled rejection:', event?.reason)
+  })
+
+  const toast = (text, kind = '') => {
+    const box = $('toasts')
+    // 同一条内容还在屏上就别再叠一条（曾经连点导致一屏红条）
+    if ([...box.children].some((item) => item.textContent === text)) return
+    const el = document.createElement('div')
+    el.className = `toast ${kind}`
+    el.textContent = text
+    box.appendChild(el)
+    while (box.children.length > 3) box.firstElementChild.remove()
+    setTimeout(() => el.remove(), kind === 'bad' ? 6000 : 3500)
+  }
+  const opLog = (text) => {
+    const list = $('opLog')
+    list.querySelector('.empty')?.remove()
+    const li = document.createElement('li')
+    li.textContent = `${new Date().toLocaleTimeString('zh-CN', { hour12: false })}  ${text}`
+    list.prepend(li)
+    while (list.children.length > 12) list.lastElementChild.remove()
+  }
+  const api = async (path, options = {}) => {
+    const url = `${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+    try {
+      const res = await fetch(url, { cache: 'no-store', ...options })
+      const text = await res.text()
+      try { return JSON.parse(text) } catch { return { ok: false, message: `HTTP ${res.status}` } }
+    } catch (error) {
+      return { ok: false, kind: 'unreachable', message: `控制台连不上：${error.message}` }
+    }
+  }
+  const post = (path, body) => api(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })
+  /**
+   * 连不上就重试：NapCat 重启期间 6099 会短暂不监听，这时候一次失败不代表"没运行"。
+   * 只对"网络层失败"重试（unreachable / timeout），业务错误（没配置 / token 被拒）不重试。
+   */
+  const withRetry = async (fn, { times = 3, delay = 2000 } = {}) => {
+    let last = null
+    for (let attempt = 1; attempt <= times; attempt += 1) {
+      last = await fn()
+      const retriable = last && last.ok === false && (last.kind === 'unreachable' || last.kind === 'timeout')
+      if (!retriable) return last
+      if (attempt < times) await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+    return last
+  }
+
+  const KIND = { ok: '正常', 'no-config': '没有配置', unreachable: '连不上（NapCat 没在运行）', unauthorized: 'token 被拒', unsupported: '这个版本没有该接口', 'need-2fa': '需要 2FA', error: '出错' }
+  const busy = (btn, on, label) => {
+    if (!btn) return
+    if (on) { btn.dataset.label = btn.textContent; btn.textContent = label ?? '处理中…'; btn.disabled = true }
+    else { btn.textContent = btn.dataset.label ?? btn.textContent; btn.disabled = false }
+  }
+
+  // ---------- 状态 ----------
+  const state = { meta: null, status: null, quick: [], loginInfo: null }
+
+
+  const setGauge = (barId, numId, subId, percent, label, sub) => {
+    const bar = $(barId)
+    const clamped = Math.max(0, Math.min(100, Number(percent) || 0))
+    const circumference = 2 * Math.PI * 50
+    bar.setAttribute('stroke-dasharray', String(circumference))
+    bar.setAttribute('stroke-dashoffset', String(circumference * (1 - clamped / 100)))
+    $(numId).textContent = label
+    $(subId).textContent = sub
+  }
+
+  const renderSys = (sys) => {
+    if (!sys) {
+      $('badgeSys').textContent = '取不到'
+      setGauge('cpuBar', 'cpuNum', 'cpuSub', 0, '—', '该版本/该时刻没有数据')
+      setGauge('memBar', 'memNum', 'memSub', 0, '—', '')
+      return
+    }
+    const cpuUsage = Number(sys.cpu?.usage?.system)
+    const cpuQq = Number(sys.cpu?.usage?.qq)
+    const memTotal = Number(sys.memory?.total)
+    const memUsed = Number(sys.memory?.usage?.system)
+    const memQq = Number(sys.memory?.usage?.qq)
+    const memPercent = memTotal > 0 ? (memUsed / memTotal) * 100 : 0
+    $('badgeSys').textContent = '实时'
+    setGauge('cpuBar', 'cpuNum', 'cpuSub', cpuUsage,
+      Number.isFinite(cpuUsage) ? cpuUsage.toFixed(1) + '%' : '—',
+      Number.isFinite(cpuQq) ? `QQ 进程 ${cpuQq.toFixed(2)}%` : '')
+    setGauge('memBar', 'memNum', 'memSub', memPercent,
+      memPercent > 0 ? memPercent.toFixed(1) + '%' : '—',
+      memTotal > 0 ? `${(memUsed / 1024).toFixed(1)} / ${(memTotal / 1024).toFixed(1)} GB（QQ ${(memQq / 1024).toFixed(2)} GB）` : '')
+    $('sysCpu').textContent = sys.cpu?.model ?? '—'
+    $('sysCores').textContent = sys.cpu ? `${sys.cpu.core ?? '—'} 核 · ${sys.cpu.speed ?? '—'} GHz` : '—'
+    $('sysMemTotal').textContent = memTotal > 0 ? `${(memTotal / 1024).toFixed(1)} GB` : '—'
+    $('sysArch').textContent = sys.arch ?? '—'
+  }
+
+  async function loadSys() {
+    const result = await api('/api/accounts/sys')
+    if (result.ok === true) { renderSys(result.data); return }
+    $('badgeSys').textContent = KIND[result.kind] ?? '取不到'
+    setGauge('cpuBar', 'cpuNum', 'cpuSub', 0, '—', result.message ?? '取不到')
+    setGauge('memBar', 'memNum', 'memSub', 0, '—', '')
+  }
+
+  async function loadMeta() {
+    $('connText').textContent = '正在读配置…'
+    const data = await api('/api/accounts/meta')
+    state.meta = data
+    const webui = data.webui ?? {}
+    const degraded = data.degraded ?? []
+    const pill = $('connPill')
+    if (!webui.exists) {
+      pill.querySelector('.dot').className = 'dot bad'
+      $('connText').textContent = webui.reason || '没有 webui.json'
+    } else if (data.ok === true && degraded.length === 0) {
+      pill.querySelector('.dot').className = 'dot ok'
+      $('connText').textContent = `配置就绪 · ${webui.url}`
+    } else if (data.ok === true) {
+      pill.querySelector('.dot').className = 'dot warn'
+      $('connText').textContent = `部分接口不可用：${[...new Set(degraded)].map((k) => KIND[k] ?? k).join('、')}`
+    } else {
+      pill.querySelector('.dot').className = 'dot warn'
+      $('connText').textContent = KIND[data.kind] ?? '读不到状态'
+    }
+
+    const versions = data.versions ?? {}
+    $('verPill').textContent = `NapCat ${versions.napcat ?? '—'} · QQ ${versions.qq ?? '—'}`
+    $('vNapcat').textContent = versions.napcat ?? '（取不到）'
+    $('vQq').textContent = versions.qq ?? '（取不到）'
+    $('badgeEnv').textContent = degraded.length === 0 ? '全部可用' : `${degraded.length} 项不可用`
+    $('apiNapcat').textContent = versions.napcat ? `${versions.napcat}（可用）` : '不可用'
+    $('apiQq').textContent = versions.qq ? `${versions.qq}（可用）` : '不可用'
+    $('apiSys').textContent = degraded.includes('unreachable') ? '不可用（NapCat 没连上）' : (versions.sys ? '可用' : '该版本未提供')
+
+    $('kUrl').innerHTML = webui.url ? `<code>${webui.url}</code>` : '—'
+    $('k2fa').textContent = webui.enable2FA ? '已开启（登录要 6 位码）' : '未开启'
+    $('kAuto').textContent = webui.autoLoginAccount || '（未设置）'
+    if (webui.enable2FA) $('twofaRow').classList.remove('hidden')
+
+    const accounts = data.accounts ?? []
+    $('mAccounts').textContent = accounts.length
+    $('mApis').textContent = degraded.length === 0 ? '全部' : `${4 - degraded.length}/4`
+    renderAccounts(accounts, webui.autoLoginAccount ?? '')
+    loadSys()
+  }
+
+  function renderAccounts(rows, auto) {
+    const body = $('accountRows')
+    $('accountBadge').textContent = `${rows.length} 个`
+    if (rows.length === 0) {
+      body.innerHTML = '<tr><td colspan="6"><div class="empty">没有找到账号配置文件</div></td></tr>'
+      return
+    }
+    const onlineUin = state.loginInfo?.uin ?? ''
+    body.innerHTML = rows.map((row) => `<tr>
+      <td><code>${row.uin}</code></td>
+      <td>${row.hasOneBotConfig ? '<span class="tag ok">有</span>' : '<span class="tag">无</span>'}</td>
+      <td>${row.hasNapCatConfig ? '<span class="tag ok">有</span>' : '<span class="tag">无</span>'}</td>
+      <td>${row.uin === onlineUin ? '<span class="tag ok">在线</span>' : '<span class="tag">—</span>'}</td>
+      <td>${row.uin === auto ? '<span class="tag star">自动登录</span>' : '<span class="tag">—</span>'}</td>
+      <td style="text-align:right">
+        <button data-quick="${row.uin}">快速登录</button>
+        <button data-auto="${row.uin}" data-on="${row.uin === auto ? '1' : '0'}">${row.uin === auto ? '取消自动登录' : '设为自动登录'}</button>
+      </td></tr>`).join('')
+    for (const btn of body.querySelectorAll('[data-quick]')) btn.onclick = () => quickLogin(btn.dataset.quick, btn)
+    for (const btn of body.querySelectorAll('[data-auto]')) btn.onclick = () => toggleAuto(btn.dataset.auto, btn.dataset.on === '1', btn)
+  }
+
+  async function refreshStatus(silent = false) {
+    const btn = $('btnStatus')
+    if (!silent) busy(btn, true, '查询中…')
+    const [status, info] = await Promise.all([
+      withRetry(() => api('/api/accounts/status')),
+      withRetry(() => api('/api/accounts/info')),
+    ])
+    if (!silent) busy(btn, false)
+    state.status = status
+    state.loginInfo = info.ok === true ? info.data : null
+    const dot = $('loginDot')
+    if (status.ok === true) {
+      const online = status.data?.isLogin === true
+      const offline = status.data?.isOffline === true
+      dot.className = `dot ${online ? 'ok' : 'warn'}`
+      $('loginState').textContent = online ? '已登录在线' : offline ? '已登录但离线' : '未登录'
+      $('loginMeta').textContent = status.data?.loginError || (online ? '可以正常收发消息' : '用扫码或快速登录开始')
+      $('kState').textContent = online ? '在线' : offline ? '离线' : '未登录'
+      $('vPhase').textContent = status.data?.loginPhase ?? '—'
+      $('vCore').textContent = status.data?.coreReady === true ? '已就绪' : '未就绪'
+      if (state.loginInfo) {
+        $('nick').textContent = state.loginInfo.nick || '（无昵称）'
+        $('uin').textContent = state.loginInfo.uin ? `QQ ${state.loginInfo.uin}` : '—'
+      }
+      const hideRetry = $('btnStatusRetry')
+      if (hideRetry) hideRetry.style.display = 'none'
+      if (!silent) { toast('登录状态已更新', 'ok'); opLog(`查状态：${online ? '在线' : offline ? '离线' : '未登录'}`) }
+      if (online && autoTimer !== null) { clearInterval(autoTimer); autoTimer = null; $('btnAutoRefresh').textContent = '自动刷新：关' }
+      return status
+    }
+    dot.className = 'dot bad'
+    const transient = status.kind === 'unreachable' || status.kind === 'timeout'
+    $('loginState').textContent = transient ? 'NapCat 连不上（可能正在重启）' : (KIND[status.kind] ?? '查不到')
+    $('loginMeta').textContent = transient
+      ? '已自动重试 3 次（每次间隔 2 秒）仍失败：6099 没有响应。NapCat 启动中会这样，稍等十几秒点「重试」。'
+      : (status.message ?? '')
+    $('kState').textContent = KIND[status.kind] ?? '查不到'
+    let retryBtn = $('btnStatusRetry')
+    if (!retryBtn) {
+      retryBtn = document.createElement('button')
+      retryBtn.id = 'btnStatusRetry'
+      retryBtn.textContent = '重试'
+      retryBtn.style.marginTop = '10px'
+      retryBtn.onclick = () => refreshStatus(false)
+      $('loginMeta').parentElement.appendChild(retryBtn)
+    }
+    retryBtn.style.display = 'inline-block'
+    if (!silent) toast(status.message ?? '查不到登录状态', 'bad')
+    return status
+  }
+
+  // ---------- 扫码 ----------
+  let qrTick = null
+  let qrWatch = null
+  const QR_TTL = 120
+  function startCountdown() {
+    clearInterval(qrTick)
+    let left = QR_TTL
+    const tick = () => {
+      $('qrCountdown').textContent = left > 0 ? `约 ${left}s 后过期` : '已过期，点「刷新二维码」'
+      if (left <= 0) { clearInterval(qrTick); return }
+      left -= 1
+    }
+    tick()
+    qrTick = setInterval(tick, 1000)
+  }
+  async function loadQr() {
+    const btn = $('btnQr')
+    busy(btn, true, '取码中…')
+    const data = await api('/api/accounts/qr')
+    busy(btn, false)
+    $('qrBadge').textContent = data.ok === true ? '待扫码' : (KIND[data.kind] ?? '失败')
+    if (data.ok !== true) {
+      if (data.kind === 'need-2fa') { $('twofaRow').classList.remove('hidden'); toast('这个 WebUI 开了 2FA，先填验证码', 'warn'); return }
+      $('qrBox').innerHTML = `<div class="hint" style="color:var(--danger)">${data.message ?? '取不到二维码'}</div>`
+      toast(data.message ?? '取不到二维码', 'bad')
+      return
+    }
+    const value = String(data.data?.qrcode ?? data.data?.qrcodeurl ?? '')
+    if (value === '') {
+      $('qrBox').innerHTML = '<div class="hint">NapCat 没给二维码（可能已登录）</div>'
+      $('qrBadge').textContent = '无'
+      return
+    }
+    // NapCat 给的是"二维码里编码的 URL"，不是图片本身；它同时会把图写到 cache/qrcode.png。
+    // 所以这里优先显示**控制台读出来的真图**（手机能直接扫），URL 作为兜底给可复制的文本。
+    const stamp = Date.now()
+    $('qrBox').innerHTML = '<img alt="登录二维码" src="/api/accounts/qr-image?token=' + encodeURIComponent(token) + '&t=' + stamp + '">'
+      + '<div class="hint" style="margin-top:8px">扫不出来就复制这行，用二维码生成器转一下：<br><code style="word-break:break-all">' + value.replace(/</g, '&lt;') + '</code></div>'
+    startCountdown()
+    opLog('取了登录二维码')
+    clearInterval(qrWatch)
+    let tries = 0
+    qrWatch = setInterval(async () => {
+      tries += 1
+      const status = await refreshStatus(true)
+      if (status.ok === true && status.data?.isLogin === true) {
+        clearInterval(qrWatch)
+        $('qrBadge').textContent = '已登录'
+        toast('登录成功 🎉', 'ok')
+      }
+      if (tries > 20) clearInterval(qrWatch)
+    }, 6000)
+  }
+
+  async function quickLogin(uin, btn) {
+    busy(btn, true, '登录中…')
+    const data = await post('/api/accounts/quick-login', { uin })
+    busy(btn, false)
+    if (data.ok === true) {
+      toast(`已请求快速登录 ${uin}`, 'ok')
+      opLog(`快速登录 ${uin}`)
+      setTimeout(() => refreshStatus(true), 1200)
+    } else {
+      toast(`快速登录失败：${data.message ?? KIND[data.kind] ?? '未知'}`, 'bad')
+      opLog(`快速登录 ${uin} 失败`)
+    }
+  }
+
+  async function toggleAuto(uin, isAuto, btn) {
+    busy(btn, true, '保存中…')
+    const data = await post('/api/accounts/auto', { uin: isAuto ? '' : uin })
+    busy(btn, false)
+    if (data.ok === true) {
+      toast(isAuto ? '已取消自动登录' : `自动登录已设为 ${uin}`, 'ok')
+      opLog(isAuto ? '取消自动登录' : `设自动登录 ${uin}`)
+      loadMeta()
+    } else toast(`设置失败：${data.message ?? KIND[data.kind] ?? '未知'}`, 'bad')
+  }
+
+  // ---------- 重启 / GUID ----------
+  async function restart() {
+    if (!confirm('重启 NapCat 会打断当前在线（正在跑的任务可能中断）。确定继续？')) return
+    const btn = $('btnRestart')
+    busy(btn, true, '重启中…')
+    const data = await post('/api/accounts/restart', {})
+    busy(btn, false)
+    if (data.ok === true) {
+      toast('已请求重启 NapCat，稍等它自己回来', 'ok')
+      opLog('请求重启 NapCat')
+      setTimeout(() => refreshStatus(true), 4000)
+    } else toast(`重启失败：${data.message ?? data.kind}`, 'bad')
+  }
+
+  async function loadGuid() {
+    const btn = $('btnGuid')
+    busy(btn, true, '读取中…')
+    const data = await api('/api/accounts/guid')
+    busy(btn, false)
+    if (data.ok !== true) { $('guidInfo').textContent = data.message ?? '取不到'; return }
+    const list = Array.isArray(data.data) ? data.data : (data.data ? [data.data] : [])
+    $('guidInfo').textContent = list.length === 0
+      ? '（没有备份）'
+      : `${list.length} 份：${list.slice(0, 3).map((x) => x?.name ?? x?.fileName ?? '…').join('、')}`
+  }
+
+  // ---------- 2FA ----------
+  async function submitTwofa() {
+    const code = $('twofaCode').value.trim()
+    if (!/^\d{6}$/.test(code)) { toast('请输入 6 位数字验证码', 'warn'); return }
+    const btn = $('btnTwofa')
+    busy(btn, true, '提交中…')
+    const data = await post('/api/accounts/2fa', { code })
+    busy(btn, false)
+    if (data.ok === true) {
+      toast('验证码已接受', 'ok')
+      $('twofaRow').classList.add('hidden')
+      opLog('提交 2FA 验证码')
+      refreshStatus()
+    } else toast(`验证码没通过：${data.message ?? data.kind}`, 'bad')
+  }
+
+  // ---------- 自动刷新 ----------
+  let autoTimer = null
+  $('btnAutoRefresh').onclick = () => {
+    if (autoTimer !== null) {
+      clearInterval(autoTimer); autoTimer = null
+      $('btnAutoRefresh').textContent = '自动刷新：关'
+      toast('已停止自动刷新')
+      return
+    }
+    autoTimer = setInterval(() => refreshStatus(true), 5000)
+    $('btnAutoRefresh').textContent = '自动刷新：开（5s）'
+    toast('每 5 秒刷新登录状态，登录成功后自动停', 'ok')
+  }
+
+
+  // ---------- 主题（跟随 / 亮 / 暗） ----------
+  const THEME_KEY = 'qq-account-theme'
+  const THEME_LABEL = { auto: '跟随系统', light: '亮色', dark: '暗色' }
+  const applyTheme = (mode) => {
+    if (mode === 'auto') document.documentElement.removeAttribute('data-theme')
+    else document.documentElement.setAttribute('data-theme', mode)
+    $('themeText').textContent = '主题：' + THEME_LABEL[mode]
+    try { localStorage.setItem(THEME_KEY, mode) } catch { /* 隐私模式下写不了，忽略 */ }
+  }
+  let themeMode = 'auto'
+  try { themeMode = localStorage.getItem(THEME_KEY) ?? 'auto' } catch { themeMode = 'auto' }
+  if (!(themeMode in THEME_LABEL)) themeMode = 'auto'
+  applyTheme(themeMode)
+  $('themeBtn').onclick = () => {
+    themeMode = themeMode === 'auto' ? 'light' : themeMode === 'light' ? 'dark' : 'auto'
+    applyTheme(themeMode)
+    toast('主题：' + THEME_LABEL[themeMode])
+  }
+
+  // ---------- 打开 NapCat WebUI（带 token 的地址由服务端给） ----------
+  $('openNapcat').onclick = async (event) => {
+    event.preventDefault()
+    const data = await api('/api/napcat/webui')
+    if (data.ok === true && data.url) { window.open(data.url, '_blank', 'noopener'); opLog('打开 NapCat WebUI') }
+    else toast('打开 NapCat 失败：' + (data.message ?? data.reason ?? '控制台没返回原因'), 'bad')
+  }
+
+  // ---------- 实时测试（复用调试台的 /api/inject，默认 dry-run） ----------
+  async function runTest() {
+    const btn = $('btnTest'); busy(btn, true, '注入中…')
+    const user = $('testUser').value.trim()
+    if (!/^\d{4,12}$/.test(user)) { busy(btn, false); $('testState').textContent = '⚠️ 先填发消息的 QQ 号（4-12 位）'; return }
+    const kind = $('testKind').value
+    const spec = {
+      kind,
+      userId: Number(user),
+      groupId: Number($('testGroup').value) || 0,
+      text: $('testText').value,
+      atMe: $('testAtMe').checked,
+    }
+    if (kind === 'notice') { spec.noticeType = 'notify'; spec.subType = 'poke' }
+    if (kind === 'request') { spec.requestType = spec.groupId ? 'group' : 'friend' }
+    const result = await post('/api/inject', spec)
+    busy(btn, false)
+    $('testState').textContent = (result.ok ? '✅ ' : '⚠️ ') + (result.reason ?? '完成')
+    toast((result.ok ? '✅ ' : '⚠️ ') + (result.reason ?? '已注入'), result.ok ? 'ok' : 'bad')
+    opLog('注入测试消息')
+  }
+  async function clearInjectQueue() {
+    if (!confirm('清空注入队列（进回收站，不会真删）？')) return
+    const result = await post('/api/queue/clear', {})
+    $('testState').textContent = (result.ok ? '✅ ' : '⚠️ ') + (result.reason ?? '已清空')
+    opLog('清空注入队列')
+  }
+  async function loadScenarios() {
+    const data = await api('/api/scenarios')
+    const list = data.scenarios ?? []
+    $('testScenario').innerHTML = list.map((item) => '<option value="' + item.id + '">' + (item.title ?? item.id) + '</option>').join('')
+  }
+  async function runScenario() {
+    const btn = $('btnScenario'); busy(btn, true, '注入中…')
+    const spec = {
+      scenario: $('testScenario').value,
+      groupId: Number($('testScenGroup').value) || 0,
+      userId: Number($('testScenUser').value) || 0,
+      targetId: Number($('testScenTarget').value) || 0,
+    }
+    const result = await post('/api/inject', spec)
+    busy(btn, false)
+    $('scenState').textContent = (result.ok ? '✅ ' : '⚠️ ') + (result.reason ?? '完成')
+    opLog('注入场景 ' + spec.scenario)
+  }
+  // ---------- 最近事件（实时测试页下方） ----------
+  let testFollow = true
+  let testTimer = null
+  async function loadTestEvents() {
+    const data = await api('/api/trace?limit=30')
+    const events = Array.isArray(data.events) ? data.events : (Array.isArray(data) ? data : [])
+    const pre = $('testEvents')
+    if (events.length === 0) {
+      pre.textContent = data.ok === false ? (data.reason ?? '取不到事件') : '（还没有事件）'
+      $('testEventsBadge').textContent = '0 条'
+      return
+    }
+    $('testEventsBadge').textContent = events.length + ' 条'
+    pre.textContent = events.slice(-30).map((event) => {
+      const time = event.at ? String(event.at).slice(11, 19) : ''
+      const mark = event.ok === false ? '✗' : '✓'
+      return [time, mark, event.stage ?? '', event.reason ?? ''].filter(Boolean).join(' ')
+    }).join('\n')
+    if (testFollow) pre.scrollTop = pre.scrollHeight
+  }
+  const startTestFollow = () => {
+    if (testTimer !== null) clearInterval(testTimer)
+    testTimer = setInterval(() => { if (testFollow) loadTestEvents() }, 3000)
+  }
+  $('btnTestEvents').onclick = () => { loadTestEvents(); opLog('刷新最近事件') }
+  $('btnTestFollow').onclick = () => {
+    testFollow = !testFollow
+    $('btnTestFollow').textContent = '自动跟随：' + (testFollow ? '开' : '关')
+    $('btnTestFollow').classList.toggle('primary', testFollow)
+    if (testFollow) loadTestEvents()
+  }
+  startTestFollow()
+  loadTestEvents()
+
+  /**
+   * 即时调试：注入一条之后**跟 15 秒**，把这段时间新产生的 trace 事件逐条追加到面板。
+   * 与"单发一次"的区别就在这：单发只告诉你"已入队"，即时调试让你看到它被怎么处理。
+   */
+
+  /** 展开某个 traceId 的完整决策链（复用调试台的 /api/trace?traceId=）。 */
+  async function showChain(traceId) {
+    const view = $('chainView')
+    if (!traceId || traceId === '') { view.classList.remove('hidden'); view.textContent = '这条事件没有 traceId（不在某次消息处理里）'; return }
+    view.classList.remove('hidden')
+    view.textContent = '读取链路 ' + traceId + ' …'
+    const data = await api('/api/trace?traceId=' + encodeURIComponent(traceId))
+    if (data.ok !== true || !data.chain) { view.textContent = '取不到这条链路：' + (data.reason ?? '可能已被轮转掉'); return }
+    const timeline = data.chain.timeline
+    view.textContent = Array.isArray(timeline) ? timeline.join('\n') : String(timeline ?? data.chain)
+    view.scrollTop = 0
+  }
+
+  let debugTimer = null
+  let debugSeen = new Set()
+  const stopDebug = (note) => {
+    if (debugTimer !== null) { clearInterval(debugTimer); debugTimer = null }
+    $('debugBadge').textContent = note ?? '空闲'
+  }
+  $('btnDebugStop').onclick = () => { stopDebug('已停止'); const log = $('debugLog'); const line = document.createElement('div'); line.style.color = 'var(--muted)'; line.textContent = '■ 已停止跟随'; log.appendChild(line) }
+  async function runDebug() {
+    const user = $('testUser').value.trim()
+    if (!/^\d{4,12}$/.test(user)) { $('testState').textContent = '⚠️ 先填发消息的 QQ 号（4-12 位）'; return }
+    const kind = $('testKind').value
+    const spec = {
+      kind, userId: Number(user), groupId: Number($('testGroup').value) || 0,
+      text: $('testText').value, atMe: $('testAtMe').checked,
+    }
+    if (kind === 'notice') { spec.noticeType = 'notify'; spec.subType = 'poke' }
+    if (kind === 'request') { spec.requestType = spec.groupId ? 'group' : 'friend' }
+
+    stopDebug('注入中…')
+    debugSeen = new Set()
+    $('debugCard').classList.remove('hidden')
+    const log = $('debugLog')
+    log.innerHTML = ''
+    const addLine = (content, options = {}) => {
+      const line = document.createElement('div')
+      line.style.padding = '1px 0'
+      if (options.clickable === true) {
+        line.style.cursor = 'pointer'
+        line.style.borderRadius = '6px'
+        line.addEventListener('mouseenter', () => { line.style.background = 'var(--card)' })
+        line.addEventListener('mouseleave', () => { line.style.background = 'transparent' })
+        line.dataset.traceId = options.traceId ?? ''
+        line.addEventListener('click', () => showChain(options.traceId ?? ''))
+      }
+      if (options.bad === true) line.style.color = 'var(--danger)'
+      if (options.muted === true) line.style.color = 'var(--muted)'
+      line.textContent = content
+      log.appendChild(line)
+      log.scrollTop = log.scrollHeight
+      return line
+    }
+    addLine('▶ 我：' + (spec.text || '（空文本）') + (spec.groupId ? '（群 ' + spec.groupId + '）' : '（私聊）'))
+    $('debugBadge').textContent = '注入中…'
+
+    const injected = await post('/api/inject', spec)
+    if (injected.ok !== true) {
+      log.textContent += '⚠️ 注入失败：' + (injected.reason ?? '未知') + '\n'
+      stopDebug('失败')
+      return
+    }
+    const startedAt = Date.now()
+    $('debugBadge').textContent = '跟 15 秒…'
+    const follow = async () => {
+      const data = await api('/api/trace?limit=60')
+      const events = Array.isArray(data.events) ? data.events : []
+      let appended = 0
+      for (const event of events) {
+        const key = String(event.ts ?? '') + '|' + String(event.stage ?? '') + '|' + String(event.reason ?? '')
+        if (debugSeen.has(key)) continue
+        // 只看这次注入之后产生的事件（ts 是毫秒）
+        if (Number(event.ts) > 0 && Number(event.ts) < startedAt - 1500) { debugSeen.add(key); continue }
+        debugSeen.add(key)
+        const time = event.ts ? new Date(Number(event.ts)).toLocaleTimeString('zh-CN', { hour12: false }) : ''
+        const mark = event.ok === false ? '✗' : '✓'
+        addLine(time + ' ' + mark + ' [' + (event.stage ?? '') + '] ' + (event.reason ?? ''), {
+          clickable: true,
+          traceId: event.id ?? '',
+          bad: event.ok === false,
+        })
+        appended += 1
+      }
+      if (appended > 0) log.scrollTop = log.scrollHeight
+      if (Date.now() - startedAt > 15000) { stopDebug('已结束'); addLine('■ 15 秒结束（事件共 ' + debugSeen.size + ' 条）', { muted: true }) }
+    }
+    await follow()
+    debugTimer = setInterval(follow, 1000)
+  }
+  $('btnTestLive').onclick = () => runDebug()
+
+  $('btnTest').onclick = () => runTest()
+  $('btnTestClear').onclick = () => clearInjectQueue()
+  $('btnScenario').onclick = () => runScenario()
+
+  // ---------- 只读分区（网络 / 文件 / 插件 / 商店 / 统计 / 配置 / 关于） ----------
+  const pretty = (value) => {
+    try { return JSON.stringify(value, null, 2) } catch { return String(value) }
+  }
+  const renderJson = (targetId, badgeId, data) => {
+    const body = $(targetId)
+    if (data.ok !== true) {
+      $(badgeId).textContent = KIND[data.kind] ?? (data.reason ? '失败' : '—')
+      body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? data.reason ?? '取不到') + '</div>'
+      return
+    }
+    $(badgeId).textContent = 'OK'
+    body.innerHTML = '<pre style="margin:0;padding:12px;border-radius:12px;background:var(--bg);border:1px solid var(--line);max-height:46vh;overflow:auto;font:12.5px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all">'
+      + pretty(data.accounts ?? data.entries ?? data.data ?? data).replace(/</g, '&lt;') + '</pre>'
+  }
+  const jsonSection = (id, path) => async () => {
+    const btn = $('btn-' + id)
+    busy(btn, true, '读取中…')
+    const data = await api(path)
+    busy(btn, false)
+    renderJson(id + 'Body', id + 'Badge', data)
+    opLog('刷新' + id)
+  }
+  /**
+   * 网络配置（**唯一可写**的分区）。
+   * 规矩：只改 WS 客户端地址与 WS 服务端端口；保存前后端会把原文件备份成 .bak-*；
+   * 改完必须重启 NapCat 才生效 —— 界面上直接写清楚，别让人以为点完就通了。
+   */
+  async function loadNetwork() {
+    const btn = $('btn-network'); busy(btn, true, '读取中…')
+    const data = await api('/api/accounts/network'); busy(btn, false)
+    const body = $('networkBody')
+    if (data.ok !== true) {
+      $('networkBadge').textContent = KIND[data.kind] ?? '失败'
+      body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? '取不到网络配置') + '</div>'
+      return
+    }
+    const rows = data.accounts ?? []
+    $('networkBadge').textContent = rows.length + ' 个账号'
+    if (rows.length === 0) { body.innerHTML = '<div class="empty">没有 onebot11_*.json</div>'; return }
+    body.innerHTML = rows.map((row) => {
+      const urls = (row.clients ?? []).map((item) => item.url ?? '').filter(Boolean).join('\n')
+      const port = row.servers?.[0]?.port ?? ''
+      return '<div style="margin:10px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--bg)" data-uin="' + row.uin + '">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center"><b>' + row.uin + '</b>'
+        + '<span class="sub" style="margin:0"><code>' + row.file + '</code></span></div>'
+        + (row.error ? '<div style="color:var(--danger);margin-top:6px">' + row.error + '</div>' : '')
+        + '<label class="sub" style="display:block;margin:10px 0 4px">WS 客户端地址（NapCat 连出去；一行一条，最多 8 条）</label>'
+        + '<textarea data-field="clients" rows="3" style="width:100%;font:12.5px/1.5 ui-monospace,Consolas,monospace;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg)">'
+        + urls.replace(/</g, '&lt;') + '</textarea>'
+        + '<label class="sub" style="display:block;margin:10px 0 4px">WS 服务端端口（别人连进来；留空 = 不改）</label>'
+        + '<input data-field="port" value="' + port + '" style="width:140px">'
+        + '<div class="row" style="margin-top:12px"><button data-save="' + row.uin + '" class="primary">保存</button>'
+        + '<button data-reset="' + row.uin + '">还原</button>'
+        + '<span class="sub" data-state="' + row.uin + '" style="margin:0"></span></div>'
+        + '<div class="sub" style="margin-top:8px">保存后<b>必须重启 NapCat</b> 才会重新读这份配置；原文件会备份成 <code>.bak-时间戳</code>。</div>'
+        + '</div>'
+    }).join('')
+    for (const btnSave of body.querySelectorAll('[data-save]')) {
+      btnSave.onclick = () => saveNetwork(btnSave.dataset.save, btnSave)
+    }
+    for (const btnReset of body.querySelectorAll('[data-reset]')) {
+      btnReset.onclick = () => loadNetwork()
+    }
+    opLog('刷新网络配置')
+  }
+
+  async function saveNetwork(uin, btn) {
+    const box = btn.closest('[data-uin]')
+    const clients = box.querySelector('[data-field="clients"]').value.split('\n').map((line) => line.trim()).filter(Boolean)
+    const portRaw = box.querySelector('[data-field="port"]').value.trim()
+    const state = box.querySelector('[data-state]')
+    if (!confirm('改完需要重启 NapCat 才生效。现在写入吗？（会先备份原文件）')) return
+    busy(btn, true, '保存中…')
+    const result = await post('/api/accounts/network', {
+      uin,
+      clients,
+      serverPort: portRaw === '' ? null : Number(portRaw),
+    })
+    busy(btn, false)
+    if (result.ok === true) {
+      state.textContent = '✅ 已写入；重启 NapCat 后生效'
+      toast('网络配置已写入（备份 ' + (result.backup ?? '').split(/[\\/]/).pop() + '）', 'ok')
+      opLog('保存网络配置 ' + uin)
+    } else {
+      state.textContent = '⚠️ ' + (result.message ?? result.reason ?? '保存失败')
+      toast('保存失败：' + (result.message ?? result.reason ?? '未知'), 'bad')
+    }
+  }
+
+  /** 文件管理：只读列表（不读内容）；要看/改就去资源管理器打开。 */
+  let filesDir = ''
+  const humanSize = (bytes) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / 1048576).toFixed(1) + ' MB'
+  }
+  async function loadFiles() {
+    const btn = $('btn-files'); busy(btn, true, '读取中…')
+    const data = await api('/api/accounts/files'); busy(btn, false)
+    const body = $('filesBody')
+    if (data.ok !== true) {
+      $('filesBadge').textContent = KIND[data.kind] ?? '失败'
+      body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? '取不到目录') + '</div>'
+      return
+    }
+    const entries = data.entries ?? []
+    filesDir = data.dir ?? ''
+    $('filesBadge').textContent = entries.length + ' 项'
+    body.innerHTML = entries.length === 0 ? '<div class="empty">目录是空的</div>'
+      : '<table><thead><tr><th>文件</th><th>大小</th><th>修改时间</th></tr></thead><tbody>'
+        + entries.map((entry) => '<tr><td><code>' + entry.name + '</code>' + (entry.isDir ? ' <span class="tag">目录</span>' : '') + '</td>'
+          + '<td>' + (entry.isDir ? '—' : humanSize(entry.size)) + '</td>'
+          + '<td class="sub" style="margin:0">' + (entry.mtime ? new Date(entry.mtime).toLocaleString('zh-CN', { hour12: false }) : '—') + '</td></tr>').join('')
+        + '</tbody></table>'
+    opLog('刷新文件列表')
+  }
+  const copyDirBtn = $('btn-copyDir')
+  if (copyDirBtn) copyDirBtn.onclick = async () => {
+    if (!filesDir) { toast('还没读到目录路径，先点「刷新列表」', 'bad'); return }
+    try {
+      await navigator.clipboard.writeText(filesDir)
+      toast('已复制：' + filesDir, 'ok')
+    } catch {
+      // 剪贴板被浏览器拦（非 https / 无权限）时，把路径塞进输入框让人手动复制
+      window.prompt('复制下面这行路径：', filesDir)
+    }
+    opLog('复制目录路径')
+  }
+  const openFilesBtn = $('btn-openFiles')
+  if (openFilesBtn) openFilesBtn.onclick = async (event) => {
+    event.preventDefault()
+    const data = await api('/api/accounts/open-folder')
+    if (data.ok === true) { toast('已打开：' + data.dir, 'ok'); opLog('打开 config 目录') }
+    else toast('打不开：' + (data.message ?? data.reason ?? '未知') + (data.dir ? '（目录：' + data.dir + '）' : ''), 'bad')
+  }
+  /** 插件管理：真列表 + 启用/停用 + 卸载（卸载要二次确认）。 */
+  let pluginCache = []
+  async function loadPlugins() {
+    const btn = $('btn-plugins'); busy(btn, true, '读取中…')
+    const data = await api('/api/accounts/plugins'); busy(btn, false)
+    const body = $('pluginsBody')
+    if (data.ok !== true) {
+      $('pluginsBadge').textContent = KIND[data.kind] ?? '失败'
+      body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? '取不到插件列表') + '</div>'
+      return
+    }
+    const list = Array.isArray(data.data?.plugins) ? data.data.plugins : (Array.isArray(data.data) ? data.data : [])
+    pluginCache = list
+    $('pluginsBadge').textContent = list.length + ' 个' + (data.data?.pluginManagerNotFound ? '（插件管理器未加载）' : '')
+    if (list.length === 0) { body.innerHTML = '<div class="empty">（没有安装插件）</div>'; return }
+    body.innerHTML = '<table><thead><tr><th>插件</th><th>版本</th><th>作者</th><th>状态</th><th style="text-align:right">操作</th></tr></thead><tbody>'
+      + list.map((item) => {
+        const enabled = String(item.status ?? '').toLowerCase() !== 'disabled'
+        const id = String(item.id ?? '')
+        return '<tr><td><b>' + (item.name ?? id) + '</b><div class="sub" style="margin:0"><code>' + id + '</code>'
+          + (item.hasConfig ? ' · 可配置' : '') + (item.hasPages ? ' · 有页面' : '') + '</div></td>'
+          + '<td>' + (item.version ?? '—') + '</td><td>' + (item.author ?? '—') + '</td>'
+          + '<td>' + (enabled ? '<span class="tag ok">已启用</span>' : '<span class="tag">已停用</span>') + '</td>'
+          + '<td style="text-align:right"><button data-toggle="' + id + '" data-enable="' + (enabled ? '0' : '1') + '">'
+          + (enabled ? '停用' : '启用') + '</button> '
+          + '<button class="danger" data-uninstall="' + id + '">卸载</button></td></tr>'
+      }).join('') + '</tbody></table>'
+    for (const el of body.querySelectorAll('[data-toggle]')) el.onclick = () => togglePlugin(el.dataset.toggle, el.dataset.enable === '1', el)
+    for (const el of body.querySelectorAll('[data-uninstall]')) el.onclick = () => uninstallPlugin(el.dataset.uninstall, el)
+    opLog('刷新插件列表')
+  }
+
+  async function togglePlugin(id, enable, btn) {
+    busy(btn, true, enable ? '启用中…' : '停用中…')
+    const result = await post('/api/accounts/plugins/status', { id, enable })
+    busy(btn, false)
+    if (result.ok === true) { toast((enable ? '已启用 ' : '已停用 ') + id, 'ok'); opLog((enable ? '启用' : '停用') + '插件 ' + id); loadPlugins() }
+    else toast('操作失败：' + (result.message ?? result.reason ?? '未知'), 'bad')
+  }
+
+  async function uninstallPlugin(id, btn) {
+    const item = pluginCache.find((row) => String(row.id) === String(id))
+    if (!confirm('卸载插件「' + (item?.name ?? id) + '」？这会删除它的文件（NapCat 自己执行），不可撤销。')) return
+    busy(btn, true, '卸载中…')
+    const result = await post('/api/accounts/plugins/uninstall', { id, cleanData: false })
+    busy(btn, false)
+    if (result.ok === true) { toast('已卸载 ' + id, 'ok'); opLog('卸载插件 ' + id); loadPlugins() }
+    else toast('卸载失败：' + (result.message ?? result.reason ?? '未知'), 'bad')
+  }
+
+  /** 插件商店：只读卡片 + 搜索。安装按钮只负责"带你去 NapCat 的商店页"，不代下不代装。 */
+  let storeCache = []
+  let storeQuery = ''
+  function renderStore() {
+    const body = $('storeList') ?? $('storeBody')
+    const query = storeQuery.trim().toLowerCase()
+    const list = query === '' ? storeCache : storeCache.filter((item) =>
+      [item.name, item.id, item.description, item.author, ...(item.tags ?? [])].join(' ').toLowerCase().includes(query))
+    $('storeBadge').textContent = list.length + ' / ' + storeCache.length + ' 个'
+    if (list.length === 0) { body.innerHTML = '<div class="empty">没有匹配的插件</div>'; return }
+    body.innerHTML = list.map((item) => {
+      const tags = (item.tags ?? []).map((tag) => '<span class="tag">' + tag + '</span>').join(' ')
+      return '<div style="padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--bg);margin-bottom:12px">'
+        + '<div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;flex-wrap:wrap">'
+        + '<b style="font-size:15px">' + (item.name ?? item.id) + '</b>'
+        + '<span class="sub" style="margin:0">v' + (item.version ?? '—') + ' · ' + (item.author ?? '未知作者') + '</span></div>'
+        + '<div style="margin:6px 0;font-size:13px;color:var(--muted)">' + (item.description ?? '') + '</div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' + tags
+        + (item.minVersion ? '<span class="sub" style="margin:0">需 NapCat ≥ ' + item.minVersion + '</span>' : '') + '</div>'
+        + '<div class="row" style="margin-top:10px"><button data-store-open="1" class="primary">在 NapCat 里安装 →</button>'
+        + (item.homepage ? '<a class="sub" style="margin:0" href="' + item.homepage + '" target="_blank" rel="noopener noreferrer">主页</a>' : '')
+        + '</div></div>'
+    }).join('')
+    for (const btn of body.querySelectorAll('[data-store-open]')) btn.onclick = openNapcatStore
+  }
+  async function loadStore() {
+    const btn = $('btn-store'); busy(btn, true, '读取中…')
+    const data = await api('/api/accounts/store'); busy(btn, false)
+    const body = $('storeBody')
+    if (data.ok !== true) {
+      $('storeBadge').textContent = KIND[data.kind] ?? '失败'
+      body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? '取不到商店列表') + '</div>'
+      return
+    }
+    storeCache = Array.isArray(data.data?.plugins) ? data.data.plugins : []
+    body.innerHTML = '<div class="row" style="margin-bottom:12px"><input id="storeSearch" placeholder="搜索插件名 / 作者 / 标签…" style="flex:1;min-width:220px" value="' + storeQuery.replace(/"/g, '&quot;') + '"></div><div id="storeList"></div>'
+    $('storeSearch').oninput = (event) => { storeQuery = event.target.value; renderStore() }
+    renderStore()
+    opLog('刷新插件商店')
+  }
+  async function openNapcatStore() {
+    const data = await api('/api/napcat/webui')
+    if (data.ok === true && data.url) { window.open(data.url, '_blank', 'noopener'); opLog('打开 NapCat 插件商店') }
+    else toast('打开失败：' + (data.message ?? data.reason ?? '未知'), 'bad')
+  }
+
+  /** 分区加载器表（键 = 侧栏 data-tab）。定义在各自 loader 之后，避免 TDZ。 */
+  const LOADERS = { network: loadNetwork, files: loadFiles, plugins: loadPlugins, store: loadStore, stats: loadStats, config: loadConfig, about: loadAbout }
+  /** 调一个分区加载器；失败就把原因写进那个分区（否则只会"什么都不发生"）。 */
+  const loadersafe = (tab) => {
+    const body = $(tab + 'Body')
+    const promise = LOADERS[tab]()
+    if (promise && typeof promise.catch === 'function') {
+      promise.catch((error) => {
+        if (body) body.innerHTML = '<div class="empty" style="color:var(--danger)">加载失败：' + (error?.message ?? error) + '</div>'
+      })
+    }
+  }
+
+  // 统计：数字 + 阶段条形 + 最近失败
+  async function loadStats() {
+    const btn = $('btn-stats'); busy(btn, true, '读取中…')
+    const data = await api('/api/accounts/stats'); busy(btn, false)
+    if (data.ok !== true) { $('statsBadge').textContent = data.reason ?? '取不到'; $('statsBody').textContent = data.reason ?? ''; return }
+    const stages = Object.entries(data.byStage ?? {}).sort((x, y) => y[1] - x[1])
+    const max = stages.length > 0 ? stages[0][1] : 1
+    $('statsBadge').textContent = (data.total ?? 0) + ' 事件 · ' + (data.errors ?? 0) + ' 失败'
+    $('statsBody').innerHTML = '<div class="metrics" style="margin-bottom:12px">'
+      + '<div class="metric"><div class="num">' + (data.total ?? 0) + '</div><div class="lbl">事件</div></div>'
+      + '<div class="metric"><div class="num">' + (data.errors ?? 0) + '</div><div class="lbl">失败</div></div>'
+      + '<div class="metric"><div class="num">' + stages.length + '</div><div class="lbl">阶段</div></div></div>'
+      + (stages.length === 0 ? '<div class="empty">trace 里还没有事件</div>' : stages.slice(0, 12).map(([name, count]) =>
+        '<div style="display:flex;align-items:center;gap:10px;margin:6px 0;font-size:12.5px">'
+        + '<code style="min-width:120px">' + name + '</code>'
+        + '<span style="flex:1;height:8px;border-radius:999px;background:var(--bg);overflow:hidden">'
+        + '<span style="display:block;height:100%;width:' + Math.max(4, Math.round(count / max * 100)) + '%;background:linear-gradient(90deg,var(--pink),var(--violet))"></span></span>'
+        + '<b style="min-width:44px;text-align:right">' + count + '</b></div>').join(''))
+      + ((data.recentErrors ?? []).length === 0 ? '' : '<h3 style="font-size:13px;margin:14px 0 6px">最近失败</h3>'
+        + data.recentErrors.map((e) => '<div style="margin:3px 0;font-size:12.5px"><code>' + (e.stage ?? '') + '</code> ' + (e.reason ?? '') + '</div>').join(''))
+    opLog('刷新统计')
+  }
+
+  /** 系统配置：端口/地址可编辑（仅回环），2FA 与 token 只读。 */
+  async function loadConfig() {
+    const btn = $('btn-config'); busy(btn, true, '读取中…')
+    const [meta, status] = await Promise.all([api('/api/accounts/meta'), api('/api/status')])
+    busy(btn, false)
+    const webui = meta.webui ?? {}
+    const ports = status.ports ?? []
+    $('configBadge').textContent = meta.ok ? '配置就绪' : '部分不可用'
+    $('configBody').innerHTML = '<div class="grid" style="gap:16px">'
+      + '<div><h3 style="font-size:13px;margin:0 0 8px">可改（写前自动备份 .bak）</h3>'
+      + '<div class="row" style="margin-bottom:8px"><label class="sub" style="margin:0;width:64px">端口</label>'
+      + '<input id="cfgPort" value="' + (webui.port ?? '') + '" style="width:120px"></div>'
+      + '<div class="row" style="margin-bottom:8px"><label class="sub" style="margin:0;width:64px">监听</label>'
+      + '<select id="cfgHost" style="min-width:180px">'
+      + ['127.0.0.1', '::1', 'localhost'].map((h) => '<option value="' + h + '"' + ((webui.host ?? '') === h ? ' selected' : '') + '>' + h + '</option>').join('')
+      + '</select></div>'
+      + '<div class="row"><button class="primary" id="btnSaveCfg">保存</button>'
+      + '<span class="sub" id="cfgState" style="margin:0"></span></div>'
+      + '<p class="sub" style="margin-top:8px">只允许回环地址：改成 0.0.0.0 会把面板暴露到局域网，后端直接拒绝。改完需重启 NapCat。</p></div>'
+      + '<div><h3 style="font-size:13px;margin:0 0 8px">只读</h3><dl class="kv" style="margin:0">'
+      + '<dt>WebUI</dt><dd>' + (webui.url ? '<code>' + webui.url + '</code>' : '—') + '</dd>'
+      + '<dt>token</dt><dd>' + (webui.tokenMasked ?? '（空）') + '</dd>'
+      + '<dt>2FA</dt><dd>' + (webui.enable2FA ? '已开启' : '未开启') + '（要改请去 NapCat，改错会把自己锁在外面）</dd>'
+      + '<dt>自动登录</dt><dd>' + (webui.autoLoginAccount || '（未设置）') + '</dd></dl></div></div>'
+      + '<h3 style="font-size:13px;margin:16px 0 6px">控制台端口</h3>'
+      + (ports.length === 0 ? '<div class="empty">没有端口信息</div>' : ports.map((row) =>
+        '<div style="display:flex;gap:8px;align-items:center;margin:4px 0">'
+        + '<span class="dot ' + (row.listening ? 'ok' : 'bad') + '"></span>'
+        + '<code style="min-width:160px">' + (row.label ?? row.name) + ' :' + row.port + '</code>'
+        + '<span class="sub" style="margin:0">' + (row.listening ? (row.process ?? '监听中') : '未监听') + '</span></div>').join(''))
+    $('btnSaveCfg').onclick = () => saveConfig()
+  }
+
+  async function saveConfig() {
+    const btn = $('btnSaveCfg'); const state = $('cfgState')
+    if (!confirm('改 webui.json 的端口/监听地址？会先备份，改完需要重启 NapCat。')) return
+    busy(btn, true, '保存中…')
+    const result = await post('/api/accounts/config', { port: Number($('cfgPort').value), host: $('cfgHost').value })
+    busy(btn, false)
+    if (result.ok === true) {
+      state.textContent = '✅ 已写入；重启 NapCat 生效'
+      toast('配置已写入（备份 ' + (result.backup ?? '').split(/[\\/]/).pop() + '）', 'ok')
+      opLog('修改 webui 配置')
+    } else {
+      state.textContent = '⚠️ ' + (result.message ?? result.reason ?? '保存失败')
+      toast('保存失败：' + (result.message ?? result.reason ?? '未知'), 'bad')
+    }
+  }
+
+  async function loadAbout() {
+    const btn = $('btn-about'); busy(btn, true, '读取中…')
+    const [data, meta] = await Promise.all([api('/api/accounts/about'), api('/api/accounts/meta')])
+    busy(btn, false)
+    const hash = data.data?.hash ?? {}
+    const latest = data.data?.latestTag
+    const mirrors = data.data?.mirrors
+    const mirrorList = Array.isArray(mirrors) ? mirrors : (mirrors?.mirrors ?? [])
+    $('aboutBadge').textContent = data.ok === true ? '已取到' : (KIND[data.kind] ?? '失败')
+    $('aboutBody').innerHTML = '<dl class="kv" style="margin-top:0">'
+      + '<dt>NapCat</dt><dd>' + (meta.versions?.napcat ?? '—') + '</dd>'
+      + '<dt>QQ</dt><dd>' + (meta.versions?.qq ?? '—') + '</dd>'
+      + '<dt>最新版</dt><dd>' + (typeof latest === 'string' ? latest : (latest?.tag_name ?? latest?.name ?? '—')) + '</dd>'
+      + '<dt>哈希</dt><dd>' + (hash.hash ? String(hash.hash).slice(0, 32) + '…（' + (hash.algorithm ?? '') + '）' : '—') + '</dd></dl>'
+      + '<h3 style="font-size:13px;margin:14px 0 6px">镜像</h3>'
+      + (mirrorList.length === 0 ? '<div class="empty">（没有配置镜像）</div>' : mirrorList.slice(0, 8).map((item) =>
+        '<div style="margin:3px 0"><code style="word-break:break-all">' + (typeof item === 'string' ? item : (item.url ?? item.name ?? '')) + '</code></div>').join(''))
+      + '<p class="sub" style="margin-top:14px">本页面是 QQ AI 控制台的一部分（control/accounts.html），只在本机运行；数据全部来自 127.0.0.1。</p>'
+    opLog('刷新关于')
+  }
+
+  // ---------- 日志窗口（实时 / 历史 · 级别筛选 · 关键词 · 跟随） ----------
+  let logTimer = null
+  let liveStream = null
+  let rawLines = []
+  let level = 'all'
+  let follow = true
+  let mode = 'live'
+  let logText = ''
+  const LOG_LINES = 300
+  const levelOf = (line) => {
+    if (/\[(ERROR|FATAL)\]|\bERROR\b/.test(line)) return 'error'
+    if (/\[(WARN|WARNING)\]|\bWARN\b/.test(line)) return 'warn'
+    return 'info'
+  }
+  /**
+   * NapCat 会把登录二维码**用方块字符打到日志里**（给终端看的那份）。
+   * 直接铺到网页上就是两屏大黑块，既碍事又占内存 —— 这里把连续的二维码行折叠成一句提示。
+   * 判据：整行几乎全是方块/半方块字符，或超长的 data:image 内联串。
+   */
+  const QR_BLOCK_CHARS = /[\u2580-\u259F\u2500-\u257F]/
+  const isQrArtLine = (line) => {
+    const trimmed = line.trim()
+    if (trimmed.length < 24) return false
+    const blocks = (trimmed.match(/[\u2580-\u259F]/g) ?? []).length
+    if (blocks / trimmed.length > 0.55) return true
+    if (/data:image\/[a-z+]+;base64,/i.test(trimmed) && trimmed.length > 240) return true
+    return false
+  }
+  const collapseQrArt = (lines) => {
+    const out = []
+    let folded = 0
+    let inArt = false
+    for (const line of lines) {
+      if (isQrArtLine(line)) {
+        folded += 1
+        inArt = true
+        continue
+      }
+      if (inArt) {
+        out.push('（这里原本是一段终端二维码，共 ' + folded + ' 行，已折叠；要看可扫的图请到「登录 / 扫码」页）')
+        folded = 0
+        inArt = false
+      }
+      out.push(line)
+    }
+    if (inArt) out.push('（这里原本是一段终端二维码，共 ' + folded + ' 行，已折叠；要看可扫的图请到「登录 / 扫码」页）')
+    return out
+  }
+
+  const renderLines = () => {
+    const keyword = $('logSearch').value.trim().toLowerCase()
+    const counts = { info: 0, warn: 0, error: 0 }
+    const kept = []
+    for (const line of collapseQrArt(rawLines)) {
+      const lv = levelOf(line)
+      counts[lv] += 1
+      if (level !== 'all' && lv !== level) continue
+      if (keyword !== '' && !line.toLowerCase().includes(keyword)) continue
+      kept.push(line)
+    }
+    $('badgeInfo').textContent = 'Info ' + counts.info
+    $('badgeWarn').textContent = 'Warn ' + counts.warn
+    $('badgeError').textContent = 'Error ' + counts.error
+    logText = kept.join('\n')
+    const pre = $('logView')
+    pre.textContent = logText || (rawLines.length === 0 ? '（空）' : '（当前筛选没有匹配行）')
+    $('logBadge').textContent = kept.length + '/' + rawLines.length + ' 行' + (level === 'all' ? '' : ' · ' + level)
+    if (follow) pre.scrollTop = pre.scrollHeight
+  }
+  const stopLive = () => {
+    if (liveStream !== null) { liveStream.abort(); liveStream = null }
+  }
+  const startLive = async () => {
+    stopLive()
+    rawLines = []
+    renderLines()
+    const controller = new AbortController()
+    liveStream = controller
+    try {
+      const res = await fetch('/api/accounts/logs/live?token=' + encodeURIComponent(token), { signal: controller.signal, cache: 'no-store' })
+      if (!res.ok || !res.body) { $('logView').textContent = '实时日志连接失败：HTTP ' + res.status; return }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        buffer += decoder.decode(chunk.value, { stream: true })
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop() ?? ''
+        for (const frame of frames) {
+          const line = frame.split('\n').find((item) => item.startsWith('data:'))
+          if (line === undefined) continue
+          let payload = ''
+          try { payload = JSON.parse(line.slice(5).trim()).line ?? '' } catch { payload = line.slice(5).trim() }
+          if (payload === '') continue
+          // NapCat 的 line 本身又是一层 JSON：{"level":"info","message":"[PacketHandler] 加载成功"}
+          // 拆开成 [INFO] 消息，级别筛选才认得出；拆不开就原样显示（不同版本可能只给纯文本）。
+          try {
+            const inner = JSON.parse(payload)
+            if (inner && typeof inner.message === 'string') {
+              payload = '[' + String(inner.level ?? 'info').toUpperCase() + '] ' + inner.message
+            }
+          } catch { /* 纯文本行 */ }
+          rawLines.push(payload)
+          if (rawLines.length > 500) rawLines = rawLines.slice(-500)
+          renderLines()
+        }
+      }
+    } catch (error) {
+      if (controller.signal.aborted !== true) $('logView').textContent = '实时日志中断：' + error.message
+    }
+  }
+  const loadHistory = async () => {
+    stopLive()
+    const source = $('logSource').value
+    const pre = $('logView')
+    pre.textContent = '加载中…'
+    if (source === 'napcat') {
+      const list = await api('/api/accounts/logs')
+      if (list.ok !== true) { pre.textContent = list.message ?? '取不到 NapCat 日志列表'; return }
+      const files = Array.isArray(list.data) ? list.data : []
+      const select = $('napcatLogFile')
+      select.classList.remove('hidden')
+      select.innerHTML = files.map((name) => '<option value="' + name + '">' + name + '</option>').join('')
+      if (files.length === 0) { rawLines = []; renderLines(); $('logView').textContent = '（NapCat 当前没有日志文件）'; return }
+      const target = files.includes(select.value) ? select.value : files[0]
+      select.value = target
+      const content = await api('/api/accounts/logs?file=' + encodeURIComponent(target))
+      if (content.ok !== true) { pre.textContent = content.message ?? '取不到日志内容'; return }
+      rawLines = String(content.data ?? '').split('\n')
+      renderLines()
+      return
+    }
+    $('napcatLogFile').classList.add('hidden')
+    const data = await api('/api/logs?name=' + encodeURIComponent(source) + '&lines=' + LOG_LINES)
+    if (data.ok !== true) { pre.textContent = data.reason ?? '取不到日志'; return }
+    rawLines = Array.isArray(data.lines) ? data.lines : String(data.lines ?? '').split('\n')
+    renderLines()
+  }
+  const applyMode = () => {
+    $('logModeTag').textContent = mode === 'live' ? '实时' : '历史'
+    $('btnLogMode').textContent = mode === 'live' ? '切到历史' : '切到实时'
+    $('btnLogAuto').classList.toggle('hidden', mode === 'live')
+    $('btnLogRefresh').textContent = mode === 'live' ? '重连' : '刷新'
+    $('napcatLogFile').classList.toggle('hidden', mode === 'live' || $('logSource').value !== 'napcat')
+  }
+  for (const id of Object.keys(LOADERS)) $('btn-' + id).onclick = () => LOADERS[id]()
+    $('btnLogMode').onclick = () => {
+    mode = mode === 'live' ? 'history' : 'live'
+    applyMode()
+    if (mode === 'live') startLive()
+    else loadHistory()
+  }
+  $('logSource').onchange = () => { if (mode === 'live') { mode = 'history'; applyMode() } loadHistory() }
+  $('napcatLogFile').onchange = () => loadHistory()
+  $('btnLogRefresh').onclick = () => { if (mode === 'live') startLive(); else loadHistory(); opLog('刷新日志') }
+  $('btnLogAuto').onclick = () => {
+    if (logTimer !== null) { clearInterval(logTimer); logTimer = null; $('btnLogAuto').textContent = '自动刷新：关'; return }
+    logTimer = setInterval(loadHistory, 3000)
+    $('btnLogAuto').textContent = '自动刷新：开（3s）'
+  }
+  $('logSearch').oninput = () => renderLines()
+  for (const btn of document.querySelectorAll('[data-level]')) {
+    btn.onclick = () => {
+      level = btn.dataset.level
+      for (const other of document.querySelectorAll('[data-level]')) other.classList.toggle('primary', other === btn)
+      renderLines()
+    }
+  }
+  $('btnFollow').onclick = () => {
+    follow = follow !== true
+    $('btnFollow').textContent = '跟随最新：' + (follow ? '开' : '关')
+    $('btnFollow').classList.toggle('primary', follow)
+    if (follow) { const pre = $('logView'); pre.scrollTop = pre.scrollHeight }
+  }
+  $('btnLogCopy').onclick = async () => {
+    if (logText === '') { toast('没有可复制的内容', 'warn'); return }
+    try { await navigator.clipboard.writeText(logText); toast('已复制到剪贴板', 'ok') }
+    catch { toast('浏览器不让写剪贴板，请手动选中复制', 'warn') }
+  }
+  $('btnLogDownload').onclick = () => {
+    if (logText === '') { toast('没有可下载的内容', 'warn'); return }
+    const blob = new Blob([logText], { type: 'text/plain;charset=utf-8' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = 'qq-account-log-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.log'
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(link.href), 2000)
+    opLog('下载日志')
+  }
+  const openLogs = () => { applyMode(); if (mode === 'live') startLive(); else loadHistory() }
+
+  $('btnReload').onclick = () => { loadMeta(); refreshStatus(true); opLog('刷新页面数据') }
+  $('btnStatus').onclick = () => refreshStatus(false)
+  $('btnQr').onclick = loadQr
+  $('btnQrRefresh').onclick = loadQr
+  $('btnRestart').onclick = restart
+  $('btnGuid').onclick = loadGuid
+  $('btnTwofa').onclick = submitTwofa
+  $('twofaCode').addEventListener('keydown', (event) => { if (event.key === 'Enter') submitTwofa() })
+
+  window.addEventListener('hashchange', () => {
+    const tab = (location.hash || '').replace('#', '')
+    if (tab === '' || !titles[tab]) return
+    if (activate(tab, { updateHash: false }) === false) return
+    if (tab === 'logs') openLogs()
+    else if (tab === 'test') loadTestEvents()
+    else if (LOADERS[tab]) LOADERS[tab]()
+  })
+
+  // 布局体检：加 ?debug=1 打开。会列出卡片往上每一层容器的宽度，直接指出是谁卡住了宽度。
+  if (new URLSearchParams(location.search).get('debug') === '1') {
+    const box = document.createElement('div')
+    box.style.cssText = 'position:fixed;right:10px;bottom:10px;z-index:9999;background:#111;color:#0f0;font:11.5px/1.45 ui-monospace,Consolas,monospace;padding:8px 10px;border-radius:8px;opacity:.92;white-space:pre;max-width:44vw;overflow:auto'
+    document.body.appendChild(box)
+    const copyBtn = document.createElement('button')
+    copyBtn.textContent = '复制体检结果'
+    copyBtn.style.cssText = 'margin-top:6px;font:11.5px ui-monospace,Consolas,monospace;padding:3px 8px;border-radius:6px;border:1px solid #0f0;background:#111;color:#0f0;cursor:pointer'
+    box.appendChild(document.createElement('br'))
+    box.appendChild(copyBtn)
+    copyBtn.onclick = async () => {
+      const text = box.textContent.replace('复制体检结果', '').trim()
+      try { await navigator.clipboard.writeText(text); copyBtn.textContent = '已复制 ✓' } catch { window.prompt('复制下面内容：', text) }
+    }
+    const paint = () => {
+      const card = document.querySelector('.section.active .card')
+      const lines = []
+      lines.push('innerWidth  ' + window.innerWidth + '   dpr ' + window.devicePixelRatio)
+      if (card) {
+        lines.push('card.right  ' + Math.round(card.getBoundingClientRect().right) + '   空隙 ' + Math.round(window.innerWidth - card.getBoundingClientRect().right))
+        let node = card
+        while (node && node !== document.documentElement) {
+          const rect = node.getBoundingClientRect()
+          const style = getComputedStyle(node)
+          const name = node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + (node.className && typeof node.className === 'string' ? '.' + node.className.split(/\s+/).filter(Boolean).slice(0, 2).join('.') : '')
+          lines.push(name.slice(0, 34).padEnd(34) + ' w=' + Math.round(rect.width) + ' max=' + (style.maxWidth === 'none' ? '-' : style.maxWidth) + ' disp=' + style.display)
+          node = node.parentElement
+        }
+      }
+      box.textContent = lines.join('\n')
+    }
+    paint()
+    setInterval(paint, 1000)
+  }
+
+  // 首屏先把滑块放到"基础信息"（无动画），窗口尺寸变化时重新对齐
+  moveIndicator(document.querySelector('.nav[data-tab].active')?.dataset.tab ?? 'home', { instant: true })
+  window.addEventListener('resize', () => {
+    const current = document.querySelector('.nav[data-tab].active')?.dataset.tab ?? 'home'
+    moveIndicator(current, { instant: true })
+  })
+
+  const initialTab = (location.hash || '').replace('#', '')
+  if (initialTab !== '' && titles[initialTab]) {
+    activate(initialTab, { updateHash: false })
+    // logs / test 这两个分区不在 LOADERS 里（它们有自己的加载函数）
+    if (initialTab === 'logs') openLogs()
+    else if (initialTab === 'test') loadTestEvents()
+    else if (LOADERS[initialTab]) LOADERS[initialTab]()
+  }
+  loadMeta()
+  refreshStatus(true)
+})()
+</script>
+</body>
+</html>

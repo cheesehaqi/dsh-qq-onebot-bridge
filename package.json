@@ -21,6 +21,8 @@
   },
   "scripts": {
     "control": "node control/bin/qq-control.mjs",
+    "accounts": "node control/bin/qq-control.mjs --open --accounts",
+    "shortcut": "node control/bin/qq-control.mjs --shortcut --accounts",
     "test": "node test/control-unit.mjs"
   },
   "exports": {

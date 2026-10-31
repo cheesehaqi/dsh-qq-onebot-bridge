@@ -12,7 +12,8 @@
  * without touching the machine.
  */
 import { createServer } from 'node:http'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { tailLines } from './supervisor.mjs'
 import { FREEABLE_PORTS } from './config.mjs'
@@ -76,8 +77,28 @@ export function originAllowed(origin, port) {
  * @param api     supervisor (createSupervisor(...)) or a stub in tests
  * @param ui      HTML served at "/"
  */
-export function createControlServer({ config, token, api, ui = '', saveConfig = null, logger = console }) {
+export function createControlServer({ config, token, api, ui = '', uiFile = '', accountsUi = '', accountsUiFile = '', saveConfig = null, logger = console }) {
   const port = config.ports?.control ?? 8799
+
+  /**
+   * 页面文件的**热读取**：mtime 变了才重新读盘。
+   * 为什么要它：控制台是独立进程，页面在启动时读进内存 —— 改完 HTML 必须重启才生效，
+   * 这个坑我们自己踩了三次（改完看不到效果 / 接口 405 / 旧页面）。生产上零成本（一次 stat）。
+   */
+  const pageCache = new Map()
+  const freshPage = (file, fallback) => {
+    if (!file) return fallback
+    try {
+      const stamp = statSync(file).mtimeMs
+      const cached = pageCache.get(file)
+      if (cached !== undefined && cached.stamp === stamp) return cached.text
+      const text = readFileSync(file, 'utf8')
+      pageCache.set(file, { stamp, text })
+      return text
+    } catch {
+      return fallback
+    }
+  }
 
   return createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', `http://127.0.0.1:${port}`)
@@ -85,7 +106,18 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
 
     if (request.method === 'GET' && (path === '/' || path === '/index.html')) {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-      response.end(ui)
+      response.end(freshPage(uiFile, ui))
+      return
+    }
+
+    // v0.7.11：账号中心（本地页面，同源；token 由页面从 ?token= 读，API 仍逐个校验）
+    if (request.method === 'GET' && (path === '/accounts' || path === '/accounts.html')) {
+      if (accountsUi === '') {
+        json(response, 404, { ok: false, reason: '这个版本没有账号页' })
+        return
+      }
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      response.end(freshPage(accountsUiFile, accountsUi))
       return
     }
 
@@ -211,6 +243,151 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
         json(response, 200, { ok: result.ok === true, url: String(result.url ?? ''), reason: String(result.reason ?? '') })
         return
       }
+      /**
+       * v0.7.11 账号中心（本地网站）：概览/登录状态/二维码/快速登录列表。
+       * 全部只读；`webui.json` 的 token 只在服务端用，响应里只有打码形态。
+       */
+      if (request.method === 'GET' && path === '/api/accounts') {
+        if (typeof api.accounts?.summary !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持账号中心' })
+          return
+        }
+        json(response, 200, api.accounts.summary())
+        return
+      }
+      if (request.method === 'GET' && path === '/api/accounts/status') {
+        json(response, 200, await api.accounts.status())
+        return
+      }
+      if (request.method === 'GET' && path === '/api/accounts/qr') {
+        json(response, 200, await api.accounts.qrcode())
+        return
+      }
+      if (request.method === 'GET' && path === '/api/accounts/quick') {
+        json(response, 200, await api.accounts.quickList())
+        return
+      }
+      // v0.7.11：当前登录账号资料（昵称 / uin / uid）
+      if (request.method === 'GET' && path === '/api/accounts/info') {
+        json(response, 200, await api.accounts.loginInfo())
+        return
+      }
+      // v0.7.11：页面顶部信息条（NapCat 版本 / QQ 版本 / 系统状态 / 账号清单）
+      if (request.method === 'GET' && path === '/api/accounts/meta') {
+        json(response, 200, await api.accounts.meta())
+        return
+      }
+      if (request.method === 'GET' && path === '/api/accounts/guid') {
+        json(response, 200, await api.accounts.guidBackups())
+        return
+      }
+      // v0.7.11 实时日志：把 NapCat 的 SSE 逐帧转给浏览器（EventSource 加不了 Authorization）
+      if (request.method === 'GET' && path === '/api/accounts/logs/live') {
+        const opened = await api.accounts.logLive()
+        if (opened.ok !== true) {
+          json(response, 200, { ok: false, kind: opened.kind, message: opened.message })
+          return
+        }
+        response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive' })
+        response.write(': connected\n\n')
+        const reader = opened.response.body?.getReader?.()
+        if (!reader) {
+          response.write('data: {"line":"（该版本实时日志不可读）"}\n\n')
+          response.end()
+          return
+        }
+        const decoder = new TextDecoder()
+        let closed = false
+        request.on('close', () => { closed = true; try { reader.cancel() } catch { /* 已关 */ } })
+        try {
+          while (closed !== true) {
+            const chunk = await reader.read()
+            if (chunk.done === true) break
+            const text = decoder.decode(chunk.value, { stream: true })
+            for (const line of text.split('\n')) {
+              if (!line.startsWith('data:')) continue
+              const payload = line.slice(5).trim()
+              if (payload === '') continue
+              response.write(`data: ${JSON.stringify({ line: payload })}\n\n`)
+            }
+          }
+        } catch { /* 客户端断开是正常路径 */ }
+        try { reader.cancel() } catch { /* 已关 */ }
+        response.end()
+        return
+      }
+      // v0.7.11：系统状态（CPU/内存），页面异步拉，免得首屏等 3 秒
+      if (request.method === 'GET' && path === '/api/accounts/sys') {
+        json(response, 200, await api.accounts.sys())
+        return
+      }
+      // v0.7.11：登录二维码图片（NapCat 每刷新一次就重写 cache/qrcode.png，直接发文件最省事）
+      if (request.method === 'GET' && path === '/api/accounts/qr-image') {
+        const file = api.napcatQrFile?.() ?? ''
+        if (file === '') { json(response, 200, { ok: false, reason: '没有配置二维码路径' }); return }
+        try {
+          const image = readFileSync(file)
+          response.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store', 'content-length': String(image.length) })
+          response.end(image)
+        } catch (error) {
+          json(response, 200, { ok: false, reason: `读二维码失败：${error?.message ?? error}` })
+        }
+        return
+      }
+      // 文件管理：在**本机资源管理器**里打开 config 目录（不经浏览器，目录内容不暴露成 HTTP）
+      if (request.method === 'GET' && path === '/api/accounts/open-folder') {
+        const dir = typeof api.accounts?.configDir === 'function' ? api.accounts.configDir() : ''
+        if (dir === '') { json(response, 200, { ok: false, reason: '找不到 config 目录（webui.json 没解析出来）' }); return }
+        if (existsSync(dir) === false) { json(response, 200, { ok: false, reason: '目录不存在：' + dir }); return }
+        try {
+          if (process.platform === 'win32') {
+            // ① Shell COM：会给窗口激活权限，通常能弹到最前
+            const quoted = dir.replace(/'/g, "''")
+            const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', `(New-Object -ComObject Shell.Application).Explore('${quoted}')`], { detached: true, stdio: 'ignore' })
+            ps.unref()
+            // ② 兜底：COM 不可用时用 cmd start（可能仍在后台）
+            setTimeout(() => { try { spawn('cmd.exe', ['/c', 'start', '', dir], { detached: true, stdio: 'ignore' }).unref() } catch { /* 忽略 */ } }, 1200)
+          } else if (process.platform === 'darwin') spawn('open', [dir], { detached: true, stdio: 'ignore' }).unref()
+          else spawn('xdg-open', [dir], { detached: true, stdio: 'ignore' }).unref()
+          json(response, 200, { ok: true, reason: '已打开', dir })
+        } catch (error) {
+          json(response, 200, { ok: false, reason: '打开失败：' + String(error?.message ?? error) })
+        }
+        return
+      }
+      // v0.7.11：网络配置 / 文件管理 / 插件商店（都只读）
+      if (request.method === 'GET' && path === '/api/accounts/network') {
+        json(response, 200, api.accounts.network())
+        return
+      }
+      if (request.method === 'GET' && path === '/api/accounts/files') {
+        json(response, 200, api.accounts.files())
+        return
+      }
+      if (request.method === 'GET' && path === '/api/accounts/store') {
+        json(response, 200, await api.accounts.store())
+        return
+      }
+      // v0.7.11：运行统计（读本地 trace）/ 插件列表 / 关于
+      if (request.method === 'GET' && path === '/api/accounts/stats') {
+        if (typeof api.traceStats !== 'function') { json(response, 200, { ok: false, reason: '当前控制台不支持统计' }); return }
+        const traceLines = Math.min(20000, Math.max(200, Number(url.searchParams.get('lines')) || 2000))
+        json(response, 200, await api.traceStats({ lines: traceLines }))
+        return
+      }
+      if (request.method === 'GET' && path === '/api/accounts/plugins') {
+        json(response, 200, await api.accounts.plugins())
+        return
+      }
+      if (request.method === 'GET' && path === '/api/accounts/about') {
+        json(response, 200, await api.accounts.about())
+        return
+      }
+      // v0.7.11 日志窗口：NapCat 的日志（不带 file 给列表，带 file 给内容）
+      if (request.method === 'GET' && path === '/api/accounts/logs') {
+        json(response, 200, await api.accounts.logs(url.searchParams.get('file') ?? ''))
+        return
+      }
       if (request.method === 'GET' && path === '/api/diagnose') {
         const result = await api.diagnose()
         json(response, 200, { ok: true, ...result })
@@ -291,6 +468,58 @@ export function createControlServer({ config, token, api, ui = '', saveConfig = 
             return api.restartNapcatLogin()
           },
           '/api/napcat/stop': () => api.stopNapcat(),
+          // v0.7.11：账号中心的两个写操作（都只是让 NapCat 干活，不碰 QQ 数据）
+          '/api/accounts/quick-login': () => {
+            if (typeof api.accounts?.quickLogin !== 'function') return { ok: false, message: '当前控制台不支持账号中心' }
+            const uin = String(body.uin ?? '').trim()
+            if (!/^\d{5,12}$/.test(uin)) return { ok: false, message: 'QQ 号格式不对' }
+            return api.accounts.quickLogin(uin)
+          },
+          '/api/accounts/auto': () => {
+            if (typeof api.accounts?.setAutoLogin !== 'function') return { ok: false, message: '当前控制台不支持账号中心' }
+            const uin = String(body.uin ?? '').trim()
+            if (uin !== '' && !/^\d{5,12}$/.test(uin)) return { ok: false, message: 'QQ 号格式不对（留空 = 取消自动登录）' }
+            return api.accounts.setAutoLogin(uin)
+          },
+          // 重启 NapCat 的登录流程（页面上的"重启"按钮；会打断当前在线，所以前端要二次确认）
+          // webui.json：只改端口与回环地址（2FA / token 不给改）
+          '/api/accounts/config': () => {
+            if (typeof api.accounts?.updateWebUiConfig !== 'function') return { ok: false, message: '当前控制台不支持改这份配置' }
+            return api.accounts.updateWebUiConfig({ port: body.port ?? null, host: body.host ?? null })
+          },
+          // 插件：启用/停用 + 卸载（卸载是破坏性的，界面二次确认）
+          '/api/accounts/plugins/status': () => {
+            if (typeof api.accounts?.setPluginStatus !== 'function') return { ok: false, message: '当前控制台不支持插件操作' }
+            const id = String(body.id ?? '').trim()
+            if (id === '') return { ok: false, message: '缺少插件 id' }
+            return api.accounts.setPluginStatus(id, body.enable === true)
+          },
+          '/api/accounts/plugins/uninstall': () => {
+            if (typeof api.accounts?.uninstallPlugin !== 'function') return { ok: false, message: '当前控制台不支持卸载插件' }
+            const id = String(body.id ?? '').trim()
+            if (id === '') return { ok: false, message: '缺少插件 id' }
+            return api.accounts.uninstallPlugin(id, body.cleanData === true)
+          },
+          // 网络配置（唯一会写 NapCat 文件的入口：先备份，再校验，再写）
+          '/api/accounts/network': () => {
+            if (typeof api.accounts?.updateNetwork !== 'function') return { ok: false, message: '当前控制台不支持编辑网络配置' }
+            return api.accounts.updateNetwork({
+              uin: String(body.uin ?? '').trim(),
+              clients: Array.isArray(body.clients) ? body.clients : null,
+              serverPort: body.serverPort ?? null,
+            })
+          },
+          '/api/accounts/restart': () => {
+            if (typeof api.accounts?.restart !== 'function') return { ok: false, message: '当前控制台不支持账号中心' }
+            return api.accounts.restart()
+          },
+          // 2FA：把 6 位码交给 NapCat 换一次凭证（凭证在服务端缓存 50 分钟，之后一小时内不用再输）
+          '/api/accounts/2fa': () => {
+            if (typeof api.accounts?.setTotp !== 'function') return { ok: false, message: '当前控制台不支持 2FA' }
+            const code = String(body.code ?? '').trim()
+            if (!/^\d{6}$/.test(code)) return { ok: false, message: '验证码必须是 6 位数字' }
+            return api.accounts.setTotp(code)
+          },
           '/api/tts/start': () => api.startTts(),
           '/api/tts/stop': () => api.stopTts(),
           '/api/all/stop': () => api.stopAll(),

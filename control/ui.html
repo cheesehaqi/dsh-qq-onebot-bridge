@@ -96,6 +96,8 @@
       <button class="danger" onclick="act('/api/all/stop')">全部停止</button>
       <a id="hostLink" href="#" target="_blank" style="display:none"><button>打开机器人控制台（3080）</button></a>
       <a id="napcatLink" href="#" target="_blank"><button>QQ助手账号</button></a>
+      <!-- v0.7.11：账号中心（本地页面，同源同 token）—— 登录/扫码/快速登录都收在这一页 -->
+      <a id="accountsLink" href="/accounts"><button>账号中心</button></a>
     </div>
     <div class="grid2" style="margin-top:10px">
       <label class="meta">宿主工作目录<input id="cfgCwd" /></label>
@@ -303,6 +305,11 @@
 
 <script>
 const token = new URLSearchParams(location.search).get('token') || '';
+// v0.7.11：账号中心是独立本地页（/accounts），把 token 带过去，省得用户手抄。
+{
+  const link = document.getElementById('accountsLink');
+  if (link && token) link.href = '/accounts?token=' + encodeURIComponent(token);
+}
 // 地址里没有 token 时，直接告诉用户为什么满屏都是「token 无效」，而不是让他自己猜：
 // 控制台与宿主 3080 是**两套** token，宿主每次重启还会换新的。
 if (!token) {

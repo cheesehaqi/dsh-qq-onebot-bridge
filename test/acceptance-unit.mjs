@@ -217,8 +217,10 @@ const server = createControlServer({
   },
   ui: '<h1>console</h1>',
 })
-await new Promise((resolve) => server.listen(18802, '127.0.0.1', resolve))
-const base = 'http://127.0.0.1:18802'
+// 端口用 0 让系统分配：写死端口会跟"恰好占着同一个端口的别的程序"撞车
+// （真事：18803 被宿主的进程占了，这套件直接 EADDRINUSE 崩掉）。
+await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+const base = `http://127.0.0.1:${server.address().port}`
 const response = await fetch(`${base}/api/acceptance?token=${token}`)
 const body = await response.json()
 check('GET /api/acceptance 返回报告与文本', response.status === 200 && body.report?.items?.length === 6 && typeof body.text === 'string', JSON.stringify(body.totals ?? {}))
@@ -229,8 +231,8 @@ server.close()
 
 // 不支持验收台的旧 supervisor 也要给可读原因
 const bare = createControlServer({ config, token, api: { status: async () => ({}), logFile: () => '', diagnose: async () => ({}) }, ui: '' })
-await new Promise((resolve) => bare.listen(18803, '127.0.0.1', resolve))
-const bareBody = await (await fetch(`http://127.0.0.1:18803/api/acceptance?token=${token}`)).json()
+await new Promise((resolve) => bare.listen(0, '127.0.0.1', resolve))
+const bareBody = await (await fetch(`http://127.0.0.1:${bare.address().port}/api/acceptance?token=${token}`)).json()
 check('旧控制台返回可读的不支持原因', bareBody.ok === false && bareBody.reason.includes('不支持验收台'))
 bare.close()
 

@@ -366,15 +366,15 @@ check('「相关链接」里有更新日志与调试台，且链接由真实素�
  * 相关链接**不**放"问题反馈"（v0.7.0 一度加过，用户当场要求移除）：
  * 面板里只留账号 / 更新日志 / 调试文档 / 调试台四条，别再加第五条。
  */
-check('★相关链接里没有"问题反馈"（保持四条：账号 / 更新日志 / 调试文档 / 调试台）',
+check('★相关链接里没有"问题反馈"（五条：账号 / 更新日志 / 调试文档 / 调试台 / 账号中心）',
   !links.some((link) => link.id === 'feedback')
-  && links.map((link) => link.id).join(',') === 'account,changelog,readme-debug,console',
+  && links.map((link) => link.id).join(',') === 'account,changelog,readme-debug,console,accounts',
   links.map((link) => link.id).join(','))
 check('调试台链接里不含 token（本机密钥不进面板）',
   links.every((link) => !/token=/i.test(link.href)) && consoleLink.href.startsWith('http://127.0.0.1:'))
 const bareLinks = panelFooterLinks({ version: '1.0.0', repoUrl: '', consolePort: 8799 })
-check('没有仓库地址时只给账号入口与调试台（不编造链接）',
-  bareLinks.length === 2 && bareLinks.every((link) => ['account', 'console'].includes(link.id)),
+check('没有仓库地址时只给账号入口、调试台与账号中心（不编造链接）',
+  bareLinks.length === 3 && bareLinks.every((link) => ['account', 'console', 'accounts'].includes(link.id)),
   bareLinks.map((link) => link.id).join(','))
 // 「QQ助手账号」= 机器人账号的登录/扫码页（NapCat WebUI）。href 指宿主自己的 /qqai/account：
 // token 由服务端读出后走 302，**不进面板载荷**（同"调试台"入口的规矩）。
@@ -390,9 +390,9 @@ check('账号入口在「相关链接」组里、排第一，且它自己不带 
   accountLink?.href === '/qqai/account' && accountLink.label.includes('QQ助手账号')
   && !/token=/i.test(accountLink.href) && links[0]?.id === 'account' && bareLinks[0]?.id === 'account',
   `${brief(accountLink)} · 完整=${links.map((link) => link.id).join(',')}`)
-check('顺序固定为 账号 → 更新日志 → 调试文档 → 调试台（调试台压在最底下）',
-  links.map((link) => link.id).join(',') === 'account,changelog,readme-debug,console'
-  && bareLinks.map((link) => link.id).join(',') === 'account,console',
+check('顺序固定为 账号 → 更新日志 → 调试文档 → 调试台 → 账号中心',
+  links.map((link) => link.id).join(',') === 'account,changelog,readme-debug,console,accounts'
+  && bareLinks.map((link) => link.id).join(',') === 'account,console,accounts',
   `完整=${links.map((link) => link.id).join(',')} 无仓库=${bareLinks.map((link) => link.id).join(',')}`)
 // 调试台是**独立进程**：面板必须如实标出"运行中/未启动"，并给出可复制的启动命令（否则用户对着"连不上"发懵）。
 const offConsole = panelFooterLinksWithConsole({
@@ -472,12 +472,13 @@ const fakeRequest = (method, body, headers = {}) => ({
   async *[Symbol.asyncIterator]() { if (body !== undefined) yield Buffer.from(JSON.stringify(body)) },
 })
 
-check('挂载了八条路由（读面板 + 写开关 + 批量写 + 调试台 + 账号 + 二维码 + 启动 NapCat + 重启登录）',
-  registered.length === 8 && registered.some((r) => r.path === '/qqai/panel')
+check('挂载了九条路由（读面板 + 写开关 + 批量写 + 调试台 + 账号 + 二维码 + 启动 NapCat + 重启登录 + 账号中心）',
+  registered.length === 9 && registered.some((r) => r.path === '/qqai/panel')
   && registered.some((r) => r.path === '/qqai/panel/set-batch')
   && registered.some((r) => r.path === '/qqai/panel/set') && registered.some((r) => r.path === '/qqai/console')
   && registered.some((r) => r.path === '/qqai/account') && registered.some((r) => r.path === '/qqai/napcat/start')
-  && registered.some((r) => r.path === '/qqai/napcat/relogin') && registered.some((r) => r.path === '/qqai/napcat/qr'),
+  && registered.some((r) => r.path === '/qqai/napcat/relogin') && registered.some((r) => r.path === '/qqai/napcat/qr')
+  && registered.some((r) => r.path === '/qqai/accounts'),
   registered.map((r) => r.path).join(','))
 
 const getHandler = registered.find((r) => r.path === '/qqai/panel').handler
@@ -1843,11 +1844,11 @@ check('★管理员分支走 WMI Win32_Process.Create，且 if/else 之间没有
 
 dispose()
 check('dispose 注销了全部路由（配置热重载后能重新挂载，不会撞 duplicate route）',
-  registered.length === 0 && disposed.length === 8, `left=${registered.length}`)
+  registered.length === 0 && disposed.length === 9, `left=${registered.length}`)
 mountQqAiPanel(fakeHost, {
   profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
 })
-check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 8, String(registered.length))
+check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 9, String(registered.length))
 
 // ------------------------------------------------- 3. 客户端 bundle 冒烟 ---- ----
 const clientText = readFileSync(join(import.meta.dirname, '..', 'client', 'client.js'), 'utf8')

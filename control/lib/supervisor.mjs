@@ -14,6 +14,7 @@ import { PORT_LABELS, configWarnings } from './config.mjs'
 import { createTraceTailer, filterEvents, formatChain, groupChains, readRuntime, readTraceFile, summarizeEvents } from './trace.mjs'
 import { formatDiagnose, runDiagnose } from './diagnose.mjs'
 import { buildZip, fileEntry } from './zip.mjs'
+import { createAccountsApi } from './accounts.mjs'
 import { createReplayer } from './replay.mjs'
 import { buildAcceptance, formatAcceptance } from './acceptance.mjs'
 import { groupsView as groupsReport, jobsView as jobsReport, perfReport } from './perf.mjs'
@@ -305,6 +306,37 @@ export function createSupervisor(config, deps = {}) {
   let lastExportSummary = null   // 验收台要看"最近一次导出"的证据
 
   const portRow = (snapshot, name) => (snapshot.ports ?? []).find((item) => item.name === name)
+
+  /**
+   * 运行统计（纯本地）：读 trace 尾部，按 stage / ok 聚合最近 N 条。
+   * 为什么读 trace 而不是问 NapCat：这是"机器人做了什么"的唯一真源，且 NapCat 那边没有等价接口。
+   */
+  async function traceStats({ lines = 2000 } = {}) {
+    const file = config.logs?.trace ?? ''
+    if (!file) return { ok: false, reason: '没有配置 trace 路径', total: 0, byStage: {}, errors: 0, recent: [] }
+    const raw = tailLines(file, lines)
+    const byStage = {}
+    let errors = 0
+    let oldest = null
+    let newest = null
+    const recentErrors = []
+    for (const line of raw) {
+      let event = null
+      try { event = JSON.parse(line) } catch { continue }
+      const stage = String(event.stage ?? 'unknown')
+      byStage[stage] = (byStage[stage] ?? 0) + 1
+      if (event.ok === false) {
+        errors += 1
+        if (recentErrors.length < 8) recentErrors.push({ stage, reason: String(event.reason ?? '').slice(0, 160), at: event.at ?? event.ts ?? '' })
+      }
+      const at = event.at ?? event.ts ?? event.time
+      if (typeof at === 'string' && at !== '') {
+        if (newest === null || at > newest) newest = at
+        if (oldest === null || at < oldest) oldest = at
+      }
+    }
+    return { ok: true, reason: '', total: raw.length, byStage, errors, oldest, newest, recentErrors }
+  }
 
   async function status() {
     const snapshot = await inspectNow()
@@ -998,6 +1030,10 @@ export function createSupervisor(config, deps = {}) {
   return {
     status, startHost, stopHost, freePort, startNapcat, stopNapcat, startTts, stopTts, stopAll,
     restartNapcatLogin, qr, napcatWebui,
+    napcatQrFile: () => config.napcatQr ?? '',
+    traceStats,
+    // v0.7.11：账号中心（本地网站）。每次调用都重读 webui.json —— 用户可能刚在别处改过 token/端口。
+    accounts: createAccountsApi({ napcatBat: config.napcatBat }),
     traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance,
     inboxList, replay, inject, clearQueue, archiveStats, archiveSearch,
     perf, jobsView, groups,

@@ -538,6 +538,12 @@ node test/replay-live-host.mjs --token <控制台 token>   # 录制 → 离线�
 
 npm run control            # 或 node control/bin/qq-control.mjs --open
 
+# 直接打开「账号中心」（本地页面 /accounts）：没在跑就顺手把控制台起来
+npm run accounts           # 或双击 control/账号中心.bat
+
+# 在桌面建一个「QQ 账号中心」快捷方式（双击即用，指向上面的 bat）
+npm run shortcut
+
 # 也可以双击 control/启动控制台.bat
 
 ```
@@ -553,6 +559,7 @@ npm run control            # 或 node control/bin/qq-control.mjs --open
 | 配置 | `qq-control.json` 是端口与路径的唯一真源（自动探测 node、dsh bin.js、NapCat、TTS 脚本；可在 UI 里改路径）；**6700 被 NapCat 配置写死，勿改** |
 | 调试 | 「录制 · 回放 · 注入」：列出 `qq-inbox.jsonl` 里录到的每条消息，可一键离线回放（沙箱 + dry-run）或注入合成事件；注入队列状态（行数 / 本次已消费 / dry-run）直接显示 |
 | 验收 | 顶部「硬约束验收台」：6 条硬约束的实时证据（无静默分支 / traceId 贯穿 / 可回放 / 可体检 / 可导出 / 可注入），不达标项直接说明该点哪里；`GET /api/acceptance` |
+| 账号中心 | **`/accounts`**（v0.7.11 起）：本地页面直接看 NapCat WebUI 的地址与打码 token、登录状态、扫码二维码、快速登录列表与本机账号配置；可一键「快速登录」或「设为自动登录」。**只连本机**，`webui.json` 的 token 只在服务端使用；NapCat 没起时如实说「连不上」而不是报错 |
 | 安全 | 只绑 `127.0.0.1`；所有 API 需要 token；带 `Origin` 的跨站请求一律拒绝 |
 
 > 以后若想做真正的托盘/桌面程序，直接包一层 Electron/Tauri 复用同一套 HTTP API 即可，逻辑无需重写。
