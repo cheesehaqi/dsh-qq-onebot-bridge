@@ -481,6 +481,20 @@ npm run control            # or: node control/bin/qq-control.mjs --open
 
 > A future tray/desktop build can simply wrap this HTTP API in Electron/Tauri — no logic rewrite needed.
 
+### Troubleshooting: "Restart NapCat does nothing / it won't start"
+
+Symptoms we actually hit, and why:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Running `napcat.bat` prints `argv[0]:.\NapCatWinBootMain.exe` and exits; QQ never starts | that bat calls **`NapCatWinBootMain.exe` with no argument**, but the booter needs a QQ number | start it with the account: `NapCatWinBootMain.exe <uin>` (that is what `quick.bat` does), or use `launcher.bat` |
+| `spawn` does nothing, but running it by hand works | the bat uses a **relative** path (`.\NapCatWinBootMain.exe`), so `cwd` must be `bootmain/` | spawn with `cwd` set to the `bootmain` directory |
+| The console's "Restart NapCat" only says "unreachable" | the old implementation only called the WebUI `RestartNapCat`, which cannot work when the process is gone | since v0.7.11: on "unreachable" it **launches with a QQ number** (`autoLoginAccount`, else `onebot11_<uin>.json`), and falls back to `launcher.bat` when no uin is found |
+| A UAC prompt appears / admin is required | `launcher.bat` checks `net session` and re-launches elevated via `launcher-elevate.ps1` + `wt.exe` | a process cannot elevate silently — **you must click the UAC prompt**; to avoid it, start `NapCatWinBootMain.exe <uin>` directly |
+| The page says "NapCat 连不上（可能正在重启）" | port 6099 is not listening during a NapCat restart window | the page retries 3 times (2 s apart) and then offers a "重试" button; wait ~15 s and retry |
+
+Suggested order: is `6099` listening → did `QQ.exe` start → if both are fine but the page still fails, check `webui.json` for the port and token.
+
 ## Tests
 
 65 unit suites, 4224 assertions in `test/*-unit.mjs`, plus 3 live scripts:

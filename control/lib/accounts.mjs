@@ -408,6 +408,21 @@ export function describeAccountState({ webui = null, status = null, accounts = [
  *   · 缓存 → 一次 2FA 之后一小时内所有操作都顺；
  *   · token 一改，key 就变，旧凭证自动作废（不会拿旧凭证去撞新配置）。
  */
+  /** 启动 NapCat 用哪个 QQ：优先 autoLoginAccount，其次配置目录里的 onebot11_<uin>.json。 */
+  const readPreferredUin = () => {
+    try {
+      const config = readConfig()
+      if (config.exists !== true) return ''
+      const json = JSON.parse(readFileSync(config.path, 'utf8'))
+      if (typeof json.autoLoginAccount === 'string' && /^\d{5,12}$/.test(json.autoLoginAccount)) return json.autoLoginAccount
+      const dir = dirname(config.path)
+      const found = readdirSync(dir).find((name) => /^onebot11_(\d{5,12})\.json$/.test(name))
+      return found ? found.replace(/^onebot11_/, '').replace(/\.json$/, '') : ''
+    } catch {
+      return ''
+    }
+  }
+
 export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = undefined } = {}) {
   const readConfig = () => readWebUiConfig({ napcatBat, file: webUiFile })
   const credentials = new Map()   // key: `${url}|${token}` → { credential, at }
@@ -744,12 +759,34 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       if (typeof napcatBat !== 'string' || napcatBat === '') {
         return { ok: false, kind: 'unsupported', message: 'NapCat 没在运行，且没有配置启动脚本（napcatBat）' }
       }
-      try {
-        spawn(napcatBat, [], { cwd: dirname(napcatBat), detached: true, stdio: 'ignore', windowsHide: false, shell: true }).unref()
-        return { ok: true, kind: 'ok', message: 'NapCat 没在运行，已用启动脚本拉起（等十几秒再刷新）', launched: true, bat: napcatBat }
-      } catch (error) {
-        return { ok: false, kind: 'error', message: '拉起失败：' + String(error?.message ?? error).slice(0, 120) }
+      /**
+       * 启动 NapCat 的正确姿势（真机踩过）：
+       *   `napcat.bat` 里是 `NapCatWinBootMain.exe` **不带参数** → 只打印 argv[0] 就退出，永远起不来；
+       *   `quick.bat` 是 `NapCatWinBootMain.exe <QQ号>` → 能起。
+       * 所以这里带 uin 直接调 exe；没有 uin 就退回 launcher.bat（它会自行提权，会弹 UAC，需要人点）。
+       */
+      const dir = dirname(napcatBat)
+      const exe = join(dir, 'NapCatWinBootMain.exe')
+      const uin = readPreferredUin()
+      if (existsSync(exe) && uin !== '') {
+        try {
+          spawn(exe, [uin], { cwd: dir, detached: true, stdio: 'ignore' }).unref()
+          return { ok: true, kind: 'ok', message: 'NapCat 没在运行，已用 QQ ' + uin + ' 拉起（等十几秒再刷新）', launched: true, uin }
+        } catch (error) {
+          return { ok: false, kind: 'error', message: '拉起失败：' + String(error?.message ?? error).slice(0, 120) }
+        }
       }
+      // 没有 uin 或没有 exe：退回 launcher.bat（可能需要 UAC 提权）
+      const launcher = join(dir, 'launcher.bat')
+      if (existsSync(launcher)) {
+        try {
+          spawn(launcher, [], { cwd: dir, detached: true, stdio: 'ignore', shell: true }).unref()
+          return { ok: true, kind: 'ok', message: '没有可用的 QQ 号，已调用 launcher.bat（可能弹 UAC，需要你确认）', launched: true, launcher: true }
+        } catch (error) {
+          return { ok: false, kind: 'error', message: '拉起失败：' + String(error?.message ?? error).slice(0, 120) }
+        }
+      }
+      return { ok: false, kind: 'not-found', message: '既没有 NapCatWinBootMain.exe 也没有 launcher.bat，路径：' + dir }
     },
     /** 当前登录的账号资料（昵称/uin/uid），页面头部用。 */
     async loginInfo() {

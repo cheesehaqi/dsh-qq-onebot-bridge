@@ -1444,8 +1444,33 @@
     else toast('打开失败：' + (data.message ?? data.reason ?? '未知'), 'bad')
   }
 
+  /** 设备与版本：GUID 备份明细 + 三个接口的可用性（都只读）。 */
+  async function loadDevice() {
+    const btn = $('btnGuid'); busy(btn, true, '查询中…')
+    const [guid, meta] = await Promise.all([api('/api/accounts/guid'), api('/api/accounts/meta')])
+    busy(btn, false)
+    const backups = Array.isArray(guid?.data?.backups) ? guid.data.backups
+      : Array.isArray(guid?.data) ? guid.data
+      : Array.isArray(guid?.backups) ? guid.backups : []
+    $('guidInfo').innerHTML = guid.ok === true
+      ? (backups.length === 0 ? '0 个（还没有备份）'
+        : backups.length + ' 个' + backups.slice(0, 6).map((item) => {
+          const uin = item.uin ?? item.qq ?? ''
+          const time = item.time ?? item.createdAt ?? ''
+          return '<div class="sub" style="margin:2px 0">' + (uin ? 'QQ ' + uin : '(未知账号)') + (time ? ' · ' + time : '') + '</div>'
+        }).join(''))
+      : '<span style="color:var(--danger)">' + (guid.message ?? guid.reason ?? '取不到') + '</span>'
+
+    const versions = meta.versions ?? {}
+    const sys = meta.sys ?? null
+    const mark = (ok) => ok ? '<span class="dot ok"></span> 可用' : '<span class="dot bad"></span> 不可用'
+    $('apiNapcat').innerHTML = versions.napcat ? mark(true) + ' <code>' + versions.napcat + '</code>' : mark(false)
+    $('apiQq').innerHTML = versions.qq ? mark(true) + ' <code>' + versions.qq + '</code>' : mark(false)
+    $('apiSys').innerHTML = (sys === null || sys === undefined) ? mark(false) : (mark(true) + ' ' + (sys.cpu?.model ?? ''))
+  }
+
   /** 分区加载器表（键 = 侧栏 data-tab）。定义在各自 loader 之后，避免 TDZ。 */
-  const LOADERS = { network: loadNetwork, files: loadFiles, plugins: loadPlugins, store: loadStore, stats: loadStats, config: loadConfig, about: loadAbout }
+  const LOADERS = { network: loadNetwork, files: loadFiles, plugins: loadPlugins, store: loadStore, stats: loadStats, config: loadConfig, about: loadAbout, device: loadDevice }
   /** 调一个分区加载器；失败就把原因写进那个分区（否则只会"什么都不发生"）。 */
   const loadersafe = (tab) => {
     const body = $(tab + 'Body')

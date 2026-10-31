@@ -564,6 +564,20 @@ npm run shortcut
 
 > 以后若想做真正的托盘/桌面程序，直接包一层 Electron/Tauri 复用同一套 HTTP API 即可，逻辑无需重写。
 
+### 排障：NapCat「点重启没反应 / 自己起不来」
+
+真机上踩过的现象与原因，写在这里省得再查一遍：
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 手动跑 `napcat.bat`，只打印一行 `argv[0]:.\NapCatWinBootMain.exe` 就退出，QQ 没起 | 该 bat 里是 **`NapCatWinBootMain.exe` 不带参数**；引导器需要 QQ 号才干活 | 用带参数的启动方式：`NapCatWinBootMain.exe <QQ号>`（同目录的 `quick.bat` 就是这么写的），或 `launcher.bat` |
+| 用 `spawn` 拉起却没反应，直接跑又正常 | bat 里用的是 `.\NapCatWinBootMain.exe` **相对路径**，`cwd` 不对就找不到 exe | 启动时把 `cwd` 设到 `bootmain/` 目录 |
+| 控制台点「重启 NapCat」只报「连不上」 | 旧实现只调 WebUI 的 `RestartNapCat`，进程不在时必然失败 | v0.7.11 起：连不上就**用 QQ 号拉起**（`autoLoginAccount` → `onebot11_<uin>.json` 兜底），没有 uin 再退回 `launcher.bat` |
+| 拉起时弹出 UAC / 需要管理员 | `launcher.bat` 会 `net session` 自检，非管理员就调 `launcher-elevate.ps1` 用 `wt.exe` 提权 | 进程无法静默提权，**UAC 必须本人点**；不想提权就用 `NapCatWinBootMain.exe <QQ号>` 的直启方式 |
+| 页面显示「NapCat 连不上（可能正在重启）」 | 6099 在 NapCat 重启窗口内不监听 | 页面已自动重试 3 次（间隔 2 秒）；仍失败会给「重试」按钮，等十几秒再点 |
+
+排查顺序建议：先看 `6099` 有没有在听 → 再看 `QQ.exe` 有没有起来 → 都正常但页面还报连不上，再回去看 `webui.json` 的端口与 token。
+
 ## 隐私与脱敏
 
 出问题排查往往要把日志发给别人，所以本插件对"数据会去哪"有明确约定：
