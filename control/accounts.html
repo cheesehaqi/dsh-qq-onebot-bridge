@@ -1141,7 +1141,8 @@
    * 每张卡可改 名称 / URL / 启停，可删除；顶部可新建。保存时整组提交，写前由服务端备份。
    */
   let netDraft = []
-  let netFilter = 'all'   // all | ws-client | ws-server | http-server      // [{ uin, clients: [{name,url,enable}] }]
+  let netFilter = 'all'   // all | ws-client | ws-server | http-server
+  let netDirty = false    // 有任何改动就点亮「保存全部」      // [{ uin, clients: [{name,url,enable}] }]
 
   async function loadNetwork() {
     const btn = $('btn-network'); busy(btn, true, '读取中…')
@@ -1183,9 +1184,12 @@
     if (toolbar) {
       toolbar.innerHTML = NET_TABS.map(([key, label]) => '<button data-filter="' + key + '" class="' + (netFilter === key ? 'primary' : '') + '">' + label + '</button>').join('')
         + '<button data-newnet="1">新建</button>'
+        + '<button class="primary" data-saveall="1"' + (netDirty ? '' : ' disabled') + '>保存全部' + (netDirty ? '' : '') + '</button>'
     }
     if (toolbar) {
       for (const el of toolbar.querySelectorAll('[data-filter]')) el.onclick = () => { netFilter = el.dataset.filter; renderNetwork() }
+      const saveAllBtn = toolbar.querySelector('[data-saveall]')
+      if (saveAllBtn) saveAllBtn.onclick = () => saveAllNetwork(saveAllBtn)
       const newBtn = toolbar.querySelector('[data-newnet]')
       if (newBtn) newBtn.onclick = () => {
         const target = netDraft.findIndex((row) => row.file)
@@ -1208,8 +1212,7 @@
             + '<div class="sub" style="margin:0 0 8px">QQ ' + row.uin + ' · Websocket 客户端</div>'
             + '<input data-field="name:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.name) + '" placeholder="名称" style="width:100%;margin-bottom:8px">'
             + '<input data-field="url:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.url) + '" placeholder="ws://127.0.0.1:6700/" style="width:100%;margin-bottom:10px">'
-            + '<div class="row"><button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button>'
-            + '<button class="primary" data-save="' + uinIndex + '">保存</button></div>'
+            + '<div class="row"><button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button></div>'
             + '<div class="sub" data-state="' + uinIndex + '" style="margin:6px 0 0"></div>'
             + '</div>')
         })
@@ -1248,6 +1251,7 @@
     const [kind, uinIndex, clientIndex] = splitKey(field)
     const client = netDraft[uinIndex]?.clients?.[clientIndex]
     if (!client) return
+    netDirty = true
     if (kind === 'url') client.url = value
     else if (kind === 'name') client.name = value
   }
@@ -1256,6 +1260,7 @@
     const [uinIndex, clientIndex] = splitKey(key)
     const client = netDraft[uinIndex]?.clients?.[clientIndex]
     if (!client) return
+    netDirty = true
     client.enable = client.enable === false
     renderNetwork()
   }
@@ -1267,6 +1272,7 @@
     const client = row.clients[clientIndex]
     if (!client) return
     if (!confirm('删除这条连接「' + (client.name || client.url) + '」？保存后生效（写前会自动备份配置）。')) return
+    netDirty = true
     row.clients.splice(clientIndex, 1)
     renderNetwork()
   }
@@ -1275,8 +1281,36 @@
     const row = netDraft[uinIndex]
     if (!row) return
     if (row.clients.length >= 8) { toast('每个账号最多 8 条 WS 客户端', 'bad'); return }
+    netDirty = true
     row.clients.push({ name: 'ws-' + (row.clients.length + 1), url: '', enable: true })
     renderNetwork()
+  }
+
+  /** 整页保存：把所有改动过的账号一次性写回（每个账号各自备份）。 */
+  async function saveAllNetwork(btn) {
+    if (netDirty !== true) { toast('没有改动', 'bad'); return }
+    for (const row of netDraft) {
+      const bad = row.clients.find((client) => /^wss?:\/\/[^\s]+$/i.test(String(client.url).trim()) === false)
+      if (bad) { toast('QQ ' + row.uin + ' 有地址不是 ws:// 或 wss:// 开头', 'bad'); return }
+    }
+    if (!confirm('保存全部改动？写前会自动备份，改完需重启 NapCat 才生效。')) return
+    busy(btn, true, '保存中…')
+    const results = []
+    for (const row of netDraft) {
+      if (!row.file) continue
+      const result = await post('/api/accounts/network/save', { uin: row.uin, clients: row.clients })
+      results.push({ uin: row.uin, result })
+    }
+    busy(btn, false)
+    const failed = results.filter((item) => item.result.ok !== true)
+    if (failed.length === 0) {
+      netDirty = false
+      toast('已保存 ' + results.length + ' 个账号；重启 NapCat 生效', 'ok')
+      opLog('保存全部网络配置')
+      loadNetwork()
+    } else {
+      toast('部分失败：' + failed.map((item) => item.uin + ' ' + (item.result.message ?? '')).join('；'), 'bad')
+    }
   }
 
   async function saveNetwork(uinIndex, btn) {
