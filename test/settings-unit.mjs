@@ -368,7 +368,7 @@ check('「相关链接」里有更新日志与调试台，且链接由真实素�
  */
 check('★相关链接里没有"问题反馈"（五条：账号 / 更新日志 / 调试文档 / 调试台 / 账号中心）',
   !links.some((link) => link.id === 'feedback')
-  && links.map((link) => link.id).join(',') === 'account,changelog,readme-debug,console,accounts',
+  && links.map((link) => link.id).join(',') === 'accounts,account,changelog,readme-debug,console',
   links.map((link) => link.id).join(','))
 check('调试台链接里不含 token（本机密钥不进面板）',
   links.every((link) => !/token=/i.test(link.href)) && consoleLink.href.startsWith('http://127.0.0.1:'))
@@ -386,13 +386,13 @@ check('没有仓库地址时只给账号入口、调试台与账号中心（不�
 //  "还是挪回到之前的位置吧，直接把相关链接整体拉到最上边" → "再把调试台和更新日志换一下位置" →
 //  "更新日志改到相关链接的最底下" → "嗯，还是把更新日志位置改回去吧" → "调试台改到调试文档下方"）。
 const accountLink = links.find((link) => link.id === 'account')
-check('账号入口在「相关链接」组里、排第一，且它自己不带 token',
+check('账号中心排第一；账号入口在其后，且不带 token',
   accountLink?.href === '/qqai/account' && accountLink.label.includes('QQ助手账号')
-  && !/token=/i.test(accountLink.href) && links[0]?.id === 'account' && bareLinks[0]?.id === 'account',
+  && !/token=/i.test(accountLink.href) && links[0]?.id === 'accounts' && bareLinks[0]?.id === 'accounts',
   `${brief(accountLink)} · 完整=${links.map((link) => link.id).join(',')}`)
-check('顺序固定为 账号 → 更新日志 → 调试文档 → 调试台 → 账号中心',
-  links.map((link) => link.id).join(',') === 'account,changelog,readme-debug,console,accounts'
-  && bareLinks.map((link) => link.id).join(',') === 'account,console,accounts',
+check('顺序固定为 账号中心 → 账号 → 更新日志 → 调试文档 → 调试台',
+  links.map((link) => link.id).join(',') === 'accounts,account,changelog,readme-debug,console'
+  && bareLinks.map((link) => link.id).join(',') === 'accounts,account,console',
   `完整=${links.map((link) => link.id).join(',')} 无仓库=${bareLinks.map((link) => link.id).join(',')}`)
 // 调试台是**独立进程**：面板必须如实标出"运行中/未启动"，并给出可复制的启动命令（否则用户对着"连不上"发懵）。
 const offConsole = panelFooterLinksWithConsole({
@@ -502,8 +502,8 @@ check('GET 带上「相关链接」（账号入口 + 更新日志 + 调试台）
   brief(readBody.links?.map((link) => link.id)))
 // 载荷形状：账号入口**就在 links 里**（第一条），没有单独的 account 字段——
 // 客户端把整组渲染在标题正下方（用户 2026-10-04："直接把相关链接整体拉到最上边"）。
-check('GET 的 links 第一条就是账号入口（没有额外的 account 字段）',
-  readBody.links[0]?.id === 'account' && readBody.links[0]?.href === '/qqai/account'
+check('GET 的 links 第一条就是账号中心入口（没有额外的 account 字段）',
+  readBody.links[0]?.id === 'accounts' && readBody.links[0]?.href === '/qqai/accounts'
   && readBody.account === undefined,
   brief({ account: readBody.account, links: readBody.links?.map((link) => link.id) }))
 /**
