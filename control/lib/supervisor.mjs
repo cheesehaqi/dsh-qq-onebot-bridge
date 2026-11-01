@@ -60,8 +60,29 @@ export function portOf(address) {
 /** `tasklist /FO CSV /NH` 的解析在 lib/napcat-launch.js（那里也做加载器挑选）。 */
 
 /** Combine netstat + tasklist into one row per watched port. */
+/**
+ * 宿主（DSH 桌面端）的监听端口**不是固定的**：每次启动可能是 5xxxx 的随机端口，
+ * 而 `qq-control.json` 里只有一个默认值（3080）。这里做一次兜底识别：
+ * 配置端口没在监听时，从 netstat + tasklist 里找"宿主进程"的监听端口。
+ * 识别不了就保持原样（不瞎猜）。
+ */
+const HOST_PROCESS_HINT = /deepseek|harness|dsh|electron/i
+
+export function guessHostPort(netstatRows, taskMap, ports, preferred = 3080) {
+  const watched = new Set(Object.values(ports ?? {}).map((port) => Number(port)))
+  const candidates = netstatRows
+    .filter((row) => row.state === 'LISTENING')
+    .filter((row) => HOST_PROCESS_HINT.test(taskMap.get(row.pid) ?? ''))
+    .filter((row) => !watched.has(Number(row.localPort)) || Number(row.localPort) === Number(preferred))
+  if (candidates.length === 0) return null
+  // 优先 4-5 位的高位端口（DSH 实际用的），再退回第一个
+  const high = candidates.filter((row) => row.localPort >= 10000)
+  const picked = (high.length > 0 ? high : candidates)[0]
+  return picked ? Number(picked.localPort) : null
+}
+
 export function summarizePorts(netstatRows, taskMap, ports, labels = {}) {
-  return Object.entries(ports).map(([name, port]) => {
+  const rows = Object.entries(ports).map(([name, port]) => {
     const listeners = netstatRows.filter((row) => row.localPort === port && row.state === 'LISTENING')
     const established = netstatRows.filter((row) => row.localPort === port && row.state === 'ESTABLISHED')
     const owner = listeners[0]
@@ -75,6 +96,21 @@ export function summarizePorts(netstatRows, taskMap, ports, labels = {}) {
       established: established.length,
     }
   })
+
+  // 宿主端口兜底：配置值没在监听，就去 netstat 里认出宿主真正的端口
+  const hostRow = rows.find((row) => row.name === 'host')
+  if (hostRow && hostRow.listening !== true) {
+    const guessed = guessHostPort(netstatRows, taskMap, ports, hostRow.port)
+    if (guessed !== null) {
+      const owner = netstatRows.find((row) => row.state === 'LISTENING' && Number(row.localPort) === guessed)
+      hostRow.port = guessed
+      hostRow.listening = true
+      hostRow.pid = owner?.pid ?? 0
+      hostRow.process = owner ? (taskMap.get(owner.pid) ?? '') : ''
+      hostRow.autoDetected = true
+    }
+  }
+  return rows
 }
 
 // ------------------------------------------------------------------ reads ----
