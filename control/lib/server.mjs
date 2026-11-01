@@ -378,17 +378,13 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         }
         return
       }
-      // v0.7.11：网络配置 / 文件管理 / 插件商店（都只读）
+      // v0.7.11：网络配置 / 文件管理（都只读）
       if (request.method === 'GET' && path === '/api/accounts/network') {
         json(response, 200, api.accounts.network())
         return
       }
       if (request.method === 'GET' && path === '/api/accounts/files') {
         json(response, 200, api.accounts.files())
-        return
-      }
-      if (request.method === 'GET' && path === '/api/accounts/store') {
-        json(response, 200, await api.accounts.store())
         return
       }
       // v0.7.11：运行统计（读本地 trace）/ 插件列表 / 关于
@@ -503,12 +499,6 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
             const uin = String(body.uin ?? '').trim()
             if (uin !== '' && !/^\d{5,12}$/.test(uin)) return { ok: false, message: 'QQ 号格式不对（留空 = 取消自动登录）' }
             return api.accounts.setAutoLogin(uin)
-          },
-          // 重启 NapCat 的登录流程（页面上的"重启"按钮；会打断当前在线，所以前端要二次确认）
-          // 插件商店：下载 zip（只下载落盘，不解压不启用）
-          '/api/accounts/store/download': async () => {
-            if (typeof api.accounts?.downloadPlugin !== 'function') return { ok: false, message: '当前控制台不支持下载插件' }
-            return api.accounts.downloadPlugin(body.id)
           },
           // 插件：建目录（只 mkdir）
           '/api/accounts/plugins/mkdir': () => {

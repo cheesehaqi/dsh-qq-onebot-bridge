@@ -394,7 +394,7 @@
         <button id="btn-mkPlugins">创建目录（缺失时）</button>
         <button id="btn-pluginInstall">去 NapCat 安装 →</button>
       </div>
-      <p class="sub" style="margin-top:10px">插件目录：<code>…\NapCat\bootmain\config\plugins</code>。商店里点「下载 zip」会把文件放进它的 <code>_downloads/</code> 子目录；把解压后的插件文件夹放到 plugins 下，重启 NapCat 即加载。列表显示 0 个是因为 NapCat 的插件管理器未加载，不是这里读错了。</p>
+      <p class="sub" style="margin-top:10px">插件目录：<code>…\NapCat\bootmain\config\plugins</code>。把解压后的插件文件夹放进 plugins，重启 NapCat 即加载。列表显示 0 个是因为 NapCat 的插件管理器未加载，不是这里读错了。装插件用右边的「去 NapCat 安装 →」。</p>
     </div></section>
 
     <section class="section" id="tab-stats">
@@ -1297,61 +1297,7 @@
     else toast('卸载失败：' + (result.message ?? result.reason ?? '未知'), 'bad')
   }
 
-  /** 插件商店：只读卡片 + 搜索。安装按钮只负责"带你去 NapCat 的商店页"，不代下不代装。 */
-  let storeCache = []
-  let storeQuery = ''
-  function renderStore() {
-    const body = $('storeList') ?? $('storeBody')
-    const query = storeQuery.trim().toLowerCase()
-    const list = query === '' ? storeCache : storeCache.filter((item) =>
-      [item.name, item.id, item.description, item.author, ...(item.tags ?? [])].join(' ').toLowerCase().includes(query))
-    $('storeBadge').textContent = list.length + ' / ' + storeCache.length + ' 个'
-    if (list.length === 0) { body.innerHTML = '<div class="empty">没有匹配的插件</div>'; return }
-    body.innerHTML = list.map((item) => {
-      const tags = (item.tags ?? []).map((tag) => '<span class="tag">' + tag + '</span>').join(' ')
-      return '<div style="padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--bg);margin-bottom:12px">'
-        + '<div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;flex-wrap:wrap">'
-        + '<b style="font-size:15px">' + (item.name ?? item.id) + '</b>'
-        + '<span class="sub" style="margin:0">v' + (item.version ?? '—') + ' · ' + (item.author ?? '未知作者') + '</span></div>'
-        + '<div style="margin:6px 0;font-size:13px;color:var(--muted)">' + (item.description ?? '') + '</div>'
-        + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' + tags
-        + (item.minVersion ? '<span class="sub" style="margin:0">需 NapCat ≥ ' + item.minVersion + '</span>' : '') + '</div>'
-        + '<div class="row" style="margin-top:10px"><button data-download="' + item.id + '" class="primary">下载 zip</button>'
-        + (item.homepage ? '<a class="sub" style="margin:0" href="' + item.homepage + '" target="_blank" rel="noopener noreferrer">主页</a>' : '')
-        + '</div></div>'
-    }).join('')
-    for (const btn of body.querySelectorAll('[data-download]')) btn.onclick = () => downloadPlugin(btn.dataset.download, btn)
-  }
-  async function loadStore() {
-    const btn = $('btn-store'); busy(btn, true, '读取中…')
-    const data = await api('/api/accounts/store'); busy(btn, false)
-    const body = $('storeBody')
-    if (data.ok !== true) {
-      $('storeBadge').textContent = KIND[data.kind] ?? '失败'
-      body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? '取不到商店列表') + '</div>'
-      return
-    }
-    storeCache = Array.isArray(data.data?.plugins) ? data.data.plugins : []
-    body.innerHTML = '<div class="row" style="margin-bottom:12px"><input id="storeSearch" placeholder="搜索插件名 / 作者 / 标签…" style="flex:1;min-width:220px" value="' + storeQuery.replace(/"/g, '&quot;') + '"></div><div id="storeList"></div>'
-    $('storeSearch').oninput = (event) => { storeQuery = event.target.value; renderStore() }
-    renderStore()
-    opLog('刷新插件商店')
-  }
-  async function downloadPlugin(id, btn) {
-    busy(btn, true, '下载中…')
-    const result = await post('/api/accounts/store/download', { id })
-    busy(btn, false)
-    if (result.ok === true) { toast('已下载：' + (result.file ?? ''), 'ok'); opLog('下载插件 ' + id) }
-    else toast('下载失败：' + (result.message ?? result.reason ?? '未知'), 'bad')
-  }
-
-  async function openNapcatStore() {
-    const data = await api('/api/napcat/webui')
-    if (data.ok === true && data.url) { window.open(data.url, '_blank', 'noopener'); opLog('打开 NapCat 插件商店') }
-    else toast('打开失败：' + (data.message ?? data.reason ?? '未知'), 'bad')
-  }
-
-  /** 设备与版本：GUID 备份明细 + 三个接口的可用性（都只读）。 */
+          /** 设备与版本：GUID 备份明细 + 三个接口的可用性（都只读）。 */
   async function loadDevice() {
     const btn = $('btnGuid'); busy(btn, true, '查询中…')
     const [guid, meta] = await Promise.all([api('/api/accounts/guid'), api('/api/accounts/meta')])
