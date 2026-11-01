@@ -1230,11 +1230,7 @@
       const saveAllBtn = toolbar.querySelector('[data-saveall]')
       if (saveAllBtn) saveAllBtn.onclick = () => saveAllNetwork(saveAllBtn)
       const newBtn = toolbar.querySelector('[data-newnet]')
-      if (newBtn) newBtn.onclick = () => {
-        const target = netDraft.findIndex((row) => row.file)
-        if (target < 0) { toast('没有可写入的账号配置', 'bad'); return }
-        addClient(target)
-      }
+      if (newBtn) newBtn.onclick = () => openNewDialog()
     }
 
     if (netDraft.length === 0) { body.innerHTML = '<div class="empty">没有 onebot11_*.json</div>'; return }
@@ -1257,15 +1253,13 @@
         })
         if (row.clients.length === 0) {
           cards.push('<div class="card" style="padding:16px"><b>QQ ' + row.uin + '</b>'
-            + '<div class="sub" style="margin:6px 0 10px">还没有 WS 客户端连接</div>'
-            + '<button data-add="' + uinIndex + '">新建连接</button></div>')
+            + '<div class="sub" style="margin:6px 0 0">还没有 WS 客户端连接（用上面的「新增」添加）</div></div>')
         }
       }
       if (netFilter === 'all' || netFilter === 'ws-server') {
         if ((row.servers ?? []).length === 0) {
           cards.push('<div class="card" style="padding:16px"><b>WS 服务器</b>'
-            + '<div class="sub" style="margin:6px 0 10px">QQ ' + row.uin + ' 还没有 WS 服务器</div>'
-            + '<button data-addserver="' + uinIndex + '">新建 WS 服务器</button></div>')
+            + '<div class="sub" style="margin:6px 0 0">QQ ' + row.uin + ' 还没有 WS 服务器（用上面的「新增」添加）</div></div>')
         } else {
           cards.push('<div class="card" style="padding:16px;display:flex;align-items:center;justify-content:space-between">'
             + '<div><b>WS 服务器</b><div class="sub" style="margin:4px 0 0">QQ ' + row.uin + ' · 共 ' + row.servers.length + ' 个</div></div>'
@@ -1287,8 +1281,7 @@
       if (netFilter === 'all' || netFilter === 'http-server') {
         if ((row.https ?? []).length === 0) {
           cards.push('<div class="card" style="padding:16px"><b>HTTP 服务器</b>'
-            + '<div class="sub" style="margin:6px 0 10px">QQ ' + row.uin + ' 还没有 HTTP 服务器</div>'
-            + '<button data-addhttp="' + uinIndex + '">新建 HTTP 服务器</button></div>')
+            + '<div class="sub" style="margin:6px 0 0">QQ ' + row.uin + ' 还没有 HTTP 服务器（用上面的「新增」添加）</div></div>')
         } else {
           cards.push('<div class="card" style="padding:16px;display:flex;align-items:center;justify-content:space-between">'
             + '<div><b>HTTP 服务器</b><div class="sub" style="margin:4px 0 0">QQ ' + row.uin + ' · 共 ' + row.https.length + ' 个</div></div>'
@@ -1369,6 +1362,36 @@
     netDirty = true
     row.servers.push({ name: 'ws-server-' + (row.servers.length + 1), port: 3001, host: '', enable: true })
     renderNetwork()
+  }
+
+  /** 顶部「新增」：先选类型与账号，再落到对应的新增函数。 */
+  function openNewDialog() {
+    const accountsWithFile = netDraft.map((row, index) => ({ row, index })).filter((item) => item.row.file)
+    if (accountsWithFile.length === 0) { toast('没有可写入的账号配置', 'bad'); return }
+    const mask = document.createElement('div')
+    mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9998'
+    const box = document.createElement('div')
+    box.className = 'card'
+    box.style.cssText = 'padding:20px;min-width:320px;max-width:420px'
+    box.innerHTML = '<h3 style="margin:0 0 12px;font-size:15px">新增连接</h3>'
+      + '<div class="row" style="margin-bottom:10px"><label class="sub" style="margin:0;width:56px">类型</label>'
+      + '<select id="newType" style="flex:1"><option value="ws-client">Websocket 客户端</option><option value="ws-server">Websocket 服务器</option><option value="http-server">HTTP 服务器</option></select></div>'
+      + '<div class="row" style="margin-bottom:14px"><label class="sub" style="margin:0;width:56px">账号</label>'
+      + '<select id="newUin" style="flex:1">' + accountsWithFile.map((item) => '<option value="' + item.index + '">QQ ' + item.row.uin + '</option>').join('') + '</select></div>'
+      + '<div class="row" style="justify-content:flex-end"><button id="newCancel">取消</button><button class="primary" id="newOk">新增</button></div>'
+    mask.appendChild(box)
+    document.body.appendChild(mask)
+    const close = () => mask.remove()
+    box.querySelector('#newCancel').onclick = close
+    mask.onclick = (event) => { if (event.target === mask) close() }
+    box.querySelector('#newOk').onclick = () => {
+      const type = box.querySelector('#newType').value
+      const index = Number(box.querySelector('#newUin').value)
+      close()
+      if (type === 'ws-client') addClient(index)
+      else if (type === 'ws-server') addServer(index)
+      else addHttpServer(index)
+    }
   }
 
   function addHttpServer(uinIndex) {
