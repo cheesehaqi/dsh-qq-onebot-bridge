@@ -648,6 +648,60 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       }
     },
     /**
+     * **整组替换** WS 客户端（对应页面上的 新建 / 删除 / 启停 / 编辑）。
+     * 与 updateNetwork 的区别：那个是"按 URL 列表整体覆盖"，这里是"带 name/enable 的条目"，
+     * 并且只改 websocketClients 一个数组，其它网络段原样不动。
+     * 规矩：校验 URL 与条数 → 备份 .bak → 写入；任何一步失败都不写。
+     */
+    saveNetworkClients({ uin, clients = [], now = () => Date.now() } = {}) {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      if (dir === '') return { ok: false, kind: 'no-config', message: config.reason || '没有可用的 WebUI 配置' }
+      const clean = String(uin ?? '').trim()
+      if (!/^\d{5,12}$/.test(clean)) return { ok: false, kind: 'bad-input', message: 'QQ 号格式不对' }
+      if (Array.isArray(clients) === false) return { ok: false, kind: 'bad-input', message: 'clients 必须是数组' }
+      if (clients.length > 8) return { ok: false, kind: 'bad-input', message: '最多 8 条 WS 客户端' }
+      const file = join(dir, 'onebot11_' + clean + '.json')
+      if (existsSync(file) === false) return { ok: false, kind: 'not-found', message: '没有这个账号的 OneBot 配置：' + file }
+
+      const next = []
+      for (const item of clients) {
+        const url = String(item?.url ?? '').trim()
+        if (url === '') continue
+        if (url.length > 300) return { ok: false, kind: 'bad-input', message: '单条地址太长（>300 字）' }
+        if (/^wss?:\/\/[^\s]+$/i.test(url) === false) return { ok: false, kind: 'bad-input', message: '地址必须以 ws:// 或 wss:// 开头：' + url.slice(0, 80) }
+        next.push({
+          name: String(item?.name ?? '').trim() || ('ws-' + (next.length + 1)),
+          url,
+          enable: item?.enable !== false,
+          reportSelfMessage: false, token: '', messagePostFormat: 'array', debug: false, heartInterval: 30000, reconnectInterval: 3000,
+        })
+      }
+
+      let json
+      try { json = JSON.parse(readFileSync(file, 'utf8')) } catch (error) {
+        return { ok: false, kind: 'error', message: '配置读不出来：' + String(error?.message ?? error).slice(0, 100) }
+      }
+      const network = json.network ?? {}
+      const kept = Array.isArray(network.websocketClients) ? network.websocketClients : []
+      // 保留每条原有但界面上没暴露的字段（token / 心跳等），按 URL 匹配
+      const merged = next.map((entry) => {
+        const old = kept.find((item) => String(item.url ?? '') === entry.url)
+        return old ? { ...old, name: entry.name, enable: entry.enable, url: entry.url } : entry
+      })
+      network.websocketClients = merged
+      json.network = network
+
+      const backup = file + '.bak-' + new Date(now()).toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      try { copyFileSync(file, backup) } catch (error) {
+        return { ok: false, kind: 'error', message: '备份失败，未写入：' + String(error?.message ?? error).slice(0, 100) }
+      }
+      try { writeFileSync(file, JSON.stringify(json, null, 2) + '\n', 'utf8') } catch (error) {
+        return { ok: false, kind: 'error', message: '写入失败（备份在 ' + backup + '）：' + String(error?.message ?? error).slice(0, 100) }
+      }
+      return { ok: true, kind: 'ok', message: '已写入 ' + merged.length + ' 条（重启 NapCat 生效）', file, backup, requiresRestart: true, count: merged.length }
+    },
+    /**
      * 改 webui.json 的**端口与监听地址**（唯一允许动的两项）。
      * 规矩：
      *   ① 地址只接受回环（127.0.0.1 / ::1 / localhost）—— 不允许 0.0.0.0，避免把面板暴露到局域网；

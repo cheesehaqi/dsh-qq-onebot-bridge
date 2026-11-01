@@ -500,6 +500,11 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
             if (uin !== '' && !/^\d{5,12}$/.test(uin)) return { ok: false, message: 'QQ 号格式不对（留空 = 取消自动登录）' }
             return api.accounts.setAutoLogin(uin)
           },
+          // 网络配置：整组替换 WS 客户端（新建/删除/启停/编辑）
+          '/api/accounts/network/save': () => {
+            if (typeof api.accounts?.saveNetworkClients !== 'function') return { ok: false, message: '当前控制台不支持保存网络配置' }
+            return api.accounts.saveNetworkClients({ uin: String(body.uin ?? '').trim(), clients: Array.isArray(body.clients) ? body.clients : [] })
+          },
           // 插件：建目录（只 mkdir）
           '/api/accounts/plugins/mkdir': () => {
             if (typeof api.accounts?.ensurePluginsDir !== 'function') return { ok: false, message: '当前控制台不支持创建插件目录' }

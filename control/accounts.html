@@ -1134,10 +1134,11 @@
     opLog('刷新' + id)
   }
   /**
-   * 网络配置（**唯一可写**的分区）。
-   * 规矩：只改 WS 客户端地址与 WS 服务端端口；保存前后端会把原文件备份成 .bak-*；
-   * 改完必须重启 NapCat 才生效 —— 界面上直接写清楚，别让人以为点完就通了。
+   * 网络配置（可写）：按 NapCat 的做法，一个 WS 客户端一张卡。
+   * 每张卡可改 名称 / URL / 启停，可删除；顶部可新建。保存时整组提交，写前由服务端备份。
    */
+  let netDraft = []      // [{ uin, clients: [{name,url,enable}] }]
+
   async function loadNetwork() {
     const btn = $('btn-network'); busy(btn, true, '读取中…')
     const data = await api('/api/accounts/network'); busy(btn, false)
@@ -1147,106 +1148,113 @@
       body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? '取不到网络配置') + '</div>'
       return
     }
-    const rows = data.accounts ?? []
-    $('networkBadge').textContent = rows.length + ' 个账号'
-    if (rows.length === 0) { body.innerHTML = '<div class="empty">没有 onebot11_*.json</div>'; return }
-    body.innerHTML = rows.map((row) => {
-      const urls = (row.clients ?? []).map((item) => item.url ?? '').filter(Boolean).join('\n')
-      const port = row.servers?.[0]?.port ?? ''
-      return '<div style="margin:10px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--bg)" data-uin="' + row.uin + '">'
-        + '<div style="display:flex;justify-content:space-between;align-items:center"><b>' + row.uin + '</b>'
-        + '<span class="sub" style="margin:0"><code>' + row.file + '</code></span></div>'
-        + (row.error ? '<div style="color:var(--danger);margin-top:6px">' + row.error + '</div>' : '')
-        + '<label class="sub" style="display:block;margin:10px 0 4px">WS 客户端地址（NapCat 连出去；一行一条，最多 8 条）</label>'
-        + '<textarea data-field="clients" rows="3" style="width:100%;font:12.5px/1.5 ui-monospace,Consolas,monospace;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg)">'
-        + urls.replace(/</g, '&lt;') + '</textarea>'
-        + '<label class="sub" style="display:block;margin:10px 0 4px">WS 服务端端口（别人连进来；留空 = 不改）</label>'
-        + '<input data-field="port" value="' + port + '" style="width:140px">'
-        + '<div class="row" style="margin-top:12px"><button data-save="' + row.uin + '" class="primary">保存</button>'
-        + '<button data-reset="' + row.uin + '">还原</button>'
-        + '<span class="sub" data-state="' + row.uin + '" style="margin:0"></span></div>'
-        + '<div class="sub" style="margin-top:8px">保存后<b>必须重启 NapCat</b> 才会重新读这份配置；原文件会备份成 <code>.bak-时间戳</code>。</div>'
-        + '</div>'
-    }).join('')
-    for (const btnSave of body.querySelectorAll('[data-save]')) {
-      btnSave.onclick = () => saveNetwork(btnSave.dataset.save, btnSave)
-    }
-    for (const btnReset of body.querySelectorAll('[data-reset]')) {
-      btnReset.onclick = () => loadNetwork()
-    }
+    netDraft = (data.accounts ?? []).map((row) => ({
+      uin: row.uin,
+      file: row.file,
+      clients: (row.clients ?? []).map((item, index) => ({
+        name: item.name ?? ('ws-' + (index + 1)),
+        url: item.url ?? '',
+        enable: item.enable !== false,
+      })),
+    }))
+    renderNetwork()
     opLog('刷新网络配置')
   }
 
-  async function saveNetwork(uin, btn) {
-    const box = btn.closest('[data-uin]')
-    const clients = box.querySelector('[data-field="clients"]').value.split('\n').map((line) => line.trim()).filter(Boolean)
-    const portRaw = box.querySelector('[data-field="port"]').value.trim()
-    const state = box.querySelector('[data-state]')
-    if (!confirm('改完需要重启 NapCat 才生效。现在写入吗？（会先备份原文件）')) return
+  function renderNetwork() {
+    const body = $('networkBody')
+    const total = netDraft.reduce((sum, row) => sum + row.clients.length, 0)
+    $('networkBadge').textContent = netDraft.length + ' 个账号 / ' + total + ' 条连接'
+    if (netDraft.length === 0) { body.innerHTML = '<div class="empty">没有 onebot11_*.json</div>'; return }
+    body.innerHTML = netDraft.map((row, uinIndex) => {
+      const cards = row.clients.length === 0
+        ? '<div class="empty">还没有 WS 客户端连接</div>'
+        : row.clients.map((client, index) => {
+          const on = client.enable !== false
+          return '<div style="border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--bg)">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">'
+            + '<b>' + escapeHtml(client.name || '未命名') + '</b>'
+            + '<button data-toggle="' + uinIndex + ':' + index + '" class="' + (on ? 'primary' : '') + '">' + (on ? '已启用' : '已停用') + '</button></div>'
+            + '<div class="sub" style="margin:0 0 6px">类型　Websocket 客户端</div>'
+            + '<div class="row" style="margin-bottom:8px"><input data-field="name:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.name) + '" placeholder="名称" style="width:150px">'
+            + '<input data-field="url:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.url) + '" placeholder="ws://127.0.0.1:6700/" style="flex:1;min-width:240px"></div>'
+            + '<div class="row"><button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button></div>'
+            + '</div>'
+        }).join('')
+      return '<div style="margin-bottom:18px">'
+        + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">'
+        + '<b>QQ ' + row.uin + '</b><span class="sub" style="margin:0"><code>' + row.file + '</code></span></div>'
+        + cards
+        + '<div class="row"><button data-add="' + uinIndex + '">新建连接</button>'
+        + '<button class="primary" data-save="' + uinIndex + '">保存这个账号</button>'
+        + '<span class="sub" data-state="' + uinIndex + '" style="margin:0"></span></div>'
+        + '</div>'
+    }).join('')
+
+    for (const el of body.querySelectorAll('[data-toggle]')) el.onclick = () => toggleClient(el.dataset.toggle)
+    for (const el of body.querySelectorAll('[data-del]')) el.onclick = () => removeClient(el.dataset.del)
+    for (const el of body.querySelectorAll('[data-add]')) el.onclick = () => addClient(Number(el.dataset.add))
+    for (const el of body.querySelectorAll('[data-save]')) el.onclick = () => saveNetwork(Number(el.dataset.save), el)
+    for (const el of body.querySelectorAll('[data-field]')) el.oninput = () => editField(el.dataset.field, el.value)
+  }
+
+  const splitKey = (key) => key.split(':').map((part, index) => (index === 0 ? part : Number(part)))
+
+  function editField(field, value) {
+    const [kind, uinIndex, clientIndex] = splitKey(field)
+    const client = netDraft[uinIndex]?.clients?.[clientIndex]
+    if (!client) return
+    if (kind === 'url') client.url = value
+    else if (kind === 'name') client.name = value
+  }
+
+  function toggleClient(key) {
+    const [uinIndex, clientIndex] = splitKey(key)
+    const client = netDraft[uinIndex]?.clients?.[clientIndex]
+    if (!client) return
+    client.enable = client.enable === false
+    renderNetwork()
+  }
+
+  function removeClient(key) {
+    const [uinIndex, clientIndex] = splitKey(key)
+    const row = netDraft[uinIndex]
+    if (!row) return
+    const client = row.clients[clientIndex]
+    if (!client) return
+    if (!confirm('删除这条连接「' + (client.name || client.url) + '」？保存后生效（写前会自动备份配置）。')) return
+    row.clients.splice(clientIndex, 1)
+    renderNetwork()
+  }
+
+  function addClient(uinIndex) {
+    const row = netDraft[uinIndex]
+    if (!row) return
+    if (row.clients.length >= 8) { toast('每个账号最多 8 条 WS 客户端', 'bad'); return }
+    row.clients.push({ name: 'ws-' + (row.clients.length + 1), url: '', enable: true })
+    renderNetwork()
+  }
+
+  async function saveNetwork(uinIndex, btn) {
+    const row = netDraft[uinIndex]
+    if (!row) return
+    const state = document.querySelector('[data-state="' + uinIndex + '"]')
+    const bad = row.clients.find((client) => /^wss?:\/\/[^\s]+$/i.test(String(client.url).trim()) === false)
+    if (bad) { if (state) state.textContent = '⚠️ 有地址不是 ws:// 或 wss:// 开头'; return }
+    if (!confirm('保存后需要重启 NapCat 才生效。现在写入吗？（写前会自动备份）')) return
     busy(btn, true, '保存中…')
-    const result = await post('/api/accounts/network', {
-      uin,
-      clients,
-      serverPort: portRaw === '' ? null : Number(portRaw),
-    })
+    const result = await post('/api/accounts/network/save', { uin: row.uin, clients: row.clients })
     busy(btn, false)
     if (result.ok === true) {
-      state.textContent = '✅ 已写入；重启 NapCat 后生效'
+      if (state) state.textContent = '✅ 已写入 ' + result.count + ' 条；重启后生效'
       toast('网络配置已写入（备份 ' + (result.backup ?? '').split(/[\\/]/).pop() + '）', 'ok')
-      opLog('保存网络配置 ' + uin)
+      opLog('保存网络配置 ' + row.uin)
     } else {
-      state.textContent = '⚠️ ' + (result.message ?? result.reason ?? '保存失败')
+      if (state) state.textContent = '⚠️ ' + (result.message ?? result.reason ?? '保存失败')
       toast('保存失败：' + (result.message ?? result.reason ?? '未知'), 'bad')
     }
   }
 
-  /** 文件管理：只读列表（不读内容）；要看/改就去资源管理器打开。 */
-  let filesDir = ''
-  const humanSize = (bytes) => {
-    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-    if (bytes < 1024) return bytes + ' B'
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
-    return (bytes / 1048576).toFixed(1) + ' MB'
-  }
-  async function loadFiles() {
-    const btn = $('btn-files'); busy(btn, true, '读取中…')
-    const data = await api('/api/accounts/files'); busy(btn, false)
-    const body = $('filesBody')
-    if (data.ok !== true) {
-      $('filesBadge').textContent = KIND[data.kind] ?? '失败'
-      body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? '取不到目录') + '</div>'
-      return
-    }
-    const entries = data.entries ?? []
-    filesDir = data.dir ?? ''
-    $('filesBadge').textContent = entries.length + ' 项'
-    body.innerHTML = entries.length === 0 ? '<div class="empty">目录是空的</div>'
-      : '<table><thead><tr><th>文件</th><th>大小</th><th>修改时间</th></tr></thead><tbody>'
-        + entries.map((entry) => '<tr><td><code>' + entry.name + '</code>' + (entry.isDir ? ' <span class="tag">目录</span>' : '') + '</td>'
-          + '<td>' + (entry.isDir ? '—' : humanSize(entry.size)) + '</td>'
-          + '<td class="sub" style="margin:0">' + (entry.mtime ? new Date(entry.mtime).toLocaleString('zh-CN', { hour12: false }) : '—') + '</td></tr>').join('')
-        + '</tbody></table>'
-    opLog('刷新文件列表')
-  }
-  const copyDirBtn = $('btn-copyDir')
-  if (copyDirBtn) copyDirBtn.onclick = async () => {
-    if (!filesDir) { toast('还没读到目录路径，先点「刷新列表」', 'bad'); return }
-    try {
-      await navigator.clipboard.writeText(filesDir)
-      toast('已复制：' + filesDir, 'ok')
-    } catch {
-      // 剪贴板被浏览器拦（非 https / 无权限）时，把路径塞进输入框让人手动复制
-      window.prompt('复制下面这行路径：', filesDir)
-    }
-    opLog('复制目录路径')
-  }
-  const openFilesBtn = $('btn-openFiles')
-  if (openFilesBtn) openFilesBtn.onclick = async (event) => {
-    event.preventDefault()
-    const data = await api('/api/accounts/open-folder')
-    if (data.ok === true) { toast('已打开：' + data.dir, 'ok'); opLog('打开 config 目录') }
-    else toast('打不开：' + (data.message ?? data.reason ?? '未知') + (data.dir ? '（目录：' + data.dir + '）' : ''), 'bad')
-  }
   /** 插件管理：真列表 + 启用/停用 + 卸载（卸载要二次确认）。 */
   let pluginCache = []
   async function loadPlugins() {
@@ -1323,6 +1331,35 @@
   }
 
   /** 分区加载器表（键 = 侧栏 data-tab）。定义在各自 loader 之后，避免 TDZ。 */
+  /** 文件管理：只读列表（不读内容）；打开目录/复制路径由服务端与本机组负责。 */
+  let filesDir = ''
+  const humanSize = (bytes) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / 1048576).toFixed(1) + ' MB'
+  }
+  async function loadFiles() {
+    const btn = $('btn-files'); busy(btn, true, '读取中…')
+    const data = await api('/api/accounts/files'); busy(btn, false)
+    const body = $('filesBody')
+    if (data.ok !== true) {
+      $('filesBadge').textContent = KIND[data.kind] ?? '失败'
+      body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? '取不到目录') + '</div>'
+      return
+    }
+    filesDir = data.dir ?? ''
+    const entries = data.entries ?? []
+    $('filesBadge').textContent = entries.length + ' 项'
+    body.innerHTML = entries.length === 0 ? '<div class="empty">目录是空的</div>'
+      : '<table><thead><tr><th>文件</th><th>大小</th><th>修改时间</th></tr></thead><tbody>'
+        + entries.map((entry) => '<tr><td><code>' + entry.name + '</code>' + (entry.isDir ? ' <span class="tag">目录</span>' : '') + '</td>'
+          + '<td>' + (entry.isDir ? '—' : humanSize(entry.size)) + '</td>'
+          + '<td class="sub" style="margin:0">' + (entry.mtime ? new Date(entry.mtime).toLocaleString('zh-CN', { hour12: false }) : '—') + '</td></tr>').join('')
+        + '</tbody></table>'
+    opLog('刷新文件列表')
+  }
+
   const LOADERS = { network: loadNetwork, files: loadFiles, plugins: loadPlugins, stats: loadStatsAndDevice, config: loadConfig, about: loadAbout }
   /** 调一个分区加载器；失败就把原因写进那个分区（否则只会"什么都不发生"）。 */
   const loadersafe = (tab) => {
