@@ -1364,7 +1364,7 @@
     renderNetwork()
   }
 
-  /** 顶部「新增」：先选类型与账号，再落到对应的新增函数。 */
+  /** 顶部「新建」：先选类型与账号，再落到对应的新建函数。 */
   function openNewDialog() {
     const accountsWithFile = netDraft.map((row, index) => ({ row, index })).filter((item) => item.row.file)
     if (accountsWithFile.length === 0) { toast('没有可写入的账号配置', 'bad'); return }
@@ -2000,7 +2000,7 @@
   const mkPluginsBtn = $('btn-mkPlugins')
   if (mkPluginsBtn) mkPluginsBtn.onclick = async () => {
     const data = await post('/api/accounts/plugins/mkdir', {})
-    if (data.ok === true) { toast(data.message + '：' + data.dir, 'ok'); opLog('新增插件目录') }
+    if (data.ok === true) { toast(data.message + '：' + data.dir, 'ok'); opLog('新建插件目录') }
     else toast('创建失败：' + (data.message ?? data.reason ?? '未知'), 'bad')
   }
   const installBtn = $('btn-pluginInstall')
