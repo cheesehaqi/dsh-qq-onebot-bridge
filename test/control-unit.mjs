@@ -289,8 +289,20 @@ check('重启接口同样要 token', noQr.status === 401, String(noQr.status))
   check('GET /api/napcat/webui 无 token 返回 401', noTokenRoute.status === 401, String(noTokenRoute.status))
   stubApi.napcatWebui = async () => ({ ok: true, url: 'http://127.0.0.1:6099/webui/?token=napcat-t', reason: '' })
   const withToken = await (await fetch(base + '/api/napcat/webui?token=' + token)).json()
-  check('带上 token 时返回的就是可直接打开的地址',
-    withToken.ok === true && withToken.url.includes('6099/webui/?token='), JSON.stringify(withToken))
+  // v0.7.11 隐私收紧：这里**不再返回 token**，只给裸地址；带 token 的跳转走 /api/napcat/open
+  check('带上 token 时只返回裸地址（不把 NapCat token 吐给前端）',
+    withToken.ok === true && withToken.hasToken === true && !/token=/.test(withToken.url), JSON.stringify(withToken))
+
+  const redirectRes = await fetch(base + '/api/napcat/open?token=' + token, { redirect: 'manual' })
+  const location = redirectRes.headers.get('location') ?? ''
+  check('GET /api/napcat/open 返回 302 且跳转地址带 token',
+    redirectRes.status === 302 && location.includes('6099/webui/?token=napcat-t'), String(redirectRes.status) + ' ' + location)
+
+  const pluginRes = await fetch(base + '/api/napcat/open?page=plugin_store&token=' + token, { redirect: 'manual' })
+  const pluginLocation = pluginRes.headers.get('location') ?? ''
+  check('page=plugin_store 时跳到插件商店路由',
+    pluginRes.status === 302 && pluginLocation.includes('/webui/plugin_store'), pluginLocation)
+
   delete stubApi.napcatWebui
   const unsupported = await (await fetch(base + '/api/napcat/webui?token=' + token)).json()
   check('控制台不支持该接口时如实说明（而不是 500）',

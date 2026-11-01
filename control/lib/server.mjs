@@ -237,7 +237,9 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
       // （NapCat 的 WebUI 有自己的 token，存在 bootmain/config/webui.json）。
     // v0.7.11 隐私收紧：NapCat token 不进 JSON，改 302 跳转（token 只在服务端拼接）
     if (request.method === 'GET' && path === '/api/napcat/open') {
-      const info = typeof api.napcatWebui === 'function' ? api.napcatWebui() : { ok: false }
+      const unsupported = typeof api.napcatWebui !== 'function'
+      if (unsupported) { json(response, 200, { ok: false, reason: '当前控制台不支持该接口' }); return }
+      const info = await api.napcatWebui()
       if (info.ok !== true || !info.url) { json(response, 200, { ok: false, reason: '拿不到 NapCat WebUI 地址' }); return }
       let target = info.url
       try {
@@ -252,7 +254,8 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
 
     if (request.method === 'GET' && path === '/api/napcat/webui') {
       // 隐私收紧：只给不带 token 的地址；要带 token 打开请用 /api/napcat/open（302）
-      const info = typeof api.napcatWebui === 'function' ? api.napcatWebui() : { ok: false }
+      if (typeof api.napcatWebui !== 'function') { json(response, 200, { ok: false, reason: '当前控制台不支持该接口' }); return }
+      const info = await api.napcatWebui()
       if (info.ok !== true) { json(response, 200, { ok: false, reason: info.reason ?? '拿不到 NapCat WebUI 地址' }); return }
       let bare = info.url
       try { const parsed = new URL(info.url); parsed.search = ''; bare = parsed.toString() } catch { /* 原样 */ }
