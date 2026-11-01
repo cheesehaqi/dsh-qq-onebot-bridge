@@ -1688,7 +1688,7 @@
     let target = data.url
     try {
       const parsed = new URL(data.url)
-      parsed.pathname = '/webui/plugin'
+      parsed.pathname = '/webui/plugin_store'
       target = parsed.toString()
     } catch { /* 解析失败就用原地址 */ }
     window.open(target, '_blank', 'noopener')
