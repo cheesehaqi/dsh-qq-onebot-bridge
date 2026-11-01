@@ -785,6 +785,8 @@
   }
 
   function renderAccounts(rows, auto) {
+    state.accountRows = rows
+    state.autoUin = auto
     const body = $('accountRows')
     $('accountBadge').textContent = `${rows.length} 个`
     if (rows.length === 0) {
@@ -792,11 +794,12 @@
       return
     }
     const onlineUin = state.loginInfo?.uin ?? ''
+    const loggedIn = state.status?.data?.isLogin === true
     body.innerHTML = rows.map((row) => `<tr>
       <td><code>${row.uin}</code></td>
       <td>${row.hasOneBotConfig ? '<span class="tag ok">有</span>' : '<span class="tag">无</span>'}</td>
       <td>${row.hasNapCatConfig ? '<span class="tag ok">有</span>' : '<span class="tag">无</span>'}</td>
-      <td>${row.uin === onlineUin ? '<span class="tag ok">在线</span>' : '<span class="tag">—</span>'}</td>
+      <td>${row.uin === onlineUin ? '<span class="tag ok">在线</span>' : (loggedIn ? '<span class="tag">其它号</span>' : '<span class="tag">未登录</span>')}</td>
       <td>${row.uin === auto ? '<span class="tag star">自动登录</span>' : '<span class="tag">—</span>'}</td>
       <td style="text-align:right">
         <button data-quick="${row.uin}">快速登录</button>
@@ -844,6 +847,8 @@
       }
       if (!silent) { toast('登录状态已更新', 'ok'); opLog('查状态：' + (online ? '在线' : offline ? '离线' : '未登录')) }
       if (online && autoTimer !== null) { clearInterval(autoTimer); autoTimer = null; $('btnAutoRefresh').textContent = '自动刷新：关' }
+      // 登录信息变了就重绘账号表（否则"登录状态"列永远停在渲染时的旧值）
+      if (Array.isArray(state.accountRows)) renderAccounts(state.accountRows, state.autoUin ?? '')
       return status
     }
 
