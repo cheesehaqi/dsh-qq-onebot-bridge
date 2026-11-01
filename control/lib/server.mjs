@@ -425,6 +425,13 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         json(response, 200, await api.accounts.logs(url.searchParams.get('file') ?? ''))
         return
       }
+      // 0.8.1：配置备份的列表 / 还原 / 删除（删除是移到 config/_trash）
+      if (request.method === 'GET' && path === '/api/accounts/backups') {
+        if (typeof api.accounts?.listBackups !== 'function') { json(response, 200, { ok: false, reason: '当前控制台不支持备份管理', backups: [] }); return }
+        json(response, 200, api.accounts.listBackups())
+        return
+      }
+
       if (request.method === 'GET' && path === '/api/diagnose') {
         const result = await api.diagnose()
         json(response, 200, { ok: true, ...result })
@@ -522,6 +529,15 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
           '/api/accounts/network/save': () => {
             if (typeof api.accounts?.saveNetworkClients !== 'function') return { ok: false, message: '当前控制台不支持保存网络配置' }
             return api.accounts.saveNetworkClients({ uin: String(body.uin ?? '').trim(), clients: Array.isArray(body.clients) ? body.clients : [] })
+          },
+          // 0.8.1：备份还原 / 移入回收
+          '/api/accounts/backups/restore': () => {
+            if (typeof api.accounts?.restoreBackup !== 'function') return { ok: false, message: '当前控制台不支持还原备份' }
+            return api.accounts.restoreBackup(String(body.name ?? ''))
+          },
+          '/api/accounts/backups/trash': () => {
+            if (typeof api.accounts?.trashBackup !== 'function') return { ok: false, message: '当前控制台不支持删除备份' }
+            return api.accounts.trashBackup(String(body.name ?? ''))
           },
           // 插件：建目录（只 mkdir）
           '/api/accounts/plugins/mkdir': () => {

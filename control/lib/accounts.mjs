@@ -753,6 +753,84 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       }
     },
     /** config 目录（给"在资源管理器里打开"用）。 */
+    /**
+     * 配置备份列表（`*.bak-*`）：我们自己每次写配置前都会留一份，这里让人看得到、能还原。
+     * 只认 config 目录下一层、且文件名里含 `.bak-` 的文件。
+     */
+    listBackups() {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      if (dir === '') return { ok: false, kind: 'no-config', message: '找不到 config 目录', backups: [] }
+      let names = []
+      try { names = readdirSync(dir) } catch (error) {
+        return { ok: false, kind: 'error', message: String(error?.message ?? error).slice(0, 100), backups: [] }
+      }
+      const backups = names
+        .filter((name) => name.includes('.bak-'))
+        .map((name) => {
+          const full = join(dir, name)
+          let size = 0
+          let mtime = 0
+          try { const info = statSync(full); size = info.size; mtime = info.mtimeMs } catch { /* 忽略 */ }
+          const [base, stamp = ''] = name.split('.bak-')
+          return { name, base, stamp, size, mtime, dir }
+        })
+        .sort((a, b) => b.mtime - a.mtime)
+      return { ok: true, kind: 'ok', message: '', dir, backups }
+    },
+
+    /**
+     * 还原备份：把 `<base>.bak-<stamp>` 覆盖回 `<base>`。
+     * 还原前**先把当前文件另存一份** `.pre-restore-<时间>`，所以还原本身也可撤销。
+     */
+    restoreBackup(name, { now = () => Date.now() } = {}) {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      const clean = String(name ?? '')
+      if (dir === '' || clean === '' || /[\\/]/.test(clean) || clean.includes('..')) {
+        return { ok: false, kind: 'bad-input', message: '只接受 config 目录下的备份文件名' }
+      }
+      if (clean.includes('.bak-') === false) return { ok: false, kind: 'bad-input', message: '这不是备份文件：' + clean }
+      const source = join(dir, clean)
+      if (existsSync(source) === false) return { ok: false, kind: 'not-found', message: '备份不存在：' + clean }
+      const target = join(dir, clean.split('.bak-')[0])
+      if (target === source) return { ok: false, kind: 'bad-input', message: '目标与备份同名，拒绝执行' }
+      const safety = target + '.pre-restore-' + new Date(now()).toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      try {
+        if (existsSync(target)) copyFileSync(target, safety)
+        copyFileSync(source, target)
+        return { ok: true, kind: 'ok', message: '已还原 ' + clean + ' → ' + clean.split('.bak-')[0] + '；还原前的内容另存为 ' + safety.split(/[\\/]/).pop(), target, safety }
+      } catch (error) {
+        return { ok: false, kind: 'error', message: '还原失败：' + String(error?.message ?? error).slice(0, 120) }
+      }
+    },
+
+    /**
+     * 删除备份：**不真删** —— 移到 config/_trash/<时间戳>/ 下。
+     * （仓库与用户规则都是"删除先进回收站"，这里给配置备份也留同样的后路。）
+     */
+    trashBackup(name, { now = () => Date.now() } = {}) {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      const clean = String(name ?? '')
+      if (dir === '' || clean === '' || /[\\/]/.test(clean) || clean.includes('..')) {
+        return { ok: false, kind: 'bad-input', message: '只接受 config 目录下的备份文件名' }
+      }
+      if (clean.includes('.bak-') === false) return { ok: false, kind: 'bad-input', message: '这不是备份文件：' + clean }
+      const source = join(dir, clean)
+      if (existsSync(source) === false) return { ok: false, kind: 'not-found', message: '备份不存在：' + clean }
+      const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      const trashDir = join(dir, '_trash', stamp)
+      try {
+        mkdirSync(trashDir, { recursive: true })
+        const dest = join(trashDir, clean)
+        copyFileSync(source, dest)
+        unlinkSync(source)
+        return { ok: true, kind: 'ok', message: '已移到 ' + dest, dest }
+      } catch (error) {
+        return { ok: false, kind: 'error', message: '移入回收失败：' + String(error?.message ?? error).slice(0, 120) }
+      }
+    },
     /** 确保插件目录存在（config/plugins）：只 mkdir，不下载、不安装。 */
     ensurePluginsDir() {
       const config = readConfig()

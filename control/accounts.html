@@ -403,6 +403,9 @@
       <h2>文件管理 <span class="badge" id="filesBadge">—</span></h2>
       <p class="sub">列 bootmain/config 目录（只读）<code style="margin-left:6px">/api/accounts/files</code></p>
       <div id="filesBody" class="empty">切换到这里会自动加载</div>
+      <h3 style="font-size:13px;margin:18px 0 8px">配置备份 <span class="badge" id="backupBadge">—</span></h3>
+      <p class="sub" style="margin:0 0 10px">每次写配置前都会留一份 <code>.bak-时间戳</code>；还原前会把当前文件另存 <code>.pre-restore-*</code>，删除是移到 <code>config/_trash/</code>，都不会真删。</p>
+      <div id="backupRows" class="empty">切换到这里会自动加载</div>
       <div class="row" style="margin-top:14px"><button id="btn-files">刷新</button>
         <button class="primary" id="btn-openFiles">在资源管理器中打开 →</button>
         <button id="btn-copyDir">复制目录路径</button>
@@ -459,7 +462,10 @@
       <h2>关于 <span class="badge" id="aboutBadge">—</span></h2>
       <p class="sub">版本 / 哈希 / 镜像<code style="margin-left:6px">/api/accounts/about</code></p>
       <div id="aboutBody" class="empty">切换到这里会自动加载</div>
-      <div class="row" style="margin-top:14px"><button id="btn-about">刷新</button></div>
+      <div class="row" style="margin-top:14px">
+        <button id="btn-about">刷新</button>
+        <button class="primary" id="btnExport">导出诊断包（脱敏）</button>
+      </div>
     </div></section>
 
     <section class="section" id="tab-test">
@@ -543,6 +549,7 @@
           <button id="btnLogMode">切到历史</button>
           <button id="btnLogRefresh">重连</button>
           <button class="primary" id="btnLogFold">折叠超长行：开</button>
+          <button id="btnLogInfoOnly">只看 Info 以上</button>
           <button id="btnLogAuto" class="hidden">自动刷新：关</button>
           <button id="btnLogCopy">复制</button>
           <button id="btnLogDownload">下载</button>
@@ -652,13 +659,33 @@
     while (box.children.length > 3) box.firstElementChild.remove()
     setTimeout(() => el.remove(), kind === 'bad' ? 6000 : 3500)
   }
+  /** 操作记录：写进 localStorage（最多 200 条），刷新页面不再清空。 */
+  const OP_LOG_KEY = 'qq-account-oplog'
+  const readOpLog = () => {
+    try {
+      const raw = localStorage.getItem(OP_LOG_KEY)
+      const list = raw ? JSON.parse(raw) : []
+      return Array.isArray(list) ? list : []
+    } catch { return [] }
+  }
+  const writeOpLog = (entry) => {
+    try {
+      const list = readOpLog()
+      list.unshift(entry)
+      localStorage.setItem(OP_LOG_KEY, JSON.stringify(list.slice(0, 200)))
+    } catch { /* 隐私模式写不了，忽略 */ }
+  }
+  const renderOpLog = () => {
+    const box = $('opLog')
+    const entries = readOpLog()
+    box.innerHTML = entries.length === 0
+      ? '<li class="empty">还没有操作</li>'
+      : entries.slice(0, 50).map((entry) => '<li>' + escapeHtml(entry) + '</li>').join('')
+  }
   const opLog = (text) => {
-    const list = $('opLog')
-    list.querySelector('.empty')?.remove()
-    const li = document.createElement('li')
-    li.textContent = `${new Date().toLocaleTimeString('zh-CN', { hour12: false })}  ${text}`
-    list.prepend(li)
-    while (list.children.length > 12) list.lastElementChild.remove()
+    const entry = `${new Date().toLocaleString('zh-CN', { hour12: false })}  ${text}`
+    writeOpLog(entry)
+    renderOpLog()
   }
   const api = async (path, options = {}) => {
     const url = `${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
@@ -1420,6 +1447,13 @@
     $('apiSys').innerHTML = (sys === null || sys === undefined) ? mark(false) : (mark(true) + ' ' + (sys.cpu?.model ?? ''))
   }
 
+  const exportBtn = $('btnExport')
+  if (exportBtn) exportBtn.onclick = () => {
+    // 走控制台已有的 /api/export：redact=1 → QQ 号掩码、消息只留长度，可直接发人
+    window.open('/api/export?redact=1&token=' + encodeURIComponent(token), '_blank', 'noopener')
+    opLog('导出诊断包（脱敏）')
+  }
+
   /** 分区加载器表（键 = 侧栏 data-tab）。定义在各自 loader 之后，避免 TDZ。 */
   /** 文件管理：只读列表（不读内容）；打开目录/复制路径由服务端与本机组负责。 */
   let filesDir = ''
@@ -1611,6 +1645,7 @@
   const escapeHtml = (value) => String(value).replace(/[&<>]/g, (ch) => ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : '&gt;')
   /** 超长行折叠：NapCat 会打几百 KB 的单行（数字数组、JSON 包体），逐字折行就成了"一堵墙"。 */
   let logFoldLong = true
+  let logInfoOnly = false   // 只看 Info 以上（藏掉 DEBUG）
   const FOLD_LIMIT = 600
   const foldLongLine = (line) => {
     if (logFoldLong !== true) return line
@@ -1627,6 +1662,7 @@
       const lv = levelOf(line)
       counts[lv] += 1
       if (level !== 'all' && lv !== level) continue
+      if (logInfoOnly === true && lv === 'debug') continue
       if (keyword !== '' && !line.toLowerCase().includes(keyword)) continue
       // 相邻完全相同的行只留一条（实时帧与历史合并时常见），避免"同一行刷两遍"
       if (kept.length > 0 && kept[kept.length - 1] === line) continue
@@ -1657,7 +1693,12 @@
           + '<div class="sub" style="margin:4px 0 0">扫码失败就点开「登录 / 扫码」页，那里可以刷新二维码。</div></div></div>'
       }).join('\n')
     } else {
-      pre.textContent = logText || (rawLines.length === 0 ? '（空）' : '（当前筛选没有匹配行）')
+      // 有搜索词时高亮：先把关键词转义成正则片段，再在转义后的文本上包 <mark>
+      const safeKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, function (ch) { return '\\' + ch })
+      const pattern = new RegExp('(' + safeKeyword + ')', 'gi')
+      pre.innerHTML = kept.map(function (line) {
+        return escapeHtml(line).replace(pattern, '<mark style="background:var(--warn-soft);color:inherit;border-radius:3px">$1</mark>')
+      }).join('\n')
     }
     $('logBadge').textContent = kept.length + '/' + rawLines.length + ' 行' + (level === 'all' ? '' : ' · ' + level)
     if (follow) pre.scrollTop = pre.scrollHeight
@@ -1747,7 +1788,14 @@
     if (refreshBtn === null) continue
     refreshBtn.onclick = () => LOADERS[id]()
   }
-    const foldBtn = $('btnLogFold')
+    const infoOnlyBtn = $('btnLogInfoOnly')
+  if (infoOnlyBtn) infoOnlyBtn.onclick = () => {
+    logInfoOnly = logInfoOnly !== true
+    infoOnlyBtn.classList.toggle('primary', logInfoOnly)
+    infoOnlyBtn.textContent = logInfoOnly ? '只看 Info 以上：开' : '只看 Info 以上'
+    renderLines()
+  }
+  const foldBtn = $('btnLogFold')
   if (foldBtn) foldBtn.onclick = () => {
     logFoldLong = logFoldLong !== true
     foldBtn.textContent = logFoldLong ? '折叠超长行：开' : '折叠超长行：关'
@@ -1880,6 +1928,8 @@
     const current = document.querySelector('.nav[data-tab].active')?.dataset.tab ?? 'home'
     moveIndicator(current, { instant: true })
   })
+
+  renderOpLog()
 
   const initialTab = (location.hash || '').replace('#', '')
   if (initialTab !== '' && titles[initialTab]) {
