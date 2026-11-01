@@ -253,7 +253,6 @@
       <div class="nav" data-tab="logs"><span class="ico">🪵</span>猫猫日志</div>
       <div class="nav" data-tab="files"><span class="ico">📁</span>文件管理</div>
       <div class="nav" data-tab="plugins"><span class="ico">🧩</span>插件管理</div>
-      <div class="nav" data-tab="store"><span class="ico">🛍️</span>插件商店</div>
       <div class="nav" data-tab="stats"><span class="ico">📊</span>运行与设备</div>
       <div class="nav" data-tab="config"><span class="ico">⚙️</span>系统配置</div>
       <div class="nav" data-tab="test"><span class="ico">🧪</span>实时测试</div>
@@ -396,13 +395,6 @@
         <button id="btn-pluginInstall">去 NapCat 安装 →</button>
       </div>
       <p class="sub" style="margin-top:10px">插件目录：<code>…\NapCat\bootmain\config\plugins</code>。商店里点「下载 zip」会把文件放进它的 <code>_downloads/</code> 子目录；把解压后的插件文件夹放到 plugins 下，重启 NapCat 即加载。列表显示 0 个是因为 NapCat 的插件管理器未加载，不是这里读错了。</p>
-    </div></section>
-
-    <section class="section" id="tab-store"><div class="card wide">
-      <h2>插件商店 <span class="badge" id="storeBadge">—</span></h2>
-      <p class="sub">只读列表；安装请在 NapCat 自己的商店里点<code style="margin-left:6px">/api/accounts/store</code></p>
-      <div id="storeBody" class="empty">切换到这里会自动加载</div>
-      <div class="row" style="margin-top:14px"><button id="btn-store">刷新</button></div>
     </div></section>
 
     <section class="section" id="tab-stats">
@@ -567,7 +559,7 @@
   $('backLink').href = token ? `./?token=${encodeURIComponent(token)}` : './'
 
   // ---------- 侧栏 tab ----------
-  const titles = { home: '基础信息', accounts: '账号配置', network: '网络配置', logs: '猫猫日志', files: '文件管理', plugins: '插件管理', store: '插件商店', stats: '运行与设备', config: '系统配置', log: '操作记录', about: '关于', test: '实时测试' }
+  const titles = { home: '基础信息', accounts: '账号配置', network: '网络配置', logs: '猫猫日志', files: '文件管理', plugins: '插件管理', stats: '运行与设备', config: '系统配置', log: '操作记录', about: '关于', test: '实时测试' }
   /**
    * 切换分区（也支持 `#network` 这种 hash 直达）。
    * 为什么加 hash：调试时经常要把"某个页面"直接发给人或收藏起来，纯 JS 切页做不到。
@@ -680,7 +672,6 @@
 
   // ---------- 状态 ----------
   const state = { meta: null, status: null, quick: [], loginInfo: null }
-
 
   const setGauge = (barId, numId, subId, percent, label, sub) => {
     const bar = $(barId)
@@ -911,7 +902,6 @@
     $('btnAutoRefresh').textContent = '自动刷新：开（5s）'
     toast('每 5 秒刷新登录状态，登录成功后自动停', 'ok')
   }
-
 
   // ---------- 主题（跟随 / 亮 / 暗） ----------
   const THEME_KEY = 'qq-account-theme'
@@ -1387,7 +1377,7 @@
   }
 
   /** 分区加载器表（键 = 侧栏 data-tab）。定义在各自 loader 之后，避免 TDZ。 */
-  const LOADERS = { network: loadNetwork, files: loadFiles, plugins: loadPlugins, store: loadStore, stats: loadStatsAndDevice, config: loadConfig, about: loadAbout }
+  const LOADERS = { network: loadNetwork, files: loadFiles, plugins: loadPlugins, stats: loadStatsAndDevice, config: loadConfig, about: loadAbout }
   /** 调一个分区加载器；失败就把原因写进那个分区（否则只会"什么都不发生"）。 */
   const loadersafe = (tab) => {
     const body = $(tab + 'Body')
