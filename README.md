@@ -2,7 +2,7 @@
 
 QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱动 DSH agent 会话，agent 回复自动发回 QQ。
 
-当前版本 **v0.8.0** · [发布记录（Releases）](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [更新日志](CHANGELOG.md)
+当前版本 **v0.8.1** · [发布记录（Releases）](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [更新日志](CHANGELOG.md)
 
 ## 架构
 
@@ -600,11 +600,11 @@ npm run shortcut
 
 最近五个版本（始终滚动展示）：
 
+- **v0.8.1** — 「让控制台能自证」：配置备份管理（还原前另存 `.pre-restore-*`、删除移到 `config/_trash`）、操作记录持久化、日志关键词高亮 + 只看 Info 以上、一键导出脱敏诊断包、网络配置的 **WS 服务器与 HTTP 服务器段可编辑**，以及「新建」入口统一
 - **v0.8.0** — 「本地账号中心」：`/accounts` 11 个分区（基础信息 / 账号配置 / 网络配置 / 文件 / 插件 / 运行日志 / 实时测试 / 运行与设备 / 系统配置 / 操作记录 / 关于）；网络配置可增删改与启停、系统配置可改端口与回环地址、插件可启停卸载，写前均有 `.bak` 备份；实时测试支持「单发 / 即时调试 15 秒」并能点开事件看完整链路；修掉 `assistantText` 在 `content` 非数组时崩溃（会吞掉整条回复）
 - **v0.7.10** — 「能力体检 + 两处测试口径修正」：① **`/能力体检`**（`lib/conformance.js`）—— 21 个**只读**探针（状态/版本/登录号/群与好友/成员/荣誉/精华/公告/群文件/历史消息/@全体余量/禁言名单/群打卡/群相册/系统消息…），逐个分类成「支持 / 不支持 / 参数不符 / 权限不足 / 无响应 / 没有数据」，回答"这功能是真不支持还是我没用到"；写操作**永远不探**，且 `assertProbeSafety()` 会拒绝任何 `send_/set_/delete_/upload_/mark_` 条目 —— 手滑加一条写操作，体检直接拒跑。结果落到 trace、面板「高级与调试」与 `knownUnsupported`。② 两处测试口径：`inject-guard-unit` 的 7 处数组全等改成**后缀匹配**（宿主给正文加前缀不再整段崩，且不会把「注入的消息」认成「注入的消息二」）；`privacy-unit` 区分「git 检出缺 `.gitignore`（照红）」与「npm 包形态缺（显式跳过）」。面板不变（87 键）。
 - **v0.7.9** — 「换桥会怎样 + 防线三」：① **能力矩阵**（`lib/capability.js`）—— 插件一共调 71 个 OneBot action，按 **standard 32 / extension 31 / napcat 4** 三层分级；连上后读 `get_version_info` 认实现（NapCat/LLOneBot/Lagrange/…），`#call` 唯一出口挂**被动账本**（成功计数、失败记次数与错误，**不记参数**），首次失败写一条 warn trace 并直接判断「大概率是当前实现不支持」还是「查连接/权限」；`/health` 与面板「高级与调试」都能看到；新增 **docs/COMPAT.md 中英**（三层表 + 换实现检查清单）。② **出站脱敏**（防线三，`outboundRedactEnabled` 默认关）—— 发送前把 `sk-…` / `gh*_…` / `AKIA…` / JWT / `Bearer …` / 整段私钥打码（保留首尾），`outboundRedactBlock` 可改成整条拦下；**QQ 号/手机号/URL 不碰**；收口在 `sendSegments`（16 个出站调用点全覆盖）；trace 只写命中的规则名、**不写原文**。③ 面板「安全与风控」「高级与调试」两组新增状态行；至此三道防线齐：注入 dry-run → 污点窗口 → 出站脱敏。
 - **v0.7.8** — 「自定义注入句式 + 四处收拾」：① **`taintExtraPatterns`**（正则数组，默认空）—— 污点窗口除了内置 8 条，还能让管理员按群补句式（≤20 条 / 每条 ≤200 字 / 大小写不敏感 / 内置优先）；**坏正则不静默**：面板点保存时服务端先编译，语法错当场 400 且不改文件；配置文件里手写错的，桥启动时写 trace 点名。② 面板说明讲清「只覆盖约三分之一」（235 个键里登记 84 个，连接/端口/token/模型参数只在 YAML 里），并新增「面板键 ⊆ schema」的测试防线。③ 新增 **`.gitattributes`**（`* text=auto eol=lf`），消掉每次提交的 CRLF 噪音。④ `package.json` 补 `engines.node>=20` 与 `author`。⑤ 新增 **`docs/EXTENSIONS.md` 中英**（扩展接缝参考：出口 API / 只读事件 / provider 七条规矩 / instanceId / 污点 source）；⑥ 修正 `punctuation: false` 的措辞（**仍会按上限分批**，只是不找标点）。
-- **v0.7.7** — 「按标点断句变成配置键」：新增 **`longReplySplitOnPunctuation`**（默认开，面板「对话基础」里一行）——`#replyTo` 的调用点直接读它，所以第三方不用再改我们的函数签名或调用点（v0.7.6 只给了函数参数，没接线）。只有**超过单条上限**的长回复才触发分批，普通对话看不到区别；关掉后**仍然会按单条上限切成多条**（分批不受影响），只是每批不再往回找标点、变成等长硬切。
 
 **更早的版本（v0.4 线及之前）见 [CHANGELOG.md](CHANGELOG.md)** —— 完整历史、每个版本的缺陷清单与测试计数都在那里。
 也可以直接在 [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) 页按版本过滤（每版都带 `compare/v上一版...v本版` 的 diff 链接）。
