@@ -367,12 +367,15 @@
       </div>
     </section>
 
-    <section class="section" id="tab-network"><div class="card wide">
-      <h2>网络配置 <span class="badge" id="networkBadge">—</span></h2>
-      <p class="sub">读 onebot11_*.json 的 servers（只读）<code style="margin-left:6px">/api/accounts/network</code></p>
-      <div id="networkBody" class="empty">切换到这里会自动加载</div>
-      <div class="row" style="margin-top:14px"><button id="btn-network">刷新</button></div>
-    </div></section>
+    <section class="section" id="tab-network">
+      <div class="row" style="justify-content:space-between;align-items:baseline;margin-bottom:12px">
+        <h2 style="margin:0">网络配置 <span class="badge" id="networkBadge">—</span></h2>
+        <span class="sub" style="margin:0">读 onebot11_*.json <code>/api/accounts/network</code></span>
+      </div>
+      <div class="row" id="networkToolbar" style="margin-bottom:12px"></div>
+      <div id="networkBody" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px"></div>
+      <div class="row" style="margin-top:16px"><button id="btn-network">刷新</button></div>
+    </section>
 
     <section class="section" id="tab-files"><div class="card wide">
       <h2>文件管理 <span class="badge" id="filesBadge">—</span></h2>
@@ -1173,77 +1176,72 @@
 
   function renderNetwork() {
     const body = $('networkBody')
+    const toolbar = $('networkToolbar')
     const total = netDraft.reduce((sum, row) => sum + row.clients.length + (row.servers?.length ?? 0) + (row.https?.length ?? 0), 0)
     $('networkBadge').textContent = netDraft.length + ' 个账号 / ' + total + ' 条连接'
-    if (netDraft.length === 0) { body.innerHTML = '<div class="empty">没有 onebot11_*.json</div>'; return }
-    const tabs = '<div class="row" style="margin-bottom:14px">'
-      + NET_TABS.map(([key, label]) => '<button data-filter="' + key + '" class="' + (netFilter === key ? 'primary' : '') + '">' + label + '</button>').join('')
-      + '<button data-newnet="1">新建</button>'
-      + '</div>'
-      + '<p class="sub" style="margin:-4px 0 14px">筛选与「新建」都在上面；新建会加到第一个有配置的账号下（WS 客户端）。服务器 / HTTP 段目前只读。</p>'
-    body.innerHTML = '<div style="max-width:1180px">' + tabs + netDraft.map((row, uinIndex) => {
-      const showClients = netFilter === 'all' || netFilter === 'ws-client'
-      const showServers = netFilter === 'all' || netFilter === 'ws-server'
-      const showHttp = netFilter === 'all' || netFilter === 'http-server'
-      const cards = (showClients === false || row.clients.length === 0)
-        ? '<div class="empty">还没有 WS 客户端连接</div>'
-        : row.clients.map((client, index) => {
-          if (showClients === false) return ''
-          const on = client.enable !== false
-          return '<div style="border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--bg)">'
-            + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">'
-            + '<b>' + escapeHtml(client.name || '未命名') + '</b>'
-            + '<button data-toggle="' + uinIndex + ':' + index + '" class="' + (on ? 'primary' : '') + '">' + (on ? '已启用' : '已停用') + '</button></div>'
-            + '<div class="sub" style="margin:0 0 6px">类型　Websocket 客户端</div>'
-            + '<div class="row" style="margin-bottom:8px"><input data-field="name:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.name) + '" placeholder="名称" style="width:200px;flex:0 0 200px">'
-            + '<input data-field="url:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.url) + '" placeholder="ws://127.0.0.1:6700/" style="flex:1 1 320px;min-width:320px"></div>'
-            + '<div class="row"><button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button></div>'
-            + '</div>'
-        }).join('')
-      const readOnlyCards = []
-      if (showServers) {
-        for (const server of (row.servers ?? [])) {
-          readOnlyCards.push('<div style="border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--bg)">'
-            + '<div style="display:flex;justify-content:space-between"><b>' + escapeHtml(server.name ?? 'ws-server') + '</b>'
-            + '<span class="tag">' + (server.enable === false ? '已停用' : '已启用') + '</span></div>'
-            + '<div class="sub" style="margin:6px 0 0">类型　Websocket 服务器</div>'
-            + '<div class="sub" style="margin:4px 0 0">端口　' + (server.port ?? '—') + '（只读）</div></div>')
-        }
-      }
-      if (showHttp) {
-        for (const http of (row.https ?? [])) {
-          readOnlyCards.push('<div style="border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--bg)">'
-            + '<div style="display:flex;justify-content:space-between"><b>' + escapeHtml(http.name ?? 'http-server') + '</b>'
-            + '<span class="tag">' + (http.enable === false ? '已停用' : '已启用') + '</span></div>'
-            + '<div class="sub" style="margin:6px 0 0">类型　HTTP 服务器</div>'
-            + '<div class="sub" style="margin:4px 0 0">端口　' + (http.port ?? '—') + '（只读）</div></div>')
-        }
-      }
-      return '<div style="margin-bottom:18px">'
-        + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">'
-        + '<b>QQ ' + row.uin + '</b><span class="sub" style="margin:0"><code>' + row.file + '</code></span></div>'
-        + cards
-        + readOnlyCards.join('')
-        + '<div class="row"><button data-add="' + uinIndex + '">新建连接</button>'
-        + '<button class="primary" data-save="' + uinIndex + '">保存这个账号</button>'
-        + '<span class="sub" data-state="' + uinIndex + '" style="margin:0"></span></div>'
-        + '</div>'
-    }).join('') + '</div>'
 
-    for (const el of body.querySelectorAll('[data-filter]')) el.onclick = () => { netFilter = el.dataset.filter; renderNetwork() }
-    const newBtn = body.querySelector('[data-newnet]')
-    if (newBtn) newBtn.onclick = () => {
-      const target = netDraft.findIndex((row) => row.file)
-      if (target < 0) { toast('没有可写入的账号配置', 'bad'); return }
-      addClient(target)
+    if (toolbar) {
+      toolbar.innerHTML = NET_TABS.map(([key, label]) => '<button data-filter="' + key + '" class="' + (netFilter === key ? 'primary' : '') + '">' + label + '</button>').join('')
+        + '<button data-newnet="1">新建</button>'
     }
+    if (toolbar) {
+      for (const el of toolbar.querySelectorAll('[data-filter]')) el.onclick = () => { netFilter = el.dataset.filter; renderNetwork() }
+      const newBtn = toolbar.querySelector('[data-newnet]')
+      if (newBtn) newBtn.onclick = () => {
+        const target = netDraft.findIndex((row) => row.file)
+        if (target < 0) { toast('没有可写入的账号配置', 'bad'); return }
+        addClient(target)
+      }
+    }
+
+    if (netDraft.length === 0) { body.innerHTML = '<div class="empty">没有 onebot11_*.json</div>'; return }
+
+    const cards = []
+    netDraft.forEach((row, uinIndex) => {
+      if (netFilter === 'all' || netFilter === 'ws-client') {
+        row.clients.forEach((client, index) => {
+          const on = client.enable !== false
+          cards.push('<div class="card" style="padding:16px">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">'
+            + '<b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(client.name || '未命名') + '</b>'
+            + '<button data-toggle="' + uinIndex + ':' + index + '" class="' + (on ? 'primary' : '') + '">' + (on ? '已启用' : '已停用') + '</button></div>'
+            + '<div class="sub" style="margin:0 0 8px">QQ ' + row.uin + ' · Websocket 客户端</div>'
+            + '<input data-field="name:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.name) + '" placeholder="名称" style="width:100%;margin-bottom:8px">'
+            + '<input data-field="url:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.url) + '" placeholder="ws://127.0.0.1:6700/" style="width:100%;margin-bottom:10px">'
+            + '<div class="row"><button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button>'
+            + '<button class="primary" data-save="' + uinIndex + '">保存</button></div>'
+            + '<div class="sub" data-state="' + uinIndex + '" style="margin:6px 0 0"></div>'
+            + '</div>')
+        })
+        if (row.clients.length === 0) {
+          cards.push('<div class="card" style="padding:16px"><b>QQ ' + row.uin + '</b>'
+            + '<div class="sub" style="margin:6px 0 10px">还没有 WS 客户端连接</div>'
+            + '<button data-add="' + uinIndex + '">新建连接</button></div>')
+        }
+      }
+      if (netFilter === 'all' || netFilter === 'ws-server') {
+        for (const server of (row.servers ?? [])) {
+          cards.push('<div class="card" style="padding:16px"><b>' + escapeHtml(server.name ?? 'ws-server') + '</b>'
+            + '<div class="sub" style="margin:6px 0 0">QQ ' + row.uin + ' · Websocket 服务器</div>'
+            + '<div class="sub" style="margin:4px 0 0">端口 ' + (server.port ?? '—') + '（只读）</div></div>')
+        }
+      }
+      if (netFilter === 'all' || netFilter === 'http-server') {
+        for (const http of (row.https ?? [])) {
+          cards.push('<div class="card" style="padding:16px"><b>' + escapeHtml(http.name ?? 'http-server') + '</b>'
+            + '<div class="sub" style="margin:6px 0 0">QQ ' + row.uin + ' · HTTP 服务器</div>'
+            + '<div class="sub" style="margin:4px 0 0">端口 ' + (http.port ?? '—') + '（只读）</div></div>')
+        }
+      }
+    })
+    body.innerHTML = cards.join('') || '<div class="empty">这个筛选下没有连接</div>'
+
     for (const el of body.querySelectorAll('[data-toggle]')) el.onclick = () => toggleClient(el.dataset.toggle)
     for (const el of body.querySelectorAll('[data-del]')) el.onclick = () => removeClient(el.dataset.del)
     for (const el of body.querySelectorAll('[data-add]')) el.onclick = () => addClient(Number(el.dataset.add))
     for (const el of body.querySelectorAll('[data-save]')) el.onclick = () => saveNetwork(Number(el.dataset.save), el)
     for (const el of body.querySelectorAll('[data-field]')) el.oninput = () => editField(el.dataset.field, el.value)
   }
-
   const splitKey = (key) => key.split(':').map((part, index) => (index === 0 ? part : Number(part)))
 
   function editField(field, value) {
