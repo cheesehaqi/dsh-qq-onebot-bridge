@@ -857,7 +857,7 @@
     $('kState').textContent = transient ? '连不上' : (KIND[status.kind] ?? '查不到')
     if (transient) {
       // 给一个「重试」按钮，宿主元素是基础信息里的状态行
-      const host = $('loginState')?.parentElement ?? $('kState')?.parentElement
+      const host = $('kState')?.parentElement ?? null
       let again = $('btnStatusRetry')
       if (!again && host) {
         again = document.createElement('button')
