@@ -1251,16 +1251,16 @@
             + '<div class="sub" data-state="' + uinIndex + '" style="margin:6px 0 0"></div>'
             + '</div>')
         })
-        if (row.clients.length === 0) {
+        if (row.clients.length === 0 && netFilter !== 'all') {
           cards.push('<div class="card" style="padding:16px"><b>QQ ' + row.uin + '</b>'
             + '<div class="sub" style="margin:6px 0 0">还没有 WS 客户端连接（用上面的「新建」添加）</div></div>')
         }
       }
       if (netFilter === 'all' || netFilter === 'ws-server') {
-        if ((row.servers ?? []).length === 0) {
+        if ((row.servers ?? []).length === 0 && netFilter !== 'all') {
           cards.push('<div class="card" style="padding:16px"><b>WS 服务器</b>'
             + '<div class="sub" style="margin:6px 0 0">QQ ' + row.uin + ' 还没有 WS 服务器（用上面的「新建」添加）</div></div>')
-        } else {
+        } else if ((row.servers ?? []).length > 0) {
           cards.push('<div class="card" style="padding:16px;display:flex;align-items:center;justify-content:space-between">'
             + '<div><b>WS 服务器</b><div class="sub" style="margin:4px 0 0">QQ ' + row.uin + ' · 共 ' + row.servers.length + ' 个</div></div>'
             + '<button data-addserver="' + uinIndex + '">新建</button></div>')
@@ -1279,10 +1279,10 @@
         })
       }
       if (netFilter === 'all' || netFilter === 'http-server') {
-        if ((row.https ?? []).length === 0) {
+        if ((row.https ?? []).length === 0 && netFilter !== 'all') {
           cards.push('<div class="card" style="padding:16px"><b>HTTP 服务器</b>'
             + '<div class="sub" style="margin:6px 0 0">QQ ' + row.uin + ' 还没有 HTTP 服务器（用上面的「新建」添加）</div></div>')
-        } else {
+        } else if ((row.https ?? []).length > 0) {
           cards.push('<div class="card" style="padding:16px;display:flex;align-items:center;justify-content:space-between">'
             + '<div><b>HTTP 服务器</b><div class="sub" style="margin:4px 0 0">QQ ' + row.uin + ' · 共 ' + row.https.length + ' 个</div></div>'
             + '<button data-addhttp="' + uinIndex + '">新建</button></div>')
@@ -1301,6 +1301,16 @@
         })
       }
     })
+    if (netFilter === 'all') {
+      for (const row of netDraft) {
+        const total = (row.clients?.length ?? 0) + (row.servers?.length ?? 0) + (row.https?.length ?? 0)
+        if (total === 0) {
+          cards.push('<div class="card" style="padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px">'
+            + '<div><b>QQ ' + row.uin + '</b><div class="sub" style="margin:2px 0 0">还没有任何连接</div></div>'
+            + '<span class="tag">点上面「新建」添加</span></div>')
+        }
+      }
+    }
     body.innerHTML = cards.join('') || '<div class="empty">这个筛选下没有连接</div>'
 
     for (const el of body.querySelectorAll('[data-toggle]')) el.onclick = () => toggleClient(el.dataset.toggle)
