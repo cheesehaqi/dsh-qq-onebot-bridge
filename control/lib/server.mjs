@@ -505,6 +505,11 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
             return api.accounts.setAutoLogin(uin)
           },
           // 重启 NapCat 的登录流程（页面上的"重启"按钮；会打断当前在线，所以前端要二次确认）
+          // 插件商店：下载 zip（只下载落盘，不解压不启用）
+          '/api/accounts/store/download': async () => {
+            if (typeof api.accounts?.downloadPlugin !== 'function') return { ok: false, message: '当前控制台不支持下载插件' }
+            return api.accounts.downloadPlugin(body.id)
+          },
           // 插件：建目录（只 mkdir）
           '/api/accounts/plugins/mkdir': () => {
             if (typeof api.accounts?.ensurePluginsDir !== 'function') return { ok: false, message: '当前控制台不支持创建插件目录' }

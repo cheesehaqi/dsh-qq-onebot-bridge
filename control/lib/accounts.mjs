@@ -700,6 +700,41 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       }
     },
     /** config 目录（给"在资源管理器里打开"用）。 */
+    /**
+     * 下载商店里的插件 zip 到 `config/plugins/_downloads/`。
+     * 只下载、只落盘：不自动解压、不自动启用——装不装、什么时候装由人决定。
+     */
+    async downloadPlugin(id, { doFetch = null, maxBytes = 40 * 1024 * 1024 } = {}) {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      if (dir === '') return { ok: false, kind: 'no-config', message: '找不到 config 目录' }
+      const clean = String(id ?? '').trim()
+      if (clean === '') return { ok: false, kind: 'bad-input', message: '缺少插件 id' }
+      const pick = doFetch ?? fetchImpl ?? fetch
+
+      const store = await client(config).storeList()
+      const list = Array.isArray(store?.data?.plugins) ? store.data.plugins : []
+      const item = list.find((entry) => String(entry.id) === clean)
+      if (!item) return { ok: false, kind: 'not-found', message: '商店里没有这个插件：' + clean }
+      const url = String(item.downloadUrl ?? '')
+      if (url === '') return { ok: false, kind: 'unsupported', message: '这个插件没有 downloadUrl' }
+
+      const targetDir = join(dir, 'plugins', '_downloads')
+      try { mkdirSync(targetDir, { recursive: true }) } catch (error) {
+        return { ok: false, kind: 'error', message: '建目录失败：' + String(error?.message ?? error).slice(0, 100) }
+      }
+      try {
+        const response = await pick(url, { redirect: 'follow' })
+        if (!response.ok) return { ok: false, kind: 'error', message: '下载失败：HTTP ' + response.status }
+        const buffer = Buffer.from(await response.arrayBuffer())
+        if (buffer.length > maxBytes) return { ok: false, kind: 'error', message: '文件太大（' + buffer.length + ' 字节），已放弃' }
+        const file = join(targetDir, clean + '.zip')
+        writeFileSync(file, buffer)
+        return { ok: true, kind: 'ok', message: '已下载 ' + (buffer.length / 1024).toFixed(1) + ' KB（未解压）', file, bytes: buffer.length, name: item.name ?? clean, version: item.version ?? '' }
+      } catch (error) {
+        return { ok: false, kind: 'unreachable', message: '下载失败：' + String(error?.message ?? error).slice(0, 120) }
+      }
+    },
     /** 确保插件目录存在（config/plugins）：只 mkdir，不下载、不安装。 */
     ensurePluginsDir() {
       const config = readConfig()

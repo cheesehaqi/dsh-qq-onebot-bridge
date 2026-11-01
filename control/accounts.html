@@ -1324,11 +1324,11 @@
         + '<div style="margin:6px 0;font-size:13px;color:var(--muted)">' + (item.description ?? '') + '</div>'
         + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' + tags
         + (item.minVersion ? '<span class="sub" style="margin:0">需 NapCat ≥ ' + item.minVersion + '</span>' : '') + '</div>'
-        + '<div class="row" style="margin-top:10px"><button data-store-open="1" class="primary">在 NapCat 里安装 →</button>'
+        + '<div class="row" style="margin-top:10px"><button data-download="' + item.id + '" class="primary">下载 zip</button>'
         + (item.homepage ? '<a class="sub" style="margin:0" href="' + item.homepage + '" target="_blank" rel="noopener noreferrer">主页</a>' : '')
         + '</div></div>'
     }).join('')
-    for (const btn of body.querySelectorAll('[data-store-open]')) btn.onclick = openNapcatStore
+    for (const btn of body.querySelectorAll('[data-download]')) btn.onclick = () => downloadPlugin(btn.dataset.download, btn)
   }
   async function loadStore() {
     const btn = $('btn-store'); busy(btn, true, '读取中…')
@@ -1345,6 +1345,14 @@
     renderStore()
     opLog('刷新插件商店')
   }
+  async function downloadPlugin(id, btn) {
+    busy(btn, true, '下载中…')
+    const result = await post('/api/accounts/store/download', { id })
+    busy(btn, false)
+    if (result.ok === true) { toast('已下载：' + (result.file ?? ''), 'ok'); opLog('下载插件 ' + id) }
+    else toast('下载失败：' + (result.message ?? result.reason ?? '未知'), 'bad')
+  }
+
   async function openNapcatStore() {
     const data = await api('/api/napcat/webui')
     if (data.ok === true && data.url) { window.open(data.url, '_blank', 'noopener'); opLog('打开 NapCat 插件商店') }
