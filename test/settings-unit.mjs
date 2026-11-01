@@ -376,7 +376,7 @@ const bareLinks = panelFooterLinks({ version: '1.0.0', repoUrl: '', consolePort:
 check('没有仓库地址时只给账号入口、调试台与账号中心（不编造链接）',
   bareLinks.length === 3 && bareLinks.every((link) => ['account', 'console', 'accounts'].includes(link.id)),
   bareLinks.map((link) => link.id).join(','))
-// 「QQ助手账号」= 机器人账号的登录/扫码页（NapCat WebUI）。href 指宿主自己的 /qqai/account：
+// 「NapCat 账号」= 机器人账号的登录/扫码页（NapCat WebUI）。href 指宿主自己的 /qqai/account：
 // token 由服务端读出后走 302，**不进面板载荷**（同"调试台"入口的规矩）。
 // ⚠️ 它**就是「相关链接」这一组里的第一条**（用户 2026-10-04 四条指示的最终口径：
 // "应该把账号登陆调到最上方" → "不对不对应该在QQ助手的下边" →
@@ -387,7 +387,7 @@ check('没有仓库地址时只给账号入口、调试台与账号中心（不�
 //  "更新日志改到相关链接的最底下" → "嗯，还是把更新日志位置改回去吧" → "调试台改到调试文档下方"）。
 const accountLink = links.find((link) => link.id === 'account')
 check('账号中心排第一；账号入口在其后，且不带 token',
-  accountLink?.href === '/qqai/account' && accountLink.label.includes('QQ助手账号')
+  accountLink?.href === '/qqai/account' && accountLink.label.includes('NapCat 账号')
   && !/token=/i.test(accountLink.href) && links[0]?.id === 'accounts' && bareLinks[0]?.id === 'accounts',
   `${brief(accountLink)} · 完整=${links.map((link) => link.id).join(',')}`)
 check('顺序固定为 账号中心 → 账号 → 更新日志 → 调试文档 → 调试台',
@@ -1327,7 +1327,7 @@ check('启动命令指向控制台入口脚本',
   consoleStartCommand({ root: fakeRoot }).includes(join('control', 'bin', 'qq-control.mjs')),
   consoleStartCommand({ root: fakeRoot }))
 
-// ---- 「QQ助手账号」入口（NapCat WebUI 的免密钥跳转）----
+// ---- 「NapCat 账号」入口（NapCat WebUI 的免密钥跳转）----
 // 落点与参数写法照 NapCat 4.18.28 前端实测：`/webui/?token=<明文 token>`（前端自己算 hash 再登录）。
 const napcatRoot = join(dir, 'napcat-root')
 mkdirSync(join(napcatRoot, 'bootmain', 'config'), { recursive: true })
@@ -1380,7 +1380,7 @@ check('账号入口拒绝跨站（它会把带 token 的地址交出去）',
   accountCross.out.status === 403, String(accountCross.out.status))
 /**
  * ✋ 2026-10-04 真机事故回归：**浏览器点链接的请求头形状**。
- * 当时面板里「QQ助手账号」「调试台」点了完全没反应 —— 因为浏览器发导航请求时是
+ * 当时面板里「NapCat 账号」「调试台」点了完全没反应 —— 因为浏览器发导航请求时是
  * `Sec-Fetch-Site: same-origin` + **不带 Origin**，而守卫的"没有 Origin"分支只放行 `''`/`none`，
  * 于是正常点击被判成"来源不明的请求" → 403。我当时的 smoke 手动补了 `Origin`，正好走另一分支，
  * 所以没测出来。下面把这四种真实形状**逐个钉死**（这才是测试该覆盖的东西，不是我自己编的头）。
