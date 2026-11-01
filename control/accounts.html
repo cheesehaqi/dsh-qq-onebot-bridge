@@ -22,11 +22,11 @@
     --shadow:0 1px 2px rgba(16,24,40,.04), 0 12px 32px rgba(16,24,40,.06);
   }
   @media (prefers-color-scheme:dark){
-    :root{ --fg:#e6edf3; --muted:#94a0ae; --line:#232a35; --bg:#0b0e14; --card:#111722;
+    :root{ --fg:#e6edf3; --muted:#a6b1bf; --line:#232a35; --bg:#0d1117; --card:#171f2b;
       --pink:#ff8cc4; --pink-soft:#2a1622; --violet:#9d87ff; --violet-soft:#1b1730;
       --accent:#ff8cc4; --ok:#3ddc91; --ok-soft:#0d2419; --warn:#e2b03a; --warn-soft:#241c08;
       --danger:#ff7b72; --danger-soft:#2b1414;
-      --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 32px rgba(0,0,0,.45); }
+      --shadow:0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.3); }
   }
 
   /* v0.7.11：手动主题（跟随系统 / 强制亮 / 强制暗）。选择存在 localStorage，刷新不丢。 */
@@ -34,10 +34,18 @@
     --pink:#ff7ab6; --pink-soft:#ffe8f3; --violet:#7c5cff; --violet-soft:#eee9ff;
     --accent:#e75480; --ok:#12a150; --ok-soft:#e6f7ee; --warn:#b7791f; --warn-soft:#fff8e6;
     --danger:#d92d20; --danger-soft:#ffeceb; }
-  html[data-theme="dark"]{ --fg:#e6edf3; --muted:#94a0ae; --line:#232a35; --bg:#0b0e14; --card:#111722;
+  html[data-theme="dark"]{ --fg:#e6edf3; --muted:#a6b1bf; --line:#232a35; --bg:#0d1117; --card:#171f2b;
     --pink:#ff8cc4; --pink-soft:#2a1622; --violet:#9d87ff; --violet-soft:#1b1730;
     --accent:#ff8cc4; --ok:#3ddc91; --ok-soft:#0d2419; --warn:#e2b03a; --warn-soft:#241c08;
     --danger:#ff7b72; --danger-soft:#2b1414; }
+  /* 暗色下的输入控件：别用 --bg（接近纯黑），否则输入框像"黑洞" */
+  html[data-theme="dark"] input, html[data-theme="dark"] textarea, html[data-theme="dark"] select{
+    background:var(--card); color:var(--fg); border-color:var(--line)
+  }
+  @media (prefers-color-scheme: dark){
+    input, textarea, select{ background:var(--card); color:var(--fg); border-color:var(--line) }
+  }
+
   *{box-sizing:border-box}
   html,body{height:100%}
   body{margin:0;background:var(--bg);color:var(--fg);
@@ -916,7 +924,10 @@
     try { localStorage.setItem(THEME_KEY, mode) } catch { /* 隐私模式下写不了，忽略 */ }
   }
   let themeMode = 'auto'
+  // 地址栏里的 ?theme=dark 优先（截图/分享用；不能压过用户自己的选择，所以只在没存过时才用）
+  const urlTheme = new URLSearchParams(location.search).get('theme') ?? ''
   try { themeMode = localStorage.getItem(THEME_KEY) ?? 'auto' } catch { themeMode = 'auto' }
+  if (themeMode === 'auto' && (urlTheme === 'dark' || urlTheme === 'light')) themeMode = urlTheme
   if (!(themeMode in THEME_LABEL)) themeMode = 'auto'
   applyTheme(themeMode)
   $('themeBtn').onclick = () => {
