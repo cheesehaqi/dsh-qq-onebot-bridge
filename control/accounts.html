@@ -272,7 +272,7 @@
       <div class="nav active" data-tab="home"><span class="ico">🏠</span>基础信息</div>
       <div class="nav" data-tab="accounts"><span class="ico">👥</span>账号配置</div>
       <div class="nav" data-tab="network"><span class="ico">📡</span>网络配置</div>
-      <div class="nav" data-tab="logs"><span class="ico">🪵</span>猫猫日志</div>
+      <div class="nav" data-tab="logs"><span class="ico">🪵</span>运行日志</div>
       <div class="nav" data-tab="files"><span class="ico">📁</span>文件管理</div>
       <div class="nav" data-tab="plugins"><span class="ico">🧩</span>插件管理</div>
       <div class="nav" data-tab="stats"><span class="ico">📊</span>运行与设备</div>
@@ -585,7 +585,7 @@
   $('backLink').href = token ? `./?token=${encodeURIComponent(token)}` : './'
 
   // ---------- 侧栏 tab ----------
-  const titles = { home: '基础信息', accounts: '账号配置', network: '网络配置', logs: '猫猫日志', files: '文件管理', plugins: '插件管理', stats: '运行与设备', config: '系统配置', log: '操作记录', about: '关于', test: '实时测试' }
+  const titles = { home: '基础信息', accounts: '账号配置', network: '网络配置', logs: '运行日志', files: '文件管理', plugins: '插件管理', stats: '运行与设备', config: '系统配置', log: '操作记录', about: '关于', test: '实时测试' }
   /**
    * 切换分区（也支持 `#network` 这种 hash 直达）。
    * 为什么加 hash：调试时经常要把"某个页面"直接发给人或收藏起来，纯 JS 切页做不到。
