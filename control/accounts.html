@@ -1166,7 +1166,7 @@
     const total = netDraft.reduce((sum, row) => sum + row.clients.length, 0)
     $('networkBadge').textContent = netDraft.length + ' 个账号 / ' + total + ' 条连接'
     if (netDraft.length === 0) { body.innerHTML = '<div class="empty">没有 onebot11_*.json</div>'; return }
-    body.innerHTML = netDraft.map((row, uinIndex) => {
+    body.innerHTML = '<div style="max-width:1180px">' + netDraft.map((row, uinIndex) => {
       const cards = row.clients.length === 0
         ? '<div class="empty">还没有 WS 客户端连接</div>'
         : row.clients.map((client, index) => {
@@ -1176,8 +1176,8 @@
             + '<b>' + escapeHtml(client.name || '未命名') + '</b>'
             + '<button data-toggle="' + uinIndex + ':' + index + '" class="' + (on ? 'primary' : '') + '">' + (on ? '已启用' : '已停用') + '</button></div>'
             + '<div class="sub" style="margin:0 0 6px">类型　Websocket 客户端</div>'
-            + '<div class="row" style="margin-bottom:8px"><input data-field="name:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.name) + '" placeholder="名称" style="width:150px">'
-            + '<input data-field="url:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.url) + '" placeholder="ws://127.0.0.1:6700/" style="flex:1;min-width:240px"></div>'
+            + '<div class="row" style="margin-bottom:8px"><input data-field="name:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.name) + '" placeholder="名称" style="width:200px;flex:0 0 200px">'
+            + '<input data-field="url:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.url) + '" placeholder="ws://127.0.0.1:6700/" style="flex:1 1 320px;min-width:320px"></div>'
             + '<div class="row"><button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button></div>'
             + '</div>'
         }).join('')
@@ -1189,7 +1189,7 @@
         + '<button class="primary" data-save="' + uinIndex + '">保存这个账号</button>'
         + '<span class="sub" data-state="' + uinIndex + '" style="margin:0"></span></div>'
         + '</div>'
-    }).join('')
+    }).join('') + '</div>'
 
     for (const el of body.querySelectorAll('[data-toggle]')) el.onclick = () => toggleClient(el.dataset.toggle)
     for (const el of body.querySelectorAll('[data-del]')) el.onclick = () => removeClient(el.dataset.del)
