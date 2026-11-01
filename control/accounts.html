@@ -1825,20 +1825,11 @@
     else toast('创建失败：' + (data.message ?? data.reason ?? '未知'), 'bad')
   }
   const installBtn = $('btn-pluginInstall')
-  if (installBtn) installBtn.onclick = async () => {
-    const data = await api('/api/napcat/webui')
-    if (data.ok !== true || !data.url) { toast('打开失败：' + (data.message ?? data.reason ?? '未知'), 'bad'); return }
-    // 尽量直达"插件商店"页：把路径换成 /webui/plugin，token 等查询参数原样保留
-    let target = data.url
-    try {
-      const parsed = new URL(data.url)
-      parsed.pathname = '/webui/plugin_store'
-      target = parsed.toString()
-    } catch { /* 解析失败就用原地址 */ }
-    window.open(target, '_blank', 'noopener')
+  if (installBtn) installBtn.onclick = () => {
+    // 直达插件商店，同样走 302（token 不进页面）
+    window.open('/api/napcat/open?page=plugin_store&token=' + encodeURIComponent(token), '_blank', 'noopener')
     opLog('打开 NapCat 插件商店')
   }
-
   window.addEventListener('hashchange', () => {
     const tab = (location.hash || '').replace('#', '')
     if (tab === '' || !titles[tab]) return

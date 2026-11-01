@@ -567,15 +567,9 @@ function render(status) {
       btn.textContent = up ? 'QQ助手账号' : 'QQ助手账号不可用（NapCat 未运行）';
     }
     if (up) {
-      // 异步补上 token；拿不到就保留不带 token 的地址，并把原因写在 title 里
-      api('/api/napcat/webui').then((info) => {
-        if (info?.ok === true && info.url) {
-          link.href = info.url;
-          link.title = '已带上 NapCat 自己的 token（来自 bootmain/config/webui.json）';
-        } else {
-          link.title = '未能自动带上 NapCat token：' + (info?.reason || '未知原因') + '（可在 webui.json 里找 token 手动拼接）';
-        }
-      }).catch(() => {});
+      // v0.7.11：token 不进页面，交给服务端 302 拼接
+      link.href = '/api/napcat/open?token=' + encodeURIComponent(token);
+      link.title = '点开会 302 到带 token 的 NapCat WebUI（token 不进页面）';
     }
   }
   const napcat = status.processes?.napcatLoaders || [];
