@@ -1723,8 +1723,18 @@
   const openPluginsBtn = $('btn-openPlugins')
   if (openPluginsBtn) openPluginsBtn.onclick = async () => {
     const data = await api('/api/accounts/open-folder?target=plugins')
-    if (data.ok === true) { toast('已打开插件目录：' + data.dir, 'ok'); opLog('打开插件目录') }
-    else toast('打不开：' + (data.message ?? data.reason ?? '未知'), 'bad')
+    if (data.ok !== true) { toast('打不开：' + (data.message ?? data.reason ?? '未知'), 'bad'); return }
+    // 资源管理器窗口可能被浏览器挡在后面（Windows 前台锁），所以顺手把路径复制走
+    let copied = false
+    try { await navigator.clipboard.writeText(data.dir); copied = true } catch { /* 剪贴板被拦就算了 */ }
+    toast((copied ? '已复制路径：' : '目录：') + data.dir, 'ok')
+    opLog('打开插件目录')
+    const hint = $('pluginsBody')
+    if (hint) {
+      hint.innerHTML = '<div class="empty" style="text-align:left">目标目录：<code>' + data.dir + '</code><br>'
+        + (copied ? '路径已复制到剪贴板。' : '')
+        + '如果资源管理器窗口被挡在后面，按 Win+E 打开后把路径粘到地址栏即可。</div>'
+    }
   }
   const mkPluginsBtn = $('btn-mkPlugins')
   if (mkPluginsBtn) mkPluginsBtn.onclick = async () => {
