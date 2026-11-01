@@ -1137,7 +1137,8 @@
    * 网络配置（可写）：按 NapCat 的做法，一个 WS 客户端一张卡。
    * 每张卡可改 名称 / URL / 启停，可删除；顶部可新建。保存时整组提交，写前由服务端备份。
    */
-  let netDraft = []      // [{ uin, clients: [{name,url,enable}] }]
+  let netDraft = []
+  let netFilter = 'all'   // all | ws-client | ws-server | http-server      // [{ uin, clients: [{name,url,enable}] }]
 
   async function loadNetwork() {
     const btn = $('btn-network'); busy(btn, true, '读取中…')
@@ -1151,6 +1152,8 @@
     netDraft = (data.accounts ?? []).map((row) => ({
       uin: row.uin,
       file: row.file,
+      servers: Array.isArray(row.servers) ? row.servers : [],
+      https: Array.isArray(row.https) ? row.https : [],
       clients: (row.clients ?? []).map((item, index) => ({
         name: item.name ?? ('ws-' + (index + 1)),
         url: item.url ?? '',
@@ -1161,15 +1164,31 @@
     opLog('刷新网络配置')
   }
 
+  const NET_TABS = [
+    ['all', '全部'],
+    ['ws-client', 'Websocket 客户端'],
+    ['ws-server', 'Websocket 服务器'],
+    ['http-server', 'HTTP 服务器'],
+  ]
+
   function renderNetwork() {
     const body = $('networkBody')
-    const total = netDraft.reduce((sum, row) => sum + row.clients.length, 0)
+    const total = netDraft.reduce((sum, row) => sum + row.clients.length + (row.servers?.length ?? 0) + (row.https?.length ?? 0), 0)
     $('networkBadge').textContent = netDraft.length + ' 个账号 / ' + total + ' 条连接'
     if (netDraft.length === 0) { body.innerHTML = '<div class="empty">没有 onebot11_*.json</div>'; return }
-    body.innerHTML = '<div style="max-width:1180px">' + netDraft.map((row, uinIndex) => {
-      const cards = row.clients.length === 0
+    const tabs = '<div class="row" style="margin-bottom:14px">'
+      + NET_TABS.map(([key, label]) => '<button data-filter="' + key + '" class="' + (netFilter === key ? 'primary' : '') + '">' + label + '</button>').join('')
+      + '<button data-newnet="1">新建</button>'
+      + '</div>'
+      + '<p class="sub" style="margin:-4px 0 14px">筛选与「新建」都在上面；新建会加到第一个有配置的账号下（WS 客户端）。服务器 / HTTP 段目前只读。</p>'
+    body.innerHTML = '<div style="max-width:1180px">' + tabs + netDraft.map((row, uinIndex) => {
+      const showClients = netFilter === 'all' || netFilter === 'ws-client'
+      const showServers = netFilter === 'all' || netFilter === 'ws-server'
+      const showHttp = netFilter === 'all' || netFilter === 'http-server'
+      const cards = (showClients === false || row.clients.length === 0)
         ? '<div class="empty">还没有 WS 客户端连接</div>'
         : row.clients.map((client, index) => {
+          if (showClients === false) return ''
           const on = client.enable !== false
           return '<div style="border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--bg)">'
             + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">'
@@ -1181,16 +1200,43 @@
             + '<div class="row"><button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button></div>'
             + '</div>'
         }).join('')
+      const readOnlyCards = []
+      if (showServers) {
+        for (const server of (row.servers ?? [])) {
+          readOnlyCards.push('<div style="border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--bg)">'
+            + '<div style="display:flex;justify-content:space-between"><b>' + escapeHtml(server.name ?? 'ws-server') + '</b>'
+            + '<span class="tag">' + (server.enable === false ? '已停用' : '已启用') + '</span></div>'
+            + '<div class="sub" style="margin:6px 0 0">类型　Websocket 服务器</div>'
+            + '<div class="sub" style="margin:4px 0 0">端口　' + (server.port ?? '—') + '（只读）</div></div>')
+        }
+      }
+      if (showHttp) {
+        for (const http of (row.https ?? [])) {
+          readOnlyCards.push('<div style="border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--bg)">'
+            + '<div style="display:flex;justify-content:space-between"><b>' + escapeHtml(http.name ?? 'http-server') + '</b>'
+            + '<span class="tag">' + (http.enable === false ? '已停用' : '已启用') + '</span></div>'
+            + '<div class="sub" style="margin:6px 0 0">类型　HTTP 服务器</div>'
+            + '<div class="sub" style="margin:4px 0 0">端口　' + (http.port ?? '—') + '（只读）</div></div>')
+        }
+      }
       return '<div style="margin-bottom:18px">'
         + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">'
         + '<b>QQ ' + row.uin + '</b><span class="sub" style="margin:0"><code>' + row.file + '</code></span></div>'
         + cards
+        + readOnlyCards.join('')
         + '<div class="row"><button data-add="' + uinIndex + '">新建连接</button>'
         + '<button class="primary" data-save="' + uinIndex + '">保存这个账号</button>'
         + '<span class="sub" data-state="' + uinIndex + '" style="margin:0"></span></div>'
         + '</div>'
     }).join('') + '</div>'
 
+    for (const el of body.querySelectorAll('[data-filter]')) el.onclick = () => { netFilter = el.dataset.filter; renderNetwork() }
+    const newBtn = body.querySelector('[data-newnet]')
+    if (newBtn) newBtn.onclick = () => {
+      const target = netDraft.findIndex((row) => row.file)
+      if (target < 0) { toast('没有可写入的账号配置', 'bad'); return }
+      addClient(target)
+    }
     for (const el of body.querySelectorAll('[data-toggle]')) el.onclick = () => toggleClient(el.dataset.toggle)
     for (const el of body.querySelectorAll('[data-del]')) el.onclick = () => removeClient(el.dataset.del)
     for (const el of body.querySelectorAll('[data-add]')) el.onclick = () => addClient(Number(el.dataset.add))
