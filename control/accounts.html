@@ -159,7 +159,8 @@
   .chip button{padding:3px 10px;border-radius:999px;font-size:12px}
 
   #toasts{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:60}
-  .toast{min-width:230px;max-width:min(620px,52vw);padding:12px 14px;border-radius:12px;border:1px solid var(--line);
+  .toast{width:max-content;max-width:min(90vw,900px);min-width:200px;
+    padding:12px 14px;border-radius:12px;border:1px solid var(--line);
     word-break:break-all;overflow-wrap:anywhere;white-space:pre-wrap;font-size:13px;line-height:1.55;
     background:var(--card);box-shadow:var(--shadow)}
   .toast.ok{border-color:var(--ok);background:var(--ok-soft)}
