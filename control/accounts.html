@@ -776,7 +776,6 @@
     $('kUrl').innerHTML = webui.url ? `<code>${webui.url}</code>` : '—'
     $('k2fa').textContent = webui.enable2FA ? '已开启（登录要 6 位码）' : '未开启'
     $('kAuto').textContent = webui.autoLoginAccount || '（未设置）'
-    if (webui.enable2FA) $('twofaRow').classList.remove('hidden')
 
     const accounts = data.accounts ?? []
     $('mAccounts').textContent = accounts.length
@@ -817,18 +816,19 @@
     if (!silent) busy(btn, false)
     state.status = status
     state.loginInfo = info.ok === true ? info.data : null
-    const dot = $('loginDot')
+
+    const retryBtn = $('btnStatusRetry')
+    if (retryBtn) retryBtn.style.display = 'none'
+
     if (status.ok === true) {
       const online = status.data?.isLogin === true
       const offline = status.data?.isOffline === true
-      if (dot) dot.className = `dot ${online ? 'ok' : 'warn'}`
-      setText('loginState', online ? '已登录在线' : offline ? '已登录但离线' : '未登录')
-      setText('loginMeta', status.data?.loginError || (online ? '可以正常收发消息' : '用扫码或快速登录开始'))
       $('kState').textContent = online ? '在线' : offline ? '离线' : '未登录'
       $('vPhase').textContent = status.data?.loginPhase ?? '—'
       $('vCore').textContent = status.data?.coreReady === true ? '已就绪' : '未就绪'
       if (state.loginInfo) {
         $('nick').textContent = state.loginInfo.nick || '（无昵称）'
+        $('uin').textContent = state.loginInfo.uin ? ('QQ ' + state.loginInfo.uin) : '—'
         const avatarImg = $('nickAvatar')
         const avatarFallback = $('nickFallback')
         const uin = state.loginInfo.uin
@@ -841,50 +841,31 @@
             avatarImg.src = src
           }
         }
-        $('uin').textContent = state.loginInfo.uin ? `QQ ${state.loginInfo.uin}` : '—'
       }
-      const hideRetry = $('btnStatusRetry')
-      if (hideRetry) hideRetry.style.display = 'none'
-      if (!silent) { toast('登录状态已更新', 'ok'); opLog(`查状态：${online ? '在线' : offline ? '离线' : '未登录'}`) }
+      if (!silent) { toast('登录状态已更新', 'ok'); opLog('查状态：' + (online ? '在线' : offline ? '离线' : '未登录')) }
       if (online && autoTimer !== null) { clearInterval(autoTimer); autoTimer = null; $('btnAutoRefresh').textContent = '自动刷新：关' }
       return status
     }
-    if (dot) dot.className = 'dot bad'
+
+    // 失败分支：分得清"正在重启"和"真的没开"
     const transient = status.kind === 'unreachable' || status.kind === 'timeout'
-    setText('loginState', transient ? 'NapCat 连不上（可能正在重启）' : (KIND[status.kind] ?? '查不到'))
-    setText('loginMeta', transient
-      ? '已自动重试 3 次（每次间隔 2 秒）仍失败：6099 没有响应。NapCat 启动中会这样，稍等十几秒点「重试」。'
-      : (status.message ?? ''))
-    $('kState').textContent = KIND[status.kind] ?? '查不到'
-    const metaHost = $('loginMeta')
-    let retryBtn = $('btnStatusRetry')
-    if (!retryBtn && metaHost) {
-      retryBtn = document.createElement('button')
-      retryBtn.id = 'btnStatusRetry'
-      retryBtn.textContent = '重试'
-      retryBtn.style.marginTop = '10px'
-      retryBtn.onclick = () => refreshStatus(false)
-      metaHost.parentElement.appendChild(retryBtn)
+    $('kState').textContent = transient ? '连不上' : (KIND[status.kind] ?? '查不到')
+    if (transient) {
+      // 给一个「重试」按钮，宿主元素是基础信息里的状态行
+      const host = $('loginState')?.parentElement ?? $('kState')?.parentElement
+      let again = $('btnStatusRetry')
+      if (!again && host) {
+        again = document.createElement('button')
+        again.id = 'btnStatusRetry'
+        again.textContent = '重试'
+        again.style.marginTop = '10px'
+        again.onclick = () => refreshStatus(false)
+        host.appendChild(again)
+      }
+      if (again) again.style.display = 'inline-block'
     }
-    retryBtn.style.display = 'inline-block'
     if (!silent) toast(status.message ?? '查不到登录状态', 'bad')
     return status
-  }
-
-  // ---------- 扫码 ----------
-  let qrTick = null
-  let qrWatch = null
-  const QR_TTL = 120
-  function startCountdown() {
-    clearInterval(qrTick)
-    let left = QR_TTL
-    const tick = () => {
-      $('qrCountdown').textContent = left > 0 ? `约 ${left}s 后过期` : '已过期，点「刷新二维码」'
-      if (left <= 0) { clearInterval(qrTick); return }
-      left -= 1
-    }
-    tick()
-    qrTick = setInterval(tick, 1000)
   }
 
   async function quickLogin(uin, btn) {
