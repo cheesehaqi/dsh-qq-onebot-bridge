@@ -22,11 +22,11 @@
     --shadow:0 1px 2px rgba(16,24,40,.04), 0 12px 32px rgba(16,24,40,.06);
   }
   @media (prefers-color-scheme:dark){
-    :root{ --fg:#e6edf3; --muted:#a6b1bf; --line:#232a35; --bg:#0d1117; --card:#171f2b;
-      --pink:#ff8cc4; --pink-soft:#2a1622; --violet:#9d87ff; --violet-soft:#1b1730;
+    :root{ --fg:#e6edf3; --muted:#a6b1bf; --line:#232a35; --bg:#12141a; --card:#1a1d25;
+      --pink:#ff8cc4; --pink-soft:#2b1d24; --violet:#9184e8; --violet-soft:#211e2b;
       --accent:#ff8cc4; --ok:#3ddc91; --ok-soft:#0d2419; --warn:#e2b03a; --warn-soft:#241c08;
       --danger:#ff7b72; --danger-soft:#2b1414;
-      --shadow:0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.3); }
+      --shadow:0 1px 2px rgba(0,0,0,.22), 0 10px 28px rgba(0,0,0,.22); }
   }
 
   /* v0.7.11：手动主题（跟随系统 / 强制亮 / 强制暗）。选择存在 localStorage，刷新不丢。 */
@@ -34,10 +34,24 @@
     --pink:#ff7ab6; --pink-soft:#ffe8f3; --violet:#7c5cff; --violet-soft:#eee9ff;
     --accent:#e75480; --ok:#12a150; --ok-soft:#e6f7ee; --warn:#b7791f; --warn-soft:#fff8e6;
     --danger:#d92d20; --danger-soft:#ffeceb; }
-  html[data-theme="dark"]{ --fg:#e6edf3; --muted:#a6b1bf; --line:#232a35; --bg:#0d1117; --card:#171f2b;
-    --pink:#ff8cc4; --pink-soft:#2a1622; --violet:#9d87ff; --violet-soft:#1b1730;
+  html[data-theme="dark"]{ --fg:#d6dae2; --muted:#98a1ae; --line:rgba(255,255,255,.06); --bg:#141519; --card:#1c1d22;
+    --pink:#ff8cc4; --pink-soft:#2b1d24; --violet:#9d87ff; --violet-soft:#1b1730;
     --accent:#ff8cc4; --ok:#3ddc91; --ok-soft:#0d2419; --warn:#e2b03a; --warn-soft:#241c08;
     --danger:#ff7b72; --danger-soft:#2b1414; }
+  /* dark-bg-soft：暗色背景加极淡渐变，整屏不至于"死黑" */
+  html[data-theme="dark"] body{
+    background:
+      radial-gradient(1200px 520px at 18% -10%, rgba(255,140,196,.05), transparent 60%),
+      radial-gradient(900px 460px at 88% 0%, rgba(145,132,232,.05), transparent 62%),
+      var(--bg)
+  }
+
+  /* 暗色下卡片边框：半透明白叠加，比实色灰柔和 */
+  html[data-theme="dark"] .card{ border-color:rgba(255,255,255,.06) }
+  @media (prefers-color-scheme: dark){
+    .card{ border-color:rgba(255,255,255,.06) }
+  }
+
   /* 暗色下的输入控件：别用 --bg（接近纯黑），否则输入框像"黑洞" */
   html[data-theme="dark"] input, html[data-theme="dark"] textarea, html[data-theme="dark"] select{
     background:var(--card); color:var(--fg); border-color:var(--line)
