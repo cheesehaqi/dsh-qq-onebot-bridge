@@ -702,6 +702,51 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       return { ok: true, kind: 'ok', message: '已写入 ' + merged.length + ' 条（重启 NapCat 生效）', file, backup, requiresRestart: true, count: merged.length }
     },
     /**
+     * **整组替换** Websocket 服务器段（端口 / 名称 / 启停）。
+     * 与客户端那条路同规格：校验 → 备份 .bak → 写入；只动 network.websocketServers。
+     */
+    saveNetworkServers({ uin, servers = [], now = () => Date.now() } = {}) {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      if (dir === '') return { ok: false, kind: 'no-config', message: config.reason || '没有可用的 WebUI 配置' }
+      const clean = String(uin ?? '').trim()
+      if (!/^\d{5,12}$/.test(clean)) return { ok: false, kind: 'bad-input', message: 'QQ 号格式不对' }
+      if (Array.isArray(servers) === false) return { ok: false, kind: 'bad-input', message: 'servers 必须是数组' }
+      if (servers.length > 4) return { ok: false, kind: 'bad-input', message: '最多 4 个 WS 服务器' }
+      const file = join(dir, 'onebot11_' + clean + '.json')
+      if (existsSync(file) === false) return { ok: false, kind: 'not-found', message: '没有这个账号的 OneBot 配置：' + file }
+
+      const next = []
+      for (const item of servers) {
+        const port = Number(item?.port)
+        if (!Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, kind: 'bad-input', message: '端口必须是 1–65535 的整数（' + String(item?.port) + '）' }
+        const name = String(item?.name ?? '').trim() || ('ws-server-' + (next.length + 1))
+        if (name.length > 40) return { ok: false, kind: 'bad-input', message: '名称太长（≤40 字）' }
+        const host = String(item?.host ?? '').trim()
+        if (host.length > 64) return { ok: false, kind: 'bad-input', message: '监听地址太长（≤64 字）' }
+        next.push({ name, port, host, enable: item?.enable !== false })
+      }
+
+      let json
+      try { json = JSON.parse(readFileSync(file, 'utf8')) } catch (error) {
+        return { ok: false, kind: 'error', message: '配置读不出来：' + String(error?.message ?? error).slice(0, 100) }
+      }
+      const network = json.network ?? {}
+      const kept = Array.isArray(network.websocketServers) ? network.websocketServers : []
+      network.websocketServers = next.map((entry, index) => ({ ...(kept[index] ?? {}), name: entry.name, port: entry.port, host: entry.host, enable: entry.enable }))
+      json.network = network
+
+      const backup = file + '.bak-' + new Date(now()).toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      try { copyFileSync(file, backup) } catch (error) {
+        return { ok: false, kind: 'error', message: '备份失败，未写入：' + String(error?.message ?? error).slice(0, 100) }
+      }
+      try { writeFileSync(file, JSON.stringify(json, null, 2) + '\n', 'utf8') } catch (error) {
+        return { ok: false, kind: 'error', message: '写入失败（备份在 ' + backup + '）：' + String(error?.message ?? error).slice(0, 100) }
+      }
+      return { ok: true, kind: 'ok', message: '已写入 ' + next.length + ' 个 WS 服务器（重启 NapCat 生效）', file, backup, requiresRestart: true, count: next.length }
+    },
+
+    /**
      * 改 webui.json 的**端口与监听地址**（唯一允许动的两项）。
      * 规矩：
      *   ① 地址只接受回环（127.0.0.1 / ::1 / localhost）—— 不允许 0.0.0.0，避免把面板暴露到局域网；

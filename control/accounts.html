@@ -1262,11 +1262,27 @@
         }
       }
       if (netFilter === 'all' || netFilter === 'ws-server') {
-        for (const server of (row.servers ?? [])) {
-          cards.push('<div class="card" style="padding:16px"><b>' + escapeHtml(server.name ?? 'ws-server') + '</b>'
-            + '<div class="sub" style="margin:6px 0 0">QQ ' + row.uin + ' · Websocket 服务器</div>'
-            + '<div class="sub" style="margin:4px 0 0">端口 ' + (server.port ?? '—') + '（只读）</div></div>')
+        if ((row.servers ?? []).length === 0) {
+          cards.push('<div class="card" style="padding:16px"><b>WS 服务器</b>'
+            + '<div class="sub" style="margin:6px 0 10px">QQ ' + row.uin + ' 还没有 WS 服务器</div>'
+            + '<button data-addserver="' + uinIndex + '">新建 WS 服务器</button></div>')
+        } else {
+          cards.push('<div class="card" style="padding:16px;display:flex;align-items:center;justify-content:space-between">'
+            + '<div><b>WS 服务器</b><div class="sub" style="margin:4px 0 0">QQ ' + row.uin + ' · 共 ' + row.servers.length + ' 个</div></div>'
+            + '<button data-addserver="' + uinIndex + '">新建</button></div>')
         }
+        ;(row.servers ?? []).forEach(function (server, serverIndex) {
+          const on = server.enable !== false
+          cards.push('<div class="card" style="padding:16px">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">'
+            + '<b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(server.name || 'ws-server') + '</b>'
+            + '<button data-stoggle="' + uinIndex + ':' + serverIndex + '" class="' + (on ? 'primary' : '') + '">' + (on ? '已启用' : '已停用') + '</button></div>'
+            + '<div class="sub" style="margin:0 0 8px">QQ ' + row.uin + ' · Websocket 服务器</div>'
+            + '<input data-sfield="name:' + uinIndex + ':' + serverIndex + '" value="' + escapeHtml(server.name || '') + '" placeholder="名称" style="width:100%;margin-bottom:8px">'
+            + '<input data-sfield="port:' + uinIndex + ':' + serverIndex + '" value="' + (server.port ?? '') + '" placeholder="端口，如 3001" style="width:100%;margin-bottom:8px">'
+            + '<input data-sfield="host:' + uinIndex + ':' + serverIndex + '" value="' + escapeHtml(server.host || '') + '" placeholder="监听地址（可空，如 0.0.0.0）" style="width:100%">'
+            + '</div>')
+        })
       }
       if (netFilter === 'all' || netFilter === 'http-server') {
         for (const http of (row.https ?? [])) {
@@ -1283,6 +1299,9 @@
     for (const el of body.querySelectorAll('[data-add]')) el.onclick = () => addClient(Number(el.dataset.add))
     for (const el of body.querySelectorAll('[data-save]')) el.onclick = () => saveNetwork(Number(el.dataset.save), el)
     for (const el of body.querySelectorAll('[data-field]')) el.oninput = () => editField(el.dataset.field, el.value)
+    for (const el of body.querySelectorAll('[data-sfield]')) el.oninput = () => editServerField(el.dataset.sfield, el.value)
+    for (const el of body.querySelectorAll('[data-stoggle]')) el.onclick = () => toggleServer(el.dataset.stoggle)
+    for (const el of body.querySelectorAll('[data-addserver]')) el.onclick = () => addServer(Number(el.dataset.addserver))
   }
   const splitKey = (key) => key.split(':').map((part, index) => (index === 0 ? part : Number(part)))
 
@@ -1295,12 +1314,41 @@
     else if (kind === 'name') client.name = value
   }
 
+  function editServerField(field, value) {
+    const [kind, uinIndex, serverIndex] = splitKey(field)
+    const server = netDraft[uinIndex]?.servers?.[serverIndex]
+    if (!server) return
+    netDirty = true
+    if (kind === 'name') server.name = value
+    else if (kind === 'host') server.host = value
+    else if (kind === 'port') server.port = value === '' ? '' : Number(value)
+  }
+
+  function toggleServer(key) {
+    const [uinIndex, serverIndex] = splitKey(key)
+    const server = netDraft[uinIndex]?.servers?.[serverIndex]
+    if (!server) return
+    netDirty = true
+    server.enable = server.enable === false
+    renderNetwork()
+  }
+
   function toggleClient(key) {
     const [uinIndex, clientIndex] = splitKey(key)
     const client = netDraft[uinIndex]?.clients?.[clientIndex]
     if (!client) return
     netDirty = true
     client.enable = client.enable === false
+    renderNetwork()
+  }
+
+  function addServer(uinIndex) {
+    const row = netDraft[uinIndex]
+    if (!row) return
+    if (!Array.isArray(row.servers)) row.servers = []
+    if (row.servers.length >= 4) { toast('最多 4 个 WS 服务器', 'bad'); return }
+    netDirty = true
+    row.servers.push({ name: 'ws-server-' + (row.servers.length + 1), port: 3001, host: '', enable: true })
     renderNetwork()
   }
 
@@ -1331,6 +1379,8 @@
     for (const row of netDraft) {
       const bad = row.clients.find((client) => /^wss?:\/\/[^\s]+$/i.test(String(client.url).trim()) === false)
       if (bad) { toast('QQ ' + row.uin + ' 有地址不是 ws:// 或 wss:// 开头', 'bad'); return }
+      const badServer = (row.servers ?? []).find((server) => Number.isInteger(Number(server.port)) === false || Number(server.port) < 1 || Number(server.port) > 65535)
+      if (badServer) { toast('QQ ' + row.uin + ' 的 WS 服务器端口不是 1–65535', 'bad'); return }
     }
     if (!confirm('保存全部改动？写前会自动备份，改完需重启 NapCat 才生效。')) return
     busy(btn, true, '保存中…')
@@ -1339,6 +1389,10 @@
       if (!row.file) continue
       const result = await post('/api/accounts/network/save', { uin: row.uin, clients: row.clients })
       results.push({ uin: row.uin, result })
+      if (Array.isArray(row.servers) && row.servers.length > 0) {
+        const serverResult = await post('/api/accounts/network/servers', { uin: row.uin, servers: row.servers })
+        if (serverResult.ok !== true) results.push({ uin: row.uin + ' (WS 服务器)', result: serverResult })
+      }
     }
     busy(btn, false)
     const failed = results.filter((item) => item.result.ok !== true)

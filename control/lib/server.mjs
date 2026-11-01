@@ -530,6 +530,11 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
             if (typeof api.accounts?.saveNetworkClients !== 'function') return { ok: false, message: '当前控制台不支持保存网络配置' }
             return api.accounts.saveNetworkClients({ uin: String(body.uin ?? '').trim(), clients: Array.isArray(body.clients) ? body.clients : [] })
           },
+          // 0.8.1：WS 服务器段整组替换
+          '/api/accounts/network/servers': () => {
+            if (typeof api.accounts?.saveNetworkServers !== 'function') return { ok: false, message: '当前控制台不支持保存 WS 服务器' }
+            return api.accounts.saveNetworkServers({ uin: String(body.uin ?? '').trim(), servers: Array.isArray(body.servers) ? body.servers : [] })
+          },
           // 0.8.1：备份还原 / 移入回收
           '/api/accounts/backups/restore': () => {
             if (typeof api.accounts?.restoreBackup !== 'function') return { ok: false, message: '当前控制台不支持还原备份' }
