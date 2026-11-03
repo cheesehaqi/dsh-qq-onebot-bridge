@@ -86,5 +86,19 @@ check('★LOADERS 引用的加载器都在它之前定义（const 写在后面�
   return missing.length === 0
 })())
 
+check('★DOM 时序：脚本执行时元素必须已存在（放在 <script> 之后 → $(...)=null → 初始化中断）', (() => {
+  const scriptAt = html.indexOf('<script')
+  // 由 JS 动态创建的节点（页面里没有静态标记）
+  const dynamicIds = new Set(['btnStatusRetry', 'navIndicator', 'cfgPort', 'cfgHost', 'btnSaveCfg', 'cfgState'])
+  const ids = new Set([...script.matchAll(/\$\('([A-Za-z][\w-]*)'\)/g)].map((m) => m[1]))
+  const tooLate = [...ids].filter((id) => {
+    if (dynamicIds.has(id)) return false
+    const at = html.indexOf('id="' + id + '"')
+    return at < 0 || at > scriptAt
+  })
+  if (tooLate.length > 0) console.log('    脚本之后才出现（或根本不存在）：' + tooLate.join(', '))
+  return ids.size > 50 && tooLate.length === 0
+})())
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)
