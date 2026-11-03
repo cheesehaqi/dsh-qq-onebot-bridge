@@ -543,7 +543,27 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
     async plugins() {
       const config = readConfig()
       if (!guard(config)) return { ok: false, kind: 'no-config', message: config.reason || '没有可用的 WebUI 配置' }
-      return client(config).pluginList()
+      const result = await client(config).pluginList()
+      // 0.8.2：顺手把插件目录的**结构**带回去（只看一级目录名，不读内容）
+      const dir = dirname(config.path)
+      const pluginDir = join(dir, 'plugins')
+      let tree = { exists: false, dir: pluginDir, entries: [] }
+      if (existsSync(pluginDir)) {
+        try {
+          const names = readdirSync(pluginDir)
+          tree = {
+            exists: true,
+            dir: pluginDir,
+            entries: names.slice(0, 50).map((name) => {
+              const full = join(pluginDir, name)
+              let isDir = false
+              try { isDir = statSync(full).isDirectory() } catch { /* 忽略 */ }
+              return { name, isDir }
+            }),
+          }
+        } catch { /* 读不了就保持空 */ }
+      }
+      return { ...result, tree }
     },
     /** 插件商店列表（只读；安装请去 NapCat 自己点）。 */
     async store() {

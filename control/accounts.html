@@ -381,7 +381,8 @@
     <section class="section" id="tab-accounts">
       <div class="card wide">
         <h2>本机账号配置 <span class="badge" id="accountBadge">—</span></h2>
-      <div class="row" style="margin-bottom:10px"><input id="accountSearch" placeholder="按 QQ 号过滤" style="max-width:280px"></div>
+      <div class="row" style="margin-bottom:10px"><input id="accountSearch" placeholder="按 QQ 号过滤" style="max-width:280px">
+        <span class="sub" style="margin:0 0 0 8px">当前自动登录：<b id="autoLoginNow">—</b></span></div>
         <p class="sub">来自 <code>bootmain/config</code> 的 <code>onebot11_&lt;QQ号&gt;.json</code> / <code>napcat_&lt;QQ号&gt;.json</code>；只读文件名，不改内容。</p>
         <table>
           <thead><tr><th>QQ 号</th><th>OneBot 配置</th><th>NapCat 配置</th><th>登录状态</th><th>自动登录</th><th style="text-align:right">操作</th></tr></thead>
@@ -418,6 +419,8 @@
       <h2>插件管理 <span class="badge" id="pluginsBadge">—</span></h2>
       <p class="sub">启用 / 停用 / 卸载（卸载会删文件，二次确认）<code style="margin-left:6px">/api/accounts/plugins</code></p>
       <div id="pluginsBody" class="empty">切换到这里会自动加载</div>
+      <h3 style="font-size:13px;margin:16px 0 6px">插件目录 <span class="badge" id="pluginTreeBadge">—</span></h3>
+      <div id="pluginTree" class="sub" style="margin:0">切换到这里会自动加载</div>
       <div class="row" style="margin-top:14px">
         <button id="btn-plugins">刷新</button>
         <button class="primary" id="btn-openPlugins">打开插件目录 →</button>
@@ -547,6 +550,12 @@
             <option value="trace">事件流（qq-trace.jsonl）</option>
           </select>
           <select id="napcatLogFile" style="font:inherit;padding:7px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-width:200px"></select>
+          <select id="logRange" style="font:inherit;padding:7px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)">
+            <option value="0">全部时间</option>
+            <option value="300000">最近 5 分钟</option>
+            <option value="3600000">最近 1 小时</option>
+            <option value="86400000">最近 24 小时</option>
+          </select>
           <span class="tag" id="logModeTag">实时</span>
           <button id="btnLogMode">切到历史</button>
           <button id="btnLogRefresh">重连</button>
@@ -819,6 +828,8 @@
     state.autoUin = auto
     const body = $('accountRows')
     $('accountBadge').textContent = `${rows.length} 个`
+    const autoNow = $('autoLoginNow')
+    if (autoNow) autoNow.textContent = auto === '' ? '未设置' : auto
     if (rows.length === 0) {
       body.innerHTML = '<tr><td colspan="6"><div class="empty">没有找到账号配置文件</div></td></tr>'
       return
@@ -1531,7 +1542,18 @@
     }
     const list = Array.isArray(data.data?.plugins) ? data.data.plugins : (Array.isArray(data.data) ? data.data : [])
     pluginCache = list
-    $('pluginsBadge').textContent = list.length + ' 个' + (data.data?.pluginManagerNotFound ? '（插件管理器未加载）' : '')
+    $('pluginsBadge').textContent = list.length + ' 个'
+    const tree = data.tree ?? { exists: false, entries: [] }
+    const treeBox = $('pluginTree')
+    if (treeBox) {
+      const entries = Array.isArray(tree.entries) ? tree.entries : []
+      $('pluginTreeBadge').textContent = tree.exists === true ? entries.length + ' 项' : '不存在'
+      treeBox.innerHTML = tree.exists !== true
+        ? '还没有 plugins 目录（点上面的「创建目录（缺失时）」）'
+        : (entries.length === 0
+          ? '目录是空的：<code>' + escapeHtml(tree.dir ?? '') + '</code>'
+          : entries.slice(0, 30).map((entry) => '<code>' + escapeHtml(entry.name) + (entry.isDir ? '/' : '') + '</code>').join(' · '))
+    } + (data.data?.pluginManagerNotFound ? '（插件管理器未加载）' : '')
     if (list.length === 0) { body.innerHTML = '<div class="empty">（没有安装插件）</div>'; return }
     body.innerHTML = '<table><thead><tr><th>插件</th><th>版本</th><th>作者</th><th>状态</th><th style="text-align:right">操作</th></tr></thead><tbody>'
       + list.map((item) => {
@@ -1620,6 +1642,94 @@
     renderOpLog()
     toast('操作记录已清空', 'ok')
   }
+
+  /** 最近一次 warn/error：从 trace 里捞，给"到底哪里疼"一个入口。 */
+  async function loadLastError() {
+    const box = $('lastError')
+    const data = await api('/api/trace?limit=200')
+    const events = Array.isArray(data.events) ? data.events : []
+    const bad = events.filter((event) => event.level === 'error' || event.level === 'warn')
+    const latest = bad[0]
+    if (!latest) {
+      $('lastErrorBadge').textContent = '干净'
+      box.textContent = '最近 200 条事件里没有 warn / error。'
+      opLog('查最近错误：无')
+      return
+    }
+    $('lastErrorBadge').textContent = latest.level === 'error' ? '有错误' : '有告警'
+    box.innerHTML = '<div>' + escapeHtml(new Date(latest.ts).toLocaleString('zh-CN', { hour12: false }))
+      + ' · <b>' + escapeHtml(latest.level) + '</b> · ' + escapeHtml(latest.stage ?? '-') + '</div>'
+      + '<div style="margin-top:4px">' + escapeHtml(latest.reason ?? latest.message ?? '（没有原因字段）') + '</div>'
+    opLog('查最近错误：' + latest.level)
+  }
+  const lastErrBtn = $('btnLastError')
+  if (lastErrBtn) lastErrBtn.onclick = () => loadLastError()
+  const lastErrJump = $('btnLastErrorJump')
+  if (lastErrJump) lastErrJump.onclick = () => activate('logs')
+
+  // ---------- 命令面板（Ctrl+K） ----------
+  const palette = $('palette')
+  const paletteInput = $('paletteInput')
+  const paletteList = $('paletteList')
+  let paletteItems = []
+  let paletteIndex = 0
+
+  const paletteSource = () => {
+    const sections = [
+      ['home', '基础信息'], ['test', '实时测试'], ['accounts', '账号配置'], ['network', '网络配置'],
+      ['files', '文件管理'], ['plugins', '插件管理'], ['logs', '运行日志'], ['stats', '运行与设备'],
+      ['config', '系统配置'], ['log', '操作记录'], ['about', '关于'],
+    ].map(([key, label]) => ({ label: '跳转：' + label, run: () => activate(key) }))
+    const actions = [
+      { label: '动作：刷新登录状态', run: () => refreshStatus(false) },
+      { label: '动作：刷新页面数据', run: () => { loadMeta(); refreshStatus(true); opLog('刷新页面数据') } },
+      { label: '动作：打开 NapCat', run: () => window.open('/api/napcat/open?token=' + encodeURIComponent(token), '_blank', 'noopener') },
+      { label: '动作：导出诊断包（脱敏）', run: () => window.open('/api/export?redact=1&token=' + encodeURIComponent(token), '_blank', 'noopener') },
+      { label: '动作：清空操作记录', run: () => { try { localStorage.removeItem(OP_LOG_KEY) } catch { /* 忽略 */ } renderOpLog(); toast('操作记录已清空', 'ok') } },
+    ]
+    return [...sections, ...actions]
+  }
+
+  const renderPalette = () => {
+    const query = paletteInput.value.trim().toLowerCase()
+    const all = paletteSource()
+    paletteItems = query === '' ? all : all.filter((item) => item.label.toLowerCase().includes(query))
+    if (paletteIndex >= paletteItems.length) paletteIndex = 0
+    paletteList.innerHTML = paletteItems.length === 0
+      ? '<div class="empty" style="padding:16px">没有匹配项</div>'
+      : paletteItems.map((item, index) => '<div data-palette="' + index + '" style="padding:10px 16px;cursor:pointer;' + (index === paletteIndex ? 'background:var(--pink-soft)' : '') + '">' + escapeHtml(item.label) + '</div>').join('')
+    for (const row of paletteList.querySelectorAll('[data-palette]')) row.onclick = () => runPalette(Number(row.dataset.palette))
+  }
+
+  const runPalette = (index) => {
+    const item = paletteItems[index]
+    closePalette()
+    if (item) item.run()
+  }
+  const openPalette = () => {
+    palette.classList.remove('hidden')
+    paletteInput.value = ''
+    paletteIndex = 0
+    renderPalette()
+    setTimeout(() => paletteInput.focus(), 0)
+  }
+  const closePalette = () => palette.classList.add('hidden')
+
+  paletteInput.oninput = () => { paletteIndex = 0; renderPalette() }
+  palette.onclick = (event) => { if (event.target === palette) closePalette() }
+  paletteInput.onkeydown = (event) => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); paletteIndex = Math.min(paletteIndex + 1, paletteItems.length - 1); renderPalette() }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); paletteIndex = Math.max(paletteIndex - 1, 0); renderPalette() }
+    else if (event.key === 'Enter') { event.preventDefault(); runPalette(paletteIndex) }
+    else if (event.key === 'Escape') { closePalette() }
+  }
+  document.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault()
+      if (palette.classList.contains('hidden')) openPalette()
+      else closePalette()
+    }
+  })
 
   const exportBtn = $('btnExport')
   if (exportBtn) exportBtn.onclick = () => {
@@ -1845,6 +1955,10 @@
       counts[lv] += 1
       if (level !== 'all' && lv !== level) continue
       if (logInfoOnly === true && lv === 'debug') continue
+      if (logRangeMs > 0) {
+        const stamp = lineTimestamp(line, Date.now())
+        if (stamp !== null && Date.now() - stamp > logRangeMs) continue
+      }
       if (keyword !== '' && !line.toLowerCase().includes(keyword)) continue
       // 相邻完全相同的行只留一条（实时帧与历史合并时常见），避免"同一行刷两遍"
       if (kept.length > 0 && kept[kept.length - 1] === line) continue
@@ -2018,9 +2132,17 @@
     try { await navigator.clipboard.writeText(logText); toast('已复制到剪贴板', 'ok') }
     catch { toast('浏览器不让写剪贴板，请手动选中复制', 'warn') }
   }
+  const logRangeSelect = $('logRange')
+  if (logRangeSelect) logRangeSelect.onchange = () => {
+    logRangeMs = Number(logRangeSelect.value) || 0
+    renderLines()
+  }
   $('btnLogDownload').onclick = () => {
-    if (logText === '') { toast('没有可下载的内容', 'warn'); return }
-    const blob = new Blob([logText], { type: 'text/plain;charset=utf-8' })
+    // 有筛选（级别 / 关键词 / 时间 / 折叠）时导出的就是筛选后的行，否则退回原文
+    const filtered = Array.isArray(logKept) && logKept.length > 0 ? logKept : null
+    const content = filtered !== null ? filtered.join('\n') : logText
+    if (content === '') { toast('没有可下载的内容', 'warn'); return }
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
     link.download = 'qq-account-log-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.log'
@@ -2126,5 +2248,12 @@
   refreshStatus(true)
 })()
 </script>
+
+  <div id="palette" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;z-index:9999">
+    <div class="card" style="width:min(560px,92vw);padding:0;overflow:hidden">
+      <input id="paletteInput" placeholder="跳转分区或执行动作…（Ctrl+K）" style="width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:14px 16px;font-size:15px">
+      <div id="paletteList" style="max-height:44vh;overflow:auto"></div>
+    </div>
+  </div>
 </body>
 </html>
