@@ -597,6 +597,13 @@
 </div>
 <div id="toasts"></div>
 
+  <div id="palette" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;z-index:9999">
+    <div class="card" style="width:min(560px,92vw);padding:0;overflow:hidden">
+      <input id="paletteInput" placeholder="跳转分区或执行动作…（Ctrl+K）" style="width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:14px 16px;font-size:15px">
+      <div id="paletteList" style="max-height:44vh;overflow:auto"></div>
+    </div>
+  </div>
+
 <script>
 (() => {
   const token = new URLSearchParams(location.search).get('token') ?? ''
@@ -2249,11 +2256,5 @@
 })()
 </script>
 
-  <div id="palette" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;z-index:9999">
-    <div class="card" style="width:min(560px,92vw);padding:0;overflow:hidden">
-      <input id="paletteInput" placeholder="跳转分区或执行动作…（Ctrl+K）" style="width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:14px 16px;font-size:15px">
-      <div id="paletteList" style="max-height:44vh;overflow:auto"></div>
-    </div>
-  </div>
 </body>
 </html>
