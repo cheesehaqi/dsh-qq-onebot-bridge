@@ -1561,11 +1561,12 @@
     if (treeBox) {
       const entries = Array.isArray(tree.entries) ? tree.entries : []
       $('pluginTreeBadge').textContent = tree.exists === true ? entries.length + ' 项' : '不存在'
+      treeBox.dataset.dir = tree.dir ?? ''
       treeBox.innerHTML = tree.exists !== true
         ? '还没有 plugins 目录（点上面的「创建目录（缺失时）」）'
         : (entries.length === 0
           ? '目录是空的：<code>' + escapeHtml(tree.dir ?? '') + '</code>'
-          : entries.slice(0, 30).map((entry) => '<code>' + escapeHtml(entry.name) + (entry.isDir ? '/' : '') + '</code>').join(' · '))
+          : entries.slice(0, 30).map((entry) => '<button class="tag" data-plugpath="' + escapeHtml(entry.name) + '" style="margin:2px;cursor:pointer">' + escapeHtml(entry.name) + (entry.isDir ? '/' : '') + '</button>').join(' '))
     } + (data.data?.pluginManagerNotFound ? '（插件管理器未加载）' : '')
     if (list.length === 0) { body.innerHTML = '<div class="empty">（没有安装插件）</div>'; return }
     body.innerHTML = '<table><thead><tr><th>插件</th><th>版本</th><th>作者</th><th>状态</th><th style="text-align:right">操作</th></tr></thead><tbody>'
@@ -1694,6 +1695,16 @@
       ['files', '文件管理'], ['plugins', '插件管理'], ['logs', '运行日志'], ['stats', '运行与设备'],
       ['config', '系统配置'], ['log', '操作记录'], ['about', '关于'],
     ].map(([key, label]) => ({ label: '跳转：' + label, run: () => activate(key) }))
+    const accountItems = (Array.isArray(state.accountRows) ? state.accountRows : []).map((row) => ({
+      label: '账号：QQ ' + row.uin + (row.uin === (state.autoUin ?? '') ? '（自动登录）' : ''),
+      run: () => {
+        activate('accounts')
+        state.accountQuery = String(row.uin)
+        const input = $('accountSearch')
+        if (input) input.value = String(row.uin)
+        if (Array.isArray(state.accountRows)) renderAccounts(state.accountRows, state.autoUin ?? '')
+      },
+    }))
     const actions = [
       { label: '动作：刷新登录状态', run: () => refreshStatus(false) },
       { label: '动作：刷新页面数据', run: () => { loadMeta(); refreshStatus(true); opLog('刷新页面数据') } },
@@ -1701,7 +1712,7 @@
       { label: '动作：导出诊断包（脱敏）', run: () => window.open('/api/export?redact=1&token=' + encodeURIComponent(token), '_blank', 'noopener') },
       { label: '动作：清空操作记录', run: () => { try { localStorage.removeItem(OP_LOG_KEY) } catch { /* 忽略 */ } renderOpLog(); toast('操作记录已清空', 'ok') } },
     ]
-    return [...sections, ...actions]
+    return [...sections, ...accountItems, ...actions]
   }
 
   const renderPalette = () => {
@@ -1952,6 +1963,22 @@
   /** 超长行折叠：NapCat 会打几百 KB 的单行（数字数组、JSON 包体），逐字折行就成了"一堵墙"。 */
   let logFoldLong = true
   let logInfoOnly = false   // 只看 Info 以上（藏掉 DEBUG）
+  let logKept = []          // 最近一次渲染保留的行（供下载）
+  let logRangeMs = 0        // 0 = 不过滤
+  let logKeyword = ''       // 最近一次的关键词（renderLines 里是局部 const，偏好要用这个）
+  const LOG_PREFS_KEY = 'qq-log-prefs'
+  const readLogPrefs = () => {
+    try {
+      const raw = localStorage.getItem(LOG_PREFS_KEY)
+      const parsed = raw ? JSON.parse(raw) : null
+      return parsed !== null && typeof parsed === 'object' ? parsed : {}
+    } catch { return {} }
+  }
+  const saveLogPrefs = () => {
+    try {
+      localStorage.setItem(LOG_PREFS_KEY, JSON.stringify({ level, keyword: logKeyword, range: logRangeMs, fold: logFoldLong, infoOnly: logInfoOnly }))
+    } catch { /* 忽略 */ }
+  }
   const FOLD_LIMIT = 600
   const foldLongLine = (line) => {
     if (logFoldLong !== true) return line
@@ -1962,6 +1989,7 @@
 
   const renderLines = () => {
     const keyword = $('logSearch').value.trim().toLowerCase()
+  logKeyword = keyword
     const counts = { info: 0, warn: 0, error: 0 }
     const kept = []
     for (const line of collapseQrArt(rawLines)) {
@@ -2013,6 +2041,7 @@
     logKept = kept
     $('logBadge').textContent = kept.length + '/' + rawLines.length + ' 行' + (level === 'all' ? '' : ' · ' + level)
     if (follow) pre.scrollTop = pre.scrollHeight
+    saveLogPrefs()
   }
   const stopLive = () => {
     if (liveStream !== null) { liveStream.abort(); liveStream = null }
@@ -2146,6 +2175,30 @@
     try { await navigator.clipboard.writeText(logText); toast('已复制到剪贴板', 'ok') }
     catch { toast('浏览器不让写剪贴板，请手动选中复制', 'warn') }
   }
+  // 恢复上次的筛选偏好（级别 / 关键词 / 时间 / 折叠 / 只看 Info）
+  ;(() => {
+    const prefs = readLogPrefs()
+    if (typeof prefs.level === 'string') level = prefs.level
+    if (typeof prefs.keyword === 'string') logKeyword = prefs.keyword
+    if (Number.isFinite(Number(prefs.range))) logRangeMs = Number(prefs.range)
+    if (typeof prefs.fold === 'boolean') logFoldLong = prefs.fold
+    if (typeof prefs.infoOnly === 'boolean') logInfoOnly = prefs.infoOnly
+    const search = $('logSearch')
+    if (search && logKeyword !== '') search.value = logKeyword
+    const range = $('logRange')
+    if (range) range.value = String(logRangeMs)
+    const foldBtnInit = $('btnLogFold')
+    if (foldBtnInit) {
+      foldBtnInit.textContent = logFoldLong ? '折叠超长行：开' : '折叠超长行：关'
+      foldBtnInit.classList.toggle('primary', logFoldLong)
+    }
+    const infoOnlyInit = $('btnLogInfoOnly')
+    if (infoOnlyInit) {
+      infoOnlyInit.textContent = logInfoOnly ? '只看 Info 以上：开' : '只看 Info 以上'
+      infoOnlyInit.classList.toggle('primary', logInfoOnly)
+    }
+  })()
+
   const logRangeSelect = $('logRange')
   if (logRangeSelect) logRangeSelect.onchange = () => {
     logRangeMs = Number(logRangeSelect.value) || 0
