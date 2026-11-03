@@ -337,6 +337,12 @@
         </div>
 
         <div class="card wide">
+          <h2>最近一次错误 <span class="badge" id="lastErrorBadge">—</span></h2>
+          <div id="lastError" class="sub" style="margin:0">点「刷新」从最近 200 条 trace 里找 warn / error。</div>
+          <div class="row" style="margin-top:10px"><button id="btnLastError">刷新</button><button id="btnLastErrorJump">查看日志 →</button></div>
+        </div>
+
+        <div class="card wide">
           <h2>运行状态 <span class="badge" id="badgeSys">—</span></h2>
           <p class="sub">来自 NapCat 的 <code>GetSysStatusRealTime</code>（SSE，取一帧即断开；控制台缓存 20 秒）。</p>
           <div class="gauges">
@@ -1653,6 +1659,7 @@
   /** 最近一次 warn/error：从 trace 里捞，给"到底哪里疼"一个入口。 */
   async function loadLastError() {
     const box = $('lastError')
+    if (!box) return
     const data = await api('/api/trace?limit=200')
     const events = Array.isArray(data.events) ? data.events : []
     const bad = events.filter((event) => event.level === 'error' || event.level === 'warn')
