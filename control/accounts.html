@@ -381,6 +381,7 @@
     <section class="section" id="tab-accounts">
       <div class="card wide">
         <h2>本机账号配置 <span class="badge" id="accountBadge">—</span></h2>
+      <div class="row" style="margin-bottom:10px"><input id="accountSearch" placeholder="按 QQ 号过滤" style="max-width:280px"></div>
         <p class="sub">来自 <code>bootmain/config</code> 的 <code>onebot11_&lt;QQ号&gt;.json</code> / <code>napcat_&lt;QQ号&gt;.json</code>；只读文件名，不改内容。</p>
         <table>
           <thead><tr><th>QQ 号</th><th>OneBot 配置</th><th>NapCat 配置</th><th>登录状态</th><th>自动登录</th><th style="text-align:right">操作</th></tr></thead>
@@ -402,6 +403,7 @@
     <section class="section" id="tab-files"><div class="card wide">
       <h2>文件管理 <span class="badge" id="filesBadge">—</span></h2>
       <p class="sub">列 bootmain/config 目录（只读）<code style="margin-left:6px">/api/accounts/files</code></p>
+      <div class="row" style="margin-bottom:10px"><input id="fileSearch" placeholder="按文件名过滤（支持 *.json）" style="flex:1"></div>
       <div id="filesBody" class="empty">切换到这里会自动加载</div>
       <h3 style="font-size:13px;margin:18px 0 8px">配置备份 <span class="badge" id="backupBadge">—</span></h3>
       <p class="sub" style="margin:0 0 10px">每次写配置前都会留一份 <code>.bak-时间戳</code>；还原前会把当前文件另存 <code>.pre-restore-*</code>，删除是移到 <code>config/_trash/</code>，都不会真删。</p>
@@ -575,6 +577,7 @@
     <section class="section" id="tab-log">
       <div class="card wide">
         <h2>操作记录</h2>
+      <div class="row" style="margin-bottom:10px"><button id="btnOpExport">导出</button><button id="btnOpClear">清空</button></div>
         <p class="sub">只记这个页面点过什么（内存里，刷新即清），方便确认“我到底点没点”。</p>
         <ol id="opLog" style="margin:0;padding-left:20px;color:var(--muted);font-size:13px">
           <li class="empty" style="list-style:none;padding:0">还没有操作</li>
@@ -820,9 +823,11 @@
       body.innerHTML = '<tr><td colspan="6"><div class="empty">没有找到账号配置文件</div></td></tr>'
       return
     }
+    const query = (state.accountQuery ?? '').trim()
+    const shown = query === '' ? rows : rows.filter((row) => String(row.uin).includes(query))
     const onlineUin = state.loginInfo?.uin ?? ''
     const loggedIn = state.status?.data?.isLogin === true
-    body.innerHTML = rows.map((row) => `<tr>
+    body.innerHTML = shown.map((row) => `<tr>
       <td><code>${row.uin}</code></td>
       <td>${row.hasOneBotConfig ? '<span class="tag ok">有</span>' : '<span class="tag">无</span>'}</td>
       <td>${row.hasNapCatConfig ? '<span class="tag ok">有</span>' : '<span class="tag">无</span>'}</td>
@@ -1588,6 +1593,34 @@
     $('apiSys').innerHTML = (sys === null || sys === undefined) ? mark(false) : (mark(true) + ' ' + (sys.cpu?.model ?? ''))
   }
 
+  const accountSearch = $('accountSearch')
+  if (accountSearch) accountSearch.oninput = () => {
+    state.accountQuery = accountSearch.value
+    if (Array.isArray(state.accountRows)) renderAccounts(state.accountRows, state.autoUin ?? '')
+  }
+
+  const fileSearch = $('fileSearch')
+  if (fileSearch) fileSearch.oninput = () => { fileQuery = fileSearch.value.trim(); loadFiles() }
+
+  const opExportBtn = $('btnOpExport')
+  if (opExportBtn) opExportBtn.onclick = () => {
+    const entries = readOpLog()
+    if (entries.length === 0) { toast('还没有操作', 'bad'); return }
+    const blob = new Blob([entries.join('\n')], { type: 'text/plain;charset=utf-8' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = 'qq-account-oplog-' + new Date().toISOString().slice(0, 10) + '.txt'
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(link.href), 2000)
+  }
+  const opClearBtn = $('btnOpClear')
+  if (opClearBtn) opClearBtn.onclick = () => {
+    if (!confirm('清空本机的操作记录？此操作不可恢复')) return
+    try { localStorage.removeItem(OP_LOG_KEY) } catch { /* 忽略 */ }
+    renderOpLog()
+    toast('操作记录已清空', 'ok')
+  }
+
   const exportBtn = $('btnExport')
   if (exportBtn) exportBtn.onclick = () => {
     // 走控制台已有的 /api/export：redact=1 → QQ 号掩码、消息只留长度，可直接发人
@@ -1604,6 +1637,7 @@
     if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
     return (bytes / 1048576).toFixed(1) + ' MB'
   }
+  let fileQuery = ''
   async function loadFiles() {
     const btn = $('btn-files'); busy(btn, true, '读取中…')
     const data = await api('/api/accounts/files'); busy(btn, false)
@@ -1615,10 +1649,17 @@
     }
     filesDir = data.dir ?? ''
     const entries = data.entries ?? []
-    $('filesBadge').textContent = entries.length + ' 项'
-    body.innerHTML = entries.length === 0 ? '<div class="empty">目录是空的</div>'
+    const visibleEntries = fileQuery === ''
+      ? entries
+      : entries.filter((entry) => {
+        const name = String(entry.name ?? '')
+        const pattern = fileQuery.replace(/[.+^${}()|[\]\\]/g, function (ch) { return '\\' + ch }).replace(/\*/g, '.*')
+        return new RegExp(pattern, 'i').test(name)
+      })
+    $('filesBadge').textContent = (fileQuery === '' ? entries.length : visibleEntries.length + '/' + entries.length) + ' 项'
+    body.innerHTML = visibleEntries.length === 0 ? '<div class="empty">' + (fileQuery === '' ? '目录是空的' : '没有匹配「' + escapeHtml(fileQuery) + '」的文件') + '</div>'
       : '<table><thead><tr><th>文件</th><th>大小</th><th>修改时间</th></tr></thead><tbody>'
-        + entries.map((entry) => '<tr><td><code>' + entry.name + '</code>' + (entry.isDir ? ' <span class="tag">目录</span>' : '') + '</td>'
+        + visibleEntries.map((entry) => '<tr><td><code>' + entry.name + '</code>' + (entry.isDir ? ' <span class="tag">目录</span>' : '') + '</td>'
           + '<td>' + (entry.isDir ? '—' : humanSize(entry.size)) + '</td>'
           + '<td class="sub" style="margin:0">' + (entry.mtime ? new Date(entry.mtime).toLocaleString('zh-CN', { hour12: false }) : '—') + '</td></tr>').join('')
         + '</tbody></table>'
@@ -1841,6 +1882,7 @@
         return escapeHtml(line).replace(pattern, '<mark style="background:var(--warn-soft);color:inherit;border-radius:3px">$1</mark>')
       }).join('\n')
     }
+    logKept = kept
     $('logBadge').textContent = kept.length + '/' + rawLines.length + ' 行' + (level === 'all' ? '' : ' · ' + level)
     if (follow) pre.scrollTop = pre.scrollHeight
   }
