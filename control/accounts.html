@@ -537,6 +537,7 @@
             <input id="testScenTarget" placeholder="被操作 QQ（踢人用）" style="width:180px">
           </div>
           <div class="row"><button id="btnScenario">一键注入场景</button><span class="sub" id="scenState" style="margin:0"></span></div>
+          <div class="sub" id="scenNote" style="margin:8px 0 0">—</div>
         </div>
       </div>
 
@@ -1051,11 +1052,22 @@
     $('testState').textContent = (result.ok ? '✅ ' : '⚠️ ') + (result.reason ?? '已清空')
     opLog('清空注入队列')
   }
+  let scenarioCache = []
   async function loadScenarios() {
     const data = await api('/api/scenarios')
     const list = data.scenarios ?? []
-    $('testScenario').innerHTML = list.map((item) => '<option value="' + item.id + '">' + (item.title ?? item.id) + '</option>').join('')
+    scenarioCache = list
+    $('testScenario').innerHTML = list.map((item) => '<option value="' + item.id + '">' + (item.name ?? item.id) + '</option>').join('')
+    showScenarioNote()
   }
+  function showScenarioNote() {
+    const pick = $('testScenario')
+    const note = $('scenNote')
+    if (!pick || !note) return
+    const hit = scenarioCache.find((item) => item.id === pick.value)
+    note.textContent = hit ? ('验证：' + (hit.note ?? '—')) + ((hit.needs ?? []).length > 0 ? '（需要：' + hit.needs.join(' / ') + '）' : '') : ''
+  }
+
   async function runScenario() {
     const btn = $('btnScenario'); busy(btn, true, '注入中…')
     const scenario = $('testScenario').value
@@ -1226,6 +1238,8 @@
   $('btnTestClear').onclick = () => clearInjectQueue()
   loadScenarios()
   $('btnScenario').onclick = () => runScenario()
+  const scenarioPick = $('testScenario')
+  if (scenarioPick) scenarioPick.onchange = () => showScenarioNote()
 
   // ---------- 只读分区（网络 / 文件 / 插件 / 商店 / 统计 / 配置 / 关于） ----------
   const pretty = (value) => {
