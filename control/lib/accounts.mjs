@@ -564,8 +564,14 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
             entries: names.slice(0, 50).map((name) => {
               const full = join(pluginDir, name)
               let isDir = false
+              let hasConfig = false
+              let hasPages = false
               try { isDir = statSync(full).isDirectory() } catch { /* 忽略 */ }
-              return { name, isDir }
+              if (isDir) {
+                hasConfig = existsSync(join(full, 'config'))
+                hasPages = existsSync(join(full, 'pages'))
+              }
+              return { name, isDir, hasConfig, hasPages }
             }),
           }
         } catch { /* 读不了就保持空 */ }

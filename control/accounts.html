@@ -401,6 +401,7 @@
     <section class="section" id="tab-network">
       <div class="row" style="justify-content:space-between;align-items:baseline;margin-bottom:12px">
         <h2 style="margin:0">网络配置 <span class="badge" id="networkBadge">—</span></h2>
+        <span class="badge" id="netDirtyTag" style="display:none;color:var(--warn)">有未保存的修改</span>
         <span class="sub" style="margin:0">读 onebot11_*.json <code>/api/accounts/network</code></span>
       </div>
       <div class="row" id="networkToolbar" style="margin-bottom:12px"></div>
@@ -542,6 +543,7 @@
         <pre id="testEvents" style="margin:0;padding:12px;border-radius:12px;background:var(--bg);border:1px solid var(--line);height:calc(100vh - 470px);min-height:180px;overflow:auto;font:12.5px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all">（还没有事件）</pre>
         <div class="row" style="margin-top:12px">
           <button id="btnTestEvents">刷新</button>
+          <button id="btnTestFailOnly">只看失败</button>
           <button id="btnTestFollow" class="primary">自动跟随：开</button>
         </div>
       </div>
@@ -1053,23 +1055,35 @@
   }
   // ---------- 最近事件（实时测试页下方） ----------
   let testFollow = true
+  let testFailOnly = false
   let testTimer = null
-  async function loadTestEvents() {
-    const data = await api('/api/trace?limit=30')
-    const events = Array.isArray(data.events) ? data.events : (Array.isArray(data) ? data : [])
+  let testEventsCache = []
+  let testEventsError = ''
+  function renderTestEvents() {
     const pre = $('testEvents')
+    if (!pre) return
+    let events = testEventsCache
+    if (testFailOnly === true) events = events.filter((event) => event.ok === false)
     if (events.length === 0) {
-      pre.textContent = data.ok === false ? (data.reason ?? '取不到事件') : '（还没有事件）'
+      pre.textContent = testEventsError !== '' ? testEventsError : (testFailOnly === true ? '（没有失败事件）' : '（还没有事件）')
       $('testEventsBadge').textContent = '0 条'
       return
     }
-    $('testEventsBadge').textContent = events.length + ' 条'
+    $('testEventsBadge').textContent = events.length + ' 条' + (testFailOnly === true ? ' · 只看失败' : '')
     pre.textContent = events.slice(-30).map((event) => {
       const time = event.at ? String(event.at).slice(11, 19) : ''
       const mark = event.ok === false ? '✗' : '✓'
       return [time, mark, event.stage ?? '', event.reason ?? ''].filter(Boolean).join(' ')
     }).join('\n')
     if (testFollow) pre.scrollTop = pre.scrollHeight
+  }
+
+  async function loadTestEvents() {
+    const data = await api('/api/trace?limit=30')
+    const events = Array.isArray(data.events) ? data.events : (Array.isArray(data) ? data : [])
+    testEventsCache = events
+    testEventsError = data.ok === false ? (data.reason ?? '取不到事件') : ''
+    renderTestEvents()
   }
   const startTestFollow = () => {
     if (testTimer !== null) clearInterval(testTimer)
@@ -1396,6 +1410,8 @@
     const client = netDraft[uinIndex]?.clients?.[clientIndex]
     if (!client) return
     netDirty = true
+    const dirtyTag = $('netDirtyTag')
+    if (dirtyTag) dirtyTag.style.display = 'inline-block'
     if (kind === 'url') client.url = value
     else if (kind === 'name') client.name = value
   }
@@ -1579,20 +1595,11 @@
 
   /** 插件管理：真列表 + 启用/停用 + 卸载（卸载要二次确认）。 */
   let pluginCache = []
-  async function loadPlugins() {
-    const btn = $('btn-plugins'); busy(btn, true, '读取中…')
-    const data = await api('/api/accounts/plugins'); busy(btn, false)
-    const body = $('pluginsBody')
-    if (data.ok !== true) {
-      $('pluginsBadge').textContent = KIND[data.kind] ?? '失败'
-      body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? '取不到插件列表') + '</div>'
-      return
-    }
-    const list = Array.isArray(data.data?.plugins) ? data.data.plugins : (Array.isArray(data.data) ? data.data : [])
-    pluginCache = list
-    $('pluginsBadge').textContent = list.length + ' 个'
-    const tree = data.tree ?? { exists: false, entries: [] }
+  /** 插件目录结构渲染（失败分支也要用，所以抽出来）。 */
+  function renderPluginTree(info) {
+    const tree = info ?? { exists: false, entries: [] }
     const treeBox = $('pluginTree')
+    if (!treeBox) return
     if (treeBox) {
       const entries = Array.isArray(tree.entries) ? tree.entries : []
       $('pluginTreeBadge').textContent = tree.exists === true ? entries.length + ' 项' : '不存在'
@@ -1601,8 +1608,31 @@
         ? '还没有 plugins 目录（点上面的「创建目录（缺失时）」）'
         : (entries.length === 0
           ? '目录是空的：<code>' + escapeHtml(tree.dir ?? '') + '</code>'
-          : entries.slice(0, 30).map((entry) => '<button class="tag" data-plugpath="' + escapeHtml(entry.name) + '" style="margin:2px;cursor:pointer">' + escapeHtml(entry.name) + (entry.isDir ? '/' : '') + '</button>').join(' '))
-    } + (data.data?.pluginManagerNotFound ? '（插件管理器未加载）' : '')
+          : entries.slice(0, 30).map((entry) => {
+            const marks = []
+            if (entry.hasConfig === true) marks.push('config')
+            if (entry.hasPages === true) marks.push('pages')
+            const label = escapeHtml(entry.name) + (entry.isDir ? '/' : '') + (marks.length > 0 ? ' [' + marks.join('+') + ']' : '')
+            return '<button class="tag" data-plugpath="' + escapeHtml(entry.name) + '" title="点击复制完整路径" style="margin:2px;cursor:pointer">' + label + '</button>'
+          }).join(' '))
+    }
+  }
+
+  async function loadPlugins() {
+    const btn = $('btn-plugins'); busy(btn, true, '读取中…')
+    const data = await api('/api/accounts/plugins'); busy(btn, false)
+    const body = $('pluginsBody')
+    renderPluginTree(data.tree)
+    if (data.ok !== true) {
+      $('pluginsBadge').textContent = KIND[data.kind] ?? '失败'
+      body.innerHTML = '<div class="empty" style="color:var(--danger)">' + (data.message ?? '取不到插件列表') + '</div>'
+      return
+    }
+    const list = Array.isArray(data.data?.plugins) ? data.data.plugins : (Array.isArray(data.data) ? data.data : [])
+    pluginCache = list
+    $('pluginsBadge').textContent = list.length + ' 个'
+    renderPluginTree(data.tree)
+ + (data.data?.pluginManagerNotFound ? '（插件管理器未加载）' : '')
     if (list.length === 0) { body.innerHTML = '<div class="empty">（没有安装插件）</div>'; return }
     body.innerHTML = '<table><thead><tr><th>插件</th><th>版本</th><th>作者</th><th>状态</th><th style="text-align:right">操作</th></tr></thead><tbody>'
       + list.map((item) => {
