@@ -415,6 +415,9 @@
       <div class="row" style="margin-bottom:10px"><input id="fileSearch" placeholder="按文件名过滤（支持 *.json）" style="flex:1"></div>
       <div id="filesSummary" class="sub" style="margin:0 0 8px">—</div>
       <div id="filesBody" class="empty">切换到这里会自动加载</div>
+      <h3 style="font-size:13px;margin:18px 0 8px">回收站 <span class="badge" id="trashBadge">—</span></h3>
+      <p class="sub" style="margin:0 0 10px">「删除备份」会把文件移进 <code>config/_trash/</code>；这里可以还原，或送进 <b>Windows 回收站</b>（不是硬删除）。</p>
+      <div id="trashRows" class="empty">切换到这里会自动加载</div>
       <h3 style="font-size:13px;margin:18px 0 8px">配置备份 <span class="badge" id="backupBadge">—</span></h3>
       <p class="sub" style="margin:0 0 10px">每次写配置前都会留一份 <code>.bak-时间戳</code>；还原前会把当前文件另存 <code>.pre-restore-*</code>，删除是移到 <code>config/_trash/</code>，都不会真删。</p>
       <div id="backupRows" class="empty">切换到这里会自动加载</div>
@@ -549,7 +552,8 @@
       </div>
 
       <div class="card wide" style="margin-top:16px">
-        <h2>最近事件 <span class="badge" id="testEventsBadge">—</span></h2>
+  
+      <h2>最近事件 <span class="badge" id="testEventsBadge">—</span></h2>
         <p class="sub">注入后桥每 2 秒轮询一次队列；这里自动跟随，能直接看到这条测试消息被怎么处理（读 <code>qq-trace.jsonl</code>）。</p>
         <pre id="testEvents" style="margin:0;padding:12px;border-radius:12px;background:var(--bg);border:1px solid var(--line);height:calc(100vh - 470px);min-height:180px;overflow:auto;font:12.5px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all">（还没有事件）</pre>
         <div class="row" style="margin-top:12px">
@@ -1054,16 +1058,20 @@
   }
   async function runScenario() {
     const btn = $('btnScenario'); busy(btn, true, '注入中…')
-    const spec = {
-      scenario: $('testScenario').value,
-      groupId: Number($('testScenGroup').value) || 0,
-      userId: Number($('testScenUser').value) || 0,
-      targetId: Number($('testScenTarget').value) || 0,
+    const scenario = $('testScenario').value
+    // 服务端只从 params 里取参数（扁平字段会被忽略）
+    const payload = {
+      scenario,
+      params: {
+        groupId: Number($('testScenGroup').value) || 0,
+        userId: Number($('testScenUser').value) || 0,
+        target: Number($('testScenTarget').value) || 0,
+      },
     }
-    const result = await post('/api/inject', spec)
+    const result = await post('/api/inject', payload)
     busy(btn, false)
     $('scenState').textContent = (result.ok ? '✅ ' : '⚠️ ') + (result.reason ?? '完成')
-    opLog('注入场景 ' + spec.scenario)
+    opLog('注入场景 ' + scenario)
   }
   // ---------- 最近事件（实时测试页下方） ----------
   let testFollow = true
@@ -1216,6 +1224,7 @@
 
   $('btnTest').onclick = () => runTest()
   $('btnTestClear').onclick = () => clearInjectQueue()
+  loadScenarios()
   $('btnScenario').onclick = () => runScenario()
 
   // ---------- 只读分区（网络 / 文件 / 插件 / 商店 / 统计 / 配置 / 关于） ----------
@@ -1917,6 +1926,43 @@
     return (bytes / 1048576).toFixed(1) + ' MB'
   }
   let fileQuery = ''
+  async function loadTrash() {
+    const body = $('trashRows')
+    if (!body) return
+    const data = await api('/api/accounts/trash')
+    const list = Array.isArray(data.entries) ? data.entries : []
+    $('trashBadge').textContent = data.ok === true ? list.length + ' 份' : '读不到'
+    if (data.ok !== true) { body.innerHTML = '<div class="empty">' + escapeHtml(data.message ?? '读不到回收站') + '</div>'; return }
+    if (list.length === 0) { body.innerHTML = '<div class="empty">回收站是空的</div>'; return }
+    body.innerHTML = '<table><thead><tr><th>文件</th><th>大小</th><th>时间</th><th style="text-align:right">操作</th></tr></thead><tbody>'
+      + list.slice(0, 30).map((item) => '<tr><td><code>' + escapeHtml(item.name) + '</code><div class="sub" style="margin:0">' + escapeHtml(item.stamp) + '</div></td>'
+        + '<td>' + humanSize(item.size) + '</td>'
+        + '<td class="sub" style="margin:0">' + (item.mtime ? new Date(item.mtime).toLocaleString('zh-CN', { hour12: false }) : '—') + '</td>'
+        + '<td style="text-align:right"><button data-trrestore="' + escapeHtml(item.rel) + '">还原</button> '
+        + '<button class="danger" data-trpurge="' + escapeHtml(item.rel) + '">送系统回收站</button></td></tr>').join('')
+      + '</tbody></table>'
+    for (const button of body.querySelectorAll('[data-trrestore]')) button.onclick = () => restoreTrash(button.dataset.trrestore, button)
+    for (const button of body.querySelectorAll('[data-trpurge]')) button.onclick = () => purgeTrash(button.dataset.trpurge, button)
+  }
+
+  async function restoreTrash(rel, button) {
+    busy(button, true, '还原中…')
+    const result = await post('/api/accounts/trash/restore', { rel })
+    busy(button, false)
+    if (result.ok === true) { toast('已还原', 'ok'); opLog('还原回收站文件 ' + rel); loadTrash(); loadFiles() }
+    else toast('还原失败：' + (result.message ?? '未知'), 'bad')
+  }
+
+  async function purgeTrash(rel, button) {
+    if (!confirm('把「' + rel + '」送进 Windows 回收站？')) return
+    busy(button, true, '处理中…')
+    const result = await post('/api/accounts/trash/purge', { rel })
+    busy(button, false)
+    if (result.ok === true) { toast('已送入系统回收站', 'ok'); opLog('清理回收站文件 ' + rel); loadTrash() }
+    else toast('失败：' + (result.message ?? '未知'), 'bad')
+  }
+
+
   async function loadFiles() {
     const btn = $('btn-files'); busy(btn, true, '读取中…')
     const data = await api('/api/accounts/files'); busy(btn, false)

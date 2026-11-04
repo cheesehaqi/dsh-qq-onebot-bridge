@@ -433,6 +433,12 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         return
       }
 
+      if (request.method === 'GET' && path === '/api/accounts/trash') {
+        if (typeof api.accounts?.trashEntries !== 'function') { json(response, 200, { ok: false, reason: '当前控制台不支持回收站', entries: [] }); return }
+        json(response, 200, api.accounts.trashEntries())
+        return
+      }
+
       if (request.method === 'GET' && path === '/api/accounts/console') {
         if (typeof api.accounts?.consoleInfo !== 'function') { json(response, 200, { ok: false, reason: '当前控制台不支持该接口' }); return }
         json(response, 200, api.accounts.consoleInfo({ port: config?.ports?.control ?? 0 }))
@@ -563,6 +569,15 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
           '/api/accounts/network/servers': () => {
             if (typeof api.accounts?.saveNetworkServers !== 'function') return { ok: false, message: '当前控制台不支持保存 WS 服务器' }
             return api.accounts.saveNetworkServers({ uin: String(body.uin ?? '').trim(), servers: Array.isArray(body.servers) ? body.servers : [] })
+          },
+          // 0.8.3：回收站还原 / 送系统回收站
+          '/api/accounts/trash/restore': () => {
+            if (typeof api.accounts?.restoreTrash !== 'function') return { ok: false, message: '当前控制台不支持还原' }
+            return api.accounts.restoreTrash({ rel: String(body.rel ?? '') })
+          },
+          '/api/accounts/trash/purge': () => {
+            if (typeof api.accounts?.purgeTrash !== 'function') return { ok: false, message: '当前控制台不支持清理' }
+            return api.accounts.purgeTrash({ rel: String(body.rel ?? '') })
           },
           // 0.8.1：备份还原 / 移入回收
           '/api/accounts/backups/restore': () => {

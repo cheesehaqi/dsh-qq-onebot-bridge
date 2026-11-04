@@ -1083,6 +1083,85 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       return { ok: true, kind: 'ok', message: '', file, entries }
     },
 
+    /**
+     * 回收站（config/_trash/<时间戳>/<文件>）：列出我们移进去的旧备份。
+     * 只读目录；真正清理走 purgeTrash（送进**系统回收站**，不硬删）。
+     */
+    trashEntries() {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      if (dir === '') return { ok: false, kind: 'no-config', message: config.reason || '没有可用的 WebUI 配置', entries: [] }
+      const root = join(dir, '_trash')
+      if (existsSync(root) === false) return { ok: true, kind: 'ok', message: '', dir: root, entries: [] }
+      const entries = []
+      try {
+        for (const stamp of readdirSync(root)) {
+          const stampDir = join(root, stamp)
+          let isDir = false
+          try { isDir = statSync(stampDir).isDirectory() } catch { /* 忽略 */ }
+          if (isDir === false) continue
+          for (const name of readdirSync(stampDir)) {
+            const full = join(stampDir, name)
+            let size = 0
+            let mtime = 0
+            try { const info = statSync(full); size = info.size; mtime = info.mtimeMs } catch { /* 忽略 */ }
+            entries.push({ rel: stamp + '/' + name, stamp, name, size, mtime })
+          }
+        }
+      } catch (error) {
+        return { ok: false, kind: 'error', message: '读回收站失败：' + String(error?.message ?? error).slice(0, 120), entries: [] }
+      }
+      entries.sort((a, b) => b.mtime - a.mtime)
+      return { ok: true, kind: 'ok', message: '', dir: root, entries }
+    },
+
+    /** 从回收站还原回 config/（不覆盖：同名存在就加 .restored-时间 后缀）。 */
+    restoreTrash({ rel = '', now = () => Date.now() } = {}) {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      const clean = String(rel ?? '').replace(/\\/g, '/')
+      if (dir === '' || clean === '' || clean.includes('..')) return { ok: false, kind: 'bad-input', message: '只接受回收站里的相对路径' }
+      const source = join(dir, '_trash', clean)
+      if (existsSync(source) === false) return { ok: false, kind: 'not-found', message: '回收站里没有：' + clean }
+      const base = clean.split('/').pop()
+      let target = join(dir, base)
+      if (existsSync(target)) target = target + '.restored-' + new Date(now()).toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      try {
+        copyFileSync(source, target)
+        unlinkSync(source)
+        return { ok: true, kind: 'ok', message: '已还原到 ' + target, target }
+      } catch (error) {
+        return { ok: false, kind: 'error', message: '还原失败：' + String(error?.message ?? error).slice(0, 120) }
+      }
+    },
+
+    /**
+     * 把回收站里的文件送进 **Windows 回收站**（不是硬删除）。
+     * 用 Shell.Application 的 InvokeVerb('delete')，失败就如实报错、绝不回退到删除。
+     */
+    purgeTrash({ rel = '', exec = execFileSync } = {}) {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      const clean = String(rel ?? '').replace(/\\/g, '/')
+      if (dir === '' || clean === '' || clean.includes('..')) return { ok: false, kind: 'bad-input', message: '只接受回收站里的相对路径' }
+      const target = join(dir, '_trash', clean)
+      if (existsSync(target) === false) return { ok: false, kind: 'not-found', message: '回收站里没有：' + clean }
+      if (process.platform !== 'win32') return { ok: false, kind: 'unsupported', message: '只有 Windows 支持送系统回收站' }
+      const escaped = target.replace(/'/g, "''")
+      const script = [
+        '$shell = New-Object -ComObject Shell.Application',
+        '$item = $shell.Namespace(0).ParseName(\'' + escaped + '\')',
+        'if ($item -eq $null) { Write-Error "ParseName failed"; exit 2 }',
+        "$item.InvokeVerb('delete')",
+      ].join('; ')
+      try {
+        exec('powershell', ['-NoProfile', '-Command', script], { encoding: 'utf8' })
+        return { ok: true, kind: 'ok', message: '已送入系统回收站：' + clean }
+      } catch (error) {
+        return { ok: false, kind: 'error', message: '送回收站失败（未删除任何内容）：' + String(error?.message ?? error).slice(0, 120) }
+      }
+    },
+
     /** 确保插件目录存在（config/plugins）：只 mkdir，不下载、不安装。 */
     ensurePluginsDir() {
       const config = readConfig()
