@@ -340,6 +340,7 @@
           <h2>最近一次错误 <span class="badge" id="lastErrorBadge">—</span></h2>
           <div id="lastError" class="sub" style="margin:0">点「刷新」从最近 200 条 trace 里找 warn / error。</div>
           <div class="row" style="margin-top:10px"><button id="btnLastError">刷新</button><button id="btnLastErrorJump">查看日志 →</button></div>
+          <div class="row" style="margin-top:10px"><button id="btnCopyDiag">复制诊断摘要</button></div>
         </div>
 
         <div class="card wide">
@@ -473,6 +474,8 @@
       <h2>关于 <span class="badge" id="aboutBadge">—</span></h2>
       <p class="sub">版本 / 哈希 / 镜像<code style="margin-left:6px">/api/accounts/about</code></p>
       <div id="aboutBody" class="empty">切换到这里会自动加载</div>
+      <div class="sub" id="releaseLine" style="margin:0 0 4px">版本检查：点「检查更新」</div>
+      <div class="row" style="margin-bottom:6px"><button id="btnCheckRelease">检查更新</button></div>
       <div class="row" style="margin-top:14px">
         <button id="btn-about">刷新</button>
         <button class="primary" id="btnExport">导出诊断包（脱敏）</button>
@@ -1210,7 +1213,8 @@
    */
   let netDraft = []
   let netFilter = 'all'   // all | ws-client | ws-server | http-server
-  let netDirty = false    // 有任何改动就点亮「保存全部」      // [{ uin, clients: [{name,url,enable}] }]
+  let netDirty = false
+  let portStatusMap = {}   // 端口 → { listening, process }（由 /api/accounts/ports 填充）    // 有任何改动就点亮「保存全部」      // [{ uin, clients: [{name,url,enable}] }]
 
   async function loadNetwork() {
     const btn = $('btn-network'); busy(btn, true, '读取中…')
@@ -1233,6 +1237,7 @@
       })),
     }))
     renderNetwork()
+    loadPortStatus()
     opLog('刷新网络配置')
   }
 
@@ -1242,6 +1247,24 @@
     ['ws-server', 'Websocket 服务器'],
     ['http-server', 'HTTP 服务器'],
   ]
+
+  /** 端口占用：网络配置页顺带查一次，谁在听就标出来。 */
+  async function loadPortStatus() {
+    const data = await api('/api/accounts/ports')
+    if (data.ok !== true) return
+    portStatusMap = {}
+    for (const row of data.ports ?? []) portStatusMap[String(row.port)] = row
+    for (const tag of document.querySelectorAll('[data-port-tag]')) {
+      const port = String(tag.dataset.portTag ?? '')
+      if (port === '') { tag.textContent = ''; continue }
+      const info = portStatusMap[port]
+      if (info === undefined) { tag.textContent = ''; continue }
+      tag.textContent = info.listening === true
+        ? '端口 ' + port + '：监听中（' + (info.process || ('PID ' + info.pid)) + '）'
+        : '端口 ' + port + '：未监听'
+      tag.style.color = info.listening === true ? 'var(--ok)' : 'var(--muted)'
+    }
+  }
 
   function renderNetwork() {
     const body = $('networkBody')
@@ -1276,6 +1299,7 @@
             + '<div class="sub" style="margin:0 0 8px">QQ ' + row.uin + ' · Websocket 客户端</div>'
             + '<input data-field="name:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.name) + '" placeholder="名称" style="width:100%;margin-bottom:8px">'
             + '<input data-field="url:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.url) + '" placeholder="ws://127.0.0.1:6700/" style="width:100%;margin-bottom:10px">'
+            + '<div class="sub" style="margin:-4px 0 8px" data-port-tag="' + (function (url) { const m = /:(\d{2,5})(?:\/|$)/.exec(String(url || '')); return m ? m[1] : '' })(client.url) + '"></div>'
             + '<div class="row"><button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button></div>'
             + '<div class="sub" data-state="' + uinIndex + '" style="margin:6px 0 0"></div>'
             + '</div>')
@@ -1324,6 +1348,7 @@
             + '<button data-htoggle="' + uinIndex + ':' + httpIndex + '" class="' + (on ? 'primary' : '') + '">' + (on ? '已启用' : '已停用') + '</button></div>'
             + '<div class="sub" style="margin:0 0 8px">QQ ' + row.uin + ' · HTTP 服务器</div>'
             + '<input data-hfield="name:' + uinIndex + ':' + httpIndex + '" value="' + escapeHtml(http.name || '') + '" placeholder="名称" style="width:100%;margin-bottom:8px">'
+            + '<div class="sub" style="margin:0 0 6px" data-port-tag="' + (http.port ?? '') + '"></div>'
             + '<input data-hfield="port:' + uinIndex + ':' + httpIndex + '" value="' + (http.port ?? '') + '" placeholder="端口，如 3000" style="width:100%;margin-bottom:8px">'
             + '<input data-hfield="host:' + uinIndex + ':' + httpIndex + '" value="' + escapeHtml(http.host || '') + '" placeholder="监听地址（可空）" style="width:100%">'
             + '</div>')
@@ -1679,6 +1704,24 @@
   }
   const lastErrBtn = $('btnLastError')
   if (lastErrBtn) lastErrBtn.onclick = () => loadLastError()
+  const copyDiagBtn = $('btnCopyDiag')
+  if (copyDiagBtn) copyDiagBtn.onclick = async () => {
+    const status = state.status?.data ?? {}
+    const info = state.loginInfo ?? {}
+    const errText = ($('lastError')?.textContent ?? '—').replace(/\s+/g, ' ').slice(0, 120)
+    const text = [
+      '账号中心诊断摘要 ' + new Date().toLocaleString('zh-CN', { hour12: false }),
+      '登录状态：' + (status.isLogin === true ? '在线' : status.isOffline === true ? '离线' : '未登录'),
+      '账号：' + (info.uin ?? '—') + (info.nick ? '（' + info.nick + '）' : ''),
+      '账号数：' + (Array.isArray(state.accountRows) ? state.accountRows.length : 0),
+      'WebUI：' + (state.webui?.url ?? '—'),
+      '最近错误：' + errText,
+    ].join('\n')
+    try { await navigator.clipboard.writeText(text); toast('诊断摘要已复制', 'ok') }
+    catch { toast('浏览器不让写剪贴板', 'warn') }
+    opLog('复制诊断摘要')
+  }
+
   const lastErrJump = $('btnLastErrorJump')
   if (lastErrJump) lastErrJump.onclick = () => activate('logs')
 
@@ -1755,6 +1798,20 @@
       else closePalette()
     }
   })
+
+  const checkReleaseBtn = $('btnCheckRelease')
+  if (checkReleaseBtn) checkReleaseBtn.onclick = async () => {
+    const line = $('releaseLine')
+    checkReleaseBtn.disabled = true
+    line.textContent = '版本检查：查询中…'
+    const data = await api('/api/accounts/release')
+    checkReleaseBtn.disabled = false
+    if (data.ok !== true) { line.textContent = '版本检查：' + (data.message ?? '查询失败'); return }
+    line.innerHTML = data.newer === true
+      ? '版本检查：当前 <b>' + escapeHtml(data.current) + '</b> → 有新版本 <b>' + escapeHtml(data.latest) + '</b>　<a href="' + escapeHtml(data.url) + '" target="_blank" rel="noopener">去下载</a>'
+      : '版本检查：当前 <b>' + escapeHtml(data.current) + '</b>，已是最新（' + escapeHtml(data.latest) + '）'
+    opLog('检查更新：' + (data.newer === true ? '有新版 ' + data.latest : '已是最新'))
+  }
 
   const exportBtn = $('btnExport')
   if (exportBtn) exportBtn.onclick = () => {

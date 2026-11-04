@@ -24,9 +24,10 @@
  */
 
 import { createHash } from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { spawn , execFileSync } from 'node:child_process'
 import { mkdirSync, copyFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /** NapCat WebUI 的端点（按源码固定；`method` 只是首选，失败会回退）。 */
 export const WEBUI_ROUTES = Object.freeze({
@@ -433,6 +434,12 @@ export function describeAccountState({ webui = null, status = null, accounts = [
   }
 
   /** 启动 NapCat 用哪个 QQ：优先 autoLoginAccount，其次配置目录里的 onebot11_<uin>.json。 */
+/** 仓库根：本文件在 control/lib/ 下，上两级就是根。 */
+const repoRoot = () => join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+/** 版本检查的 10 分钟缓存（进程内）。 */
+const latestReleaseCache = { value: null, at: 0 }
+
 export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = undefined } = {}) {
   const readConfig = () => readWebUiConfig({ napcatBat, file: webUiFile })
   /**
@@ -938,6 +945,91 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
         return { ok: false, kind: 'error', message: '移入回收失败：' + String(error?.message ?? error).slice(0, 120) }
       }
     },
+    /**
+     * 版本更新检查：拿 GitHub 最新 release 与本地 package.json 比。
+     * 只读、带 10 分钟缓存；网络不通就如实返回原因（不假装"已是最新"）。
+     */
+    async latestRelease({ fetchImpl = fetch, now = () => Date.now() } = {}) {
+      const cache = latestReleaseCache
+      if (cache.value !== null && now() - cache.at < 10 * 60 * 1000) return cache.value
+      let current = ''
+      try {
+        const pkg = JSON.parse(readFileSync(join(repoRoot(), 'package.json'), 'utf8'))
+        current = String(pkg.version ?? '')
+      } catch { /* 读不到就留空 */ }
+      let result
+      try {
+        const res = await fetchImpl('https://api.github.com/repos/cheesehaqi/dsh-qq-onebot-bridge/releases/latest', {
+          headers: { accept: 'application/vnd.github+json', 'user-agent': 'dsh-qq-control' },
+        })
+        if (res.ok !== true) throw new Error('HTTP ' + res.status)
+        const json = await res.json()
+        const latest = String(json.tag_name ?? '').replace(/^v/, '')
+        result = {
+          ok: true,
+          current,
+          latest,
+          newer: current !== '' && latest !== '' && latest !== current && latest > current,
+          url: json.html_url ?? '',
+          publishedAt: json.published_at ?? '',
+          name: json.name ?? '',
+        }
+      } catch (error) {
+        result = { ok: false, kind: 'offline', message: '查不到最新版本：' + String(error?.message ?? error).slice(0, 120), current }
+      }
+      latestReleaseCache.value = result
+      latestReleaseCache.at = now()
+      return result
+    },
+
+    /**
+     * 端口占用：把 onebot11 配置里出现的端口逐个查一遍（谁在听、PID 是谁）。
+     * 只读 netstat + tasklist，不改任何东西。
+     */
+    portStatus({ exec = execFileSync } = {}) {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      if (dir === '') return { ok: false, kind: 'no-config', message: config.reason || '没有可用的 WebUI 配置', ports: [] }
+      const wanted = new Set()
+      for (const account of listAccounts({ dir })) {
+        const file = join(dir, 'onebot11_' + account.uin + '.json')
+        if (existsSync(file) === false) continue
+        try {
+          const json = JSON.parse(readFileSync(file, 'utf8'))
+          const network = json.network ?? {}
+          for (const server of network.websocketServers ?? []) if (Number.isFinite(Number(server.port))) wanted.add(Number(server.port))
+          for (const server of network.httpServers ?? []) if (Number.isFinite(Number(server.port))) wanted.add(Number(server.port))
+          for (const client of network.websocketClients ?? []) {
+            const match = /:(\d{2,5})(?:\/|$)/.exec(String(client.url ?? ''))
+            if (match) wanted.add(Number(match[1]))
+          }
+        } catch { /* 单个账号配置坏了不影响其它 */ }
+      }
+      if (wanted.size === 0) return { ok: true, kind: 'ok', message: '', ports: [] }
+      let rows = []
+      try {
+        const netstat = exec('netstat', ['-ano'], { encoding: 'utf8' })
+        const tasklist = exec('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8' })
+        const names = new Map()
+        for (const line of String(tasklist).split('\n')) {
+          const parts = line.match(/"([^"]+)","(\d+)"/)
+          if (parts) names.set(Number(parts[2]), parts[1])
+        }
+        rows = String(netstat).split('\n')
+          .map((line) => line.trim().split(/\s+/))
+          .filter((parts) => parts.length >= 5 && parts[0].toUpperCase() === 'TCP' && parts[3] === 'LISTENING')
+          .map((parts) => ({ port: Number(parts[1].split(':').pop()), pid: Number(parts[4]) }))
+          .filter((row) => wanted.has(row.port))
+          .map((row) => ({ port: row.port, listening: true, pid: row.pid, process: names.get(row.pid) ?? '' }))
+      } catch (error) {
+        return { ok: false, kind: 'error', message: '读端口失败：' + String(error?.message ?? error).slice(0, 120), ports: [] }
+      }
+      const seen = new Set(rows.map((row) => row.port))
+      for (const port of wanted) if (!seen.has(port)) rows.push({ port, listening: false, pid: 0, process: '' })
+      rows.sort((a, b) => a.port - b.port)
+      return { ok: true, kind: 'ok', message: '', ports: rows }
+    },
+
     /** 确保插件目录存在（config/plugins）：只 mkdir，不下载、不安装。 */
     ensurePluginsDir() {
       const config = readConfig()

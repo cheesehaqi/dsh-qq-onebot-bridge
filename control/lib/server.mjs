@@ -426,6 +426,18 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         return
       }
       // 0.8.1：配置备份的列表 / 还原 / 删除（删除是移到 config/_trash）
+      // 0.8.3：版本更新检查 / 端口占用
+      if (request.method === 'GET' && path === '/api/accounts/release') {
+        if (typeof api.accounts?.latestRelease !== 'function') { json(response, 200, { ok: false, reason: '当前控制台不支持版本检查' }); return }
+        json(response, 200, await api.accounts.latestRelease())
+        return
+      }
+      if (request.method === 'GET' && path === '/api/accounts/ports') {
+        if (typeof api.accounts?.portStatus !== 'function') { json(response, 200, { ok: false, reason: '当前控制台不支持端口检查', ports: [] }); return }
+        json(response, 200, api.accounts.portStatus())
+        return
+      }
+
       if (request.method === 'GET' && path === '/api/accounts/backups') {
         if (typeof api.accounts?.listBackups !== 'function') { json(response, 200, { ok: false, reason: '当前控制台不支持备份管理', backups: [] }); return }
         json(response, 200, api.accounts.listBackups())
