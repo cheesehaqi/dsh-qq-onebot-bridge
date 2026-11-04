@@ -413,6 +413,7 @@
       <h2>文件管理 <span class="badge" id="filesBadge">—</span></h2>
       <p class="sub">列 bootmain/config 目录（只读）<code style="margin-left:6px">/api/accounts/files</code></p>
       <div class="row" style="margin-bottom:10px"><input id="fileSearch" placeholder="按文件名过滤（支持 *.json）" style="flex:1"></div>
+      <div id="filesSummary" class="sub" style="margin:0 0 8px">—</div>
       <div id="filesBody" class="empty">切换到这里会自动加载</div>
       <h3 style="font-size:13px;margin:18px 0 8px">配置备份 <span class="badge" id="backupBadge">—</span></h3>
       <p class="sub" style="margin:0 0 10px">每次写配置前都会留一份 <code>.bak-时间戳</code>；还原前会把当前文件另存 <code>.pre-restore-*</code>，删除是移到 <code>config/_trash/</code>，都不会真删。</p>
@@ -475,6 +476,9 @@
       <h2>关于 <span class="badge" id="aboutBadge">—</span></h2>
       <p class="sub">版本 / 哈希 / 镜像<code style="margin-left:6px">/api/accounts/about</code></p>
       <div id="aboutBody" class="empty">切换到这里会自动加载</div>
+      <h3 style="font-size:13px;margin:16px 0 6px">数据目录</h3>
+      <div class="sub" id="dataDirs" style="margin:0 0 6px">读取中…</div>
+      <div class="row" style="margin-bottom:6px"><button id="btnCopyDirs">复制目录列表</button></div>
       <h3 style="font-size:13px;margin:16px 0 6px">控制台</h3>
       <div class="sub" id="consoleInfo" style="margin:0 0 10px">读取中…</div>
       <div class="sub" id="releaseLine" style="margin:0 0 4px">版本检查：点「检查更新」</div>
@@ -544,6 +548,7 @@
         <div class="row" style="margin-top:12px">
           <button id="btnTestEvents">刷新</button>
           <button id="btnTestFailOnly">只看失败</button>
+          <input id="testEventFilter" placeholder="按 traceId / 关键词过滤" style="max-width:260px">
           <button id="btnTestFollow" class="primary">自动跟随：开</button>
         </div>
       </div>
@@ -1056,6 +1061,7 @@
   // ---------- 最近事件（实时测试页下方） ----------
   let testFollow = true
   let testFailOnly = false
+  let testEventQuery = ''
   let testTimer = null
   let testEventsCache = []
   let testEventsError = ''
@@ -1064,6 +1070,11 @@
     if (!pre) return
     let events = testEventsCache
     if (testFailOnly === true) events = events.filter((event) => event.ok === false)
+    if (testEventQuery !== '') {
+      const query = testEventQuery.toLowerCase()
+      events = events.filter((event) => [event.id, event.stage, event.reason, event.module]
+        .filter(Boolean).some((value) => String(value).toLowerCase().includes(query)))
+    }
     if (events.length === 0) {
       pre.textContent = testEventsError !== '' ? testEventsError : (testFailOnly === true ? '（没有失败事件）' : '（还没有事件）')
       $('testEventsBadge').textContent = '0 条'
@@ -1841,6 +1852,22 @@
     }
   })
 
+  const dataDirsBox = $('dataDirs')
+  let dirText = ''
+  if (dataDirsBox) {
+    Promise.all([api('/api/accounts/files'), api('/api/accounts/network')]).then(([files, network]) => {
+      const configDir = files.dir ?? network.dir ?? '—'
+      dirText = '配置：' + configDir + '\n控制台令牌：qq-control.json（仓库根）'
+      dataDirsBox.innerHTML = '配置：<code>' + escapeHtml(configDir) + '</code>'
+    }).catch(() => { dataDirsBox.textContent = '数据目录：读取失败' })
+  }
+  const copyDirsBtn = $('btnCopyDirs')
+  if (copyDirsBtn) copyDirsBtn.onclick = async () => {
+    if (dirText === '') { toast('还没读到目录', 'bad'); return }
+    try { await navigator.clipboard.writeText(dirText); toast('目录已复制', 'ok') }
+    catch { toast('复制失败', 'warn') }
+  }
+
   const consoleInfoBox = $('consoleInfo')
   if (consoleInfoBox) {
     api('/api/accounts/console').then((data) => {
@@ -1902,6 +1929,11 @@
         return new RegExp(pattern, 'i').test(name)
       })
     $('filesBadge').textContent = (fileQuery === '' ? entries.length : visibleEntries.length + '/' + entries.length) + ' 项'
+    const fileCount = visibleEntries.filter((entry) => entry.isDir !== true).length
+    const dirCount = visibleEntries.length - fileCount
+    const totalBytes = visibleEntries.reduce((sum, entry) => sum + (entry.isDir === true ? 0 : Number(entry.size ?? 0)), 0)
+    const summaryBox = $('filesSummary')
+    if (summaryBox) summaryBox.textContent = '文件 ' + fileCount + ' 个 · 目录 ' + dirCount + ' 个 · 合计 ' + humanSize(totalBytes)
     body.innerHTML = visibleEntries.length === 0 ? '<div class="empty">' + (fileQuery === '' ? '目录是空的' : '没有匹配「' + escapeHtml(fileQuery) + '」的文件') + '</div>'
       : '<table><thead><tr><th>文件</th><th>大小</th><th>修改时间</th></tr></thead><tbody>'
         + visibleEntries.map((entry) => '<tr><td><code>' + entry.name + '</code>' + (entry.isDir ? ' <span class="tag">目录</span>' : '') + '</td>'
