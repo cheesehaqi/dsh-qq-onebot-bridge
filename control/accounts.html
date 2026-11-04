@@ -470,7 +470,14 @@
       <p class="sub">webui.json + 端口状态<code style="margin-left:6px">/api/accounts/meta</code></p>
       <div id="configBody" class="empty">切换到这里会自动加载</div>
       <div class="row" style="margin-top:14px"><button id="btn-config">刷新</button></div>
-    </div></section>
+    </div>
+      <div class="card wide">
+        <h2>napcat.json 只读预览 <span class="badge" id="napcatCfgBadge">—</span></h2>
+        <p class="sub">顶层键值，值截断到 80 字；<b>命中 token / secret / password / cookie / key 的一律显示「（已隐藏）」</b>。只读，不写回。</p>
+        <div id="napcatCfgBody" class="empty">切换到这里会自动加载</div>
+        <div class="row" style="margin-top:12px"><button id="btnNapcatCfg">刷新</button></div>
+      </div>
+</section>
 
     <section class="section" id="tab-about"><div class="card wide">
       <h2>关于 <span class="badge" id="aboutBadge">—</span></h2>
@@ -1943,6 +1950,23 @@
     opLog('刷新文件列表')
   }
 
+  async function loadNapcatConfig() {
+    const body = $('napcatCfgBody')
+    if (!body) return
+    const data = await api('/api/accounts/napcat-config')
+    const entries = Array.isArray(data.entries) ? data.entries : []
+    $('napcatCfgBadge').textContent = data.ok === true ? entries.length + ' 项' : (data.kind === 'not-found' ? '没有文件' : '读不到')
+    if (data.ok !== true) { body.innerHTML = '<div class="empty" style="color:var(--muted)">' + escapeHtml(data.message ?? '读不到') + '</div>'; return }
+    body.innerHTML = '<table><thead><tr><th>键</th><th>类型</th><th>值</th></tr></thead><tbody>'
+      + entries.map((entry) => '<tr><td><code>' + escapeHtml(entry.key) + '</code></td>'
+        + '<td class="sub" style="margin:0">' + escapeHtml(entry.type) + '</td>'
+        + '<td>' + escapeHtml(entry.shown) + '</td></tr>').join('')
+      + '</tbody></table>'
+  }
+
+  const napcatCfgBtn = $('btnNapcatCfg')
+  if (napcatCfgBtn) napcatCfgBtn.onclick = () => loadNapcatConfig()
+
   const LOADERS = { network: loadNetwork, files: loadFiles, plugins: loadPlugins, stats: loadStatsAndDevice, config: loadConfig, about: loadAbout }
   /** 调一个分区加载器；失败就把原因写进那个分区（否则只会"什么都不发生"）。 */
   const loadersafe = (tab) => {
@@ -1983,6 +2007,7 @@
 
   /** 系统配置：端口/地址可编辑（仅回环），2FA 与 token 只读。 */
   async function loadConfig() {
+    loadNapcatConfig()
     const btn = $('btn-config'); busy(btn, true, '读取中…')
     const [meta, status] = await Promise.all([api('/api/accounts/meta'), api('/api/status')])
     busy(btn, false)

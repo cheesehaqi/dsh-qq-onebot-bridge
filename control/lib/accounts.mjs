@@ -1053,6 +1053,36 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       }
     },
 
+    /**
+     * 只读预览 napcat.json 的关键项。
+     * 安全边界：**只回顶层键值**、**一律截断到 80 字**、命中 /token|secret|password|cookie|key|pass/i 的一律打码。
+     */
+    napcatConfigPreview() {
+      const config = readConfig()
+      const dir = config.exists ? dirname(config.path) : ''
+      if (dir === '') return { ok: false, kind: 'no-config', message: config.reason || '没有可用的 WebUI 配置', file: '', entries: [] }
+      const file = join(dir, 'napcat.json')
+      if (existsSync(file) === false) return { ok: false, kind: 'not-found', message: '没有 napcat.json', file, entries: [] }
+      let json
+      try { json = JSON.parse(readFileSync(file, 'utf8')) } catch (error) {
+        return { ok: false, kind: 'error', message: '解析失败：' + String(error?.message ?? error).slice(0, 100), file, entries: [] }
+      }
+      if (json === null || typeof json !== 'object' || Array.isArray(json)) {
+        return { ok: false, kind: 'error', message: '顶层不是对象', file, entries: [] }
+      }
+      const secret = /token|secret|password|passwd|cookie|apiKey|apikey|key|auth/i
+      const entries = Object.keys(json).sort().slice(0, 60).map((key) => {
+        const value = json[key]
+        let shown = ''
+        if (secret.test(key)) shown = '（已隐藏）'
+        else if (value === null) shown = 'null'
+        else if (typeof value === 'object') shown = Array.isArray(value) ? '[数组 ' + value.length + ' 项]' : '{对象 ' + Object.keys(value).length + ' 键}'
+        else shown = String(value).slice(0, 80)
+        return { key, type: value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value, shown }
+      })
+      return { ok: true, kind: 'ok', message: '', file, entries }
+    },
+
     /** 确保插件目录存在（config/plugins）：只 mkdir，不下载、不安装。 */
     ensurePluginsDir() {
       const config = readConfig()
