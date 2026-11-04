@@ -474,6 +474,8 @@
       <h2>关于 <span class="badge" id="aboutBadge">—</span></h2>
       <p class="sub">版本 / 哈希 / 镜像<code style="margin-left:6px">/api/accounts/about</code></p>
       <div id="aboutBody" class="empty">切换到这里会自动加载</div>
+      <h3 style="font-size:13px;margin:16px 0 6px">控制台</h3>
+      <div class="sub" id="consoleInfo" style="margin:0 0 10px">读取中…</div>
       <div class="sub" id="releaseLine" style="margin:0 0 4px">版本检查：点「检查更新」</div>
       <div class="row" style="margin-bottom:6px"><button id="btnCheckRelease">检查更新</button></div>
       <div class="row" style="margin-top:14px">
@@ -1300,7 +1302,8 @@
             + '<input data-field="name:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.name) + '" placeholder="名称" style="width:100%;margin-bottom:8px">'
             + '<input data-field="url:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.url) + '" placeholder="ws://127.0.0.1:6700/" style="width:100%;margin-bottom:10px">'
             + '<div class="sub" style="margin:-4px 0 8px" data-port-tag="' + (function (url) { const m = /:(\d{2,5})(?:\/|$)/.exec(String(url || '')); return m ? m[1] : '' })(client.url) + '"></div>'
-            + '<div class="row"><button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button></div>'
+            + '<div class="row"><button data-copyurl="' + uinIndex + ':' + index + '">复制地址</button>'
+            + '<button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button></div>'
             + '<div class="sub" data-state="' + uinIndex + '" style="margin:6px 0 0"></div>'
             + '</div>')
         })
@@ -1369,6 +1372,13 @@
 
     for (const el of body.querySelectorAll('[data-toggle]')) el.onclick = () => toggleClient(el.dataset.toggle)
     for (const el of body.querySelectorAll('[data-del]')) el.onclick = () => removeClient(el.dataset.del)
+    for (const el of body.querySelectorAll('[data-copyurl]')) el.onclick = async () => {
+      const [uinIndex, clientIndex] = splitKey(el.dataset.copyurl)
+      const url = netDraft[uinIndex]?.clients?.[clientIndex]?.url ?? ''
+      if (url === '') { toast('这个连接还没有地址', 'bad'); return }
+      try { await navigator.clipboard.writeText(url); toast('已复制：' + url, 'ok') }
+      catch { toast('复制失败，地址：' + url, 'warn') }
+    }
     for (const el of body.querySelectorAll('[data-add]')) el.onclick = () => addClient(Number(el.dataset.add))
     for (const el of body.querySelectorAll('[data-save]')) el.onclick = () => saveNetwork(Number(el.dataset.save), el)
     for (const el of body.querySelectorAll('[data-field]')) el.oninput = () => editField(el.dataset.field, el.value)
@@ -1752,6 +1762,8 @@
       { label: '动作：刷新登录状态', run: () => refreshStatus(false) },
       { label: '动作：刷新页面数据', run: () => { loadMeta(); refreshStatus(true); opLog('刷新页面数据') } },
       { label: '动作：打开 NapCat', run: () => window.open('/api/napcat/open?token=' + encodeURIComponent(token), '_blank', 'noopener') },
+      { label: '动作：检查更新', run: () => { activate('about'); const button = $('btnCheckRelease'); if (button) button.click() } },
+      { label: '动作：复制诊断摘要', run: () => { activate('home'); const button = $('btnCopyDiag'); if (button) button.click() } },
       { label: '动作：导出诊断包（脱敏）', run: () => window.open('/api/export?redact=1&token=' + encodeURIComponent(token), '_blank', 'noopener') },
       { label: '动作：清空操作记录', run: () => { try { localStorage.removeItem(OP_LOG_KEY) } catch { /* 忽略 */ } renderOpLog(); toast('操作记录已清空', 'ok') } },
     ]
@@ -1798,6 +1810,17 @@
       else closePalette()
     }
   })
+
+  const consoleInfoBox = $('consoleInfo')
+  if (consoleInfoBox) {
+    api('/api/accounts/console').then((data) => {
+      if (data.ok !== true) { consoleInfoBox.textContent = '控制台信息：' + (data.reason ?? '读不到'); return }
+      const mins = Math.floor(data.uptimeSeconds / 60)
+      consoleInfoBox.innerHTML = '版本 <b>' + escapeHtml(data.version) + '</b>｜端口 ' + escapeHtml(String(data.port))
+        + '｜PID ' + escapeHtml(String(data.pid)) + '｜已运行 ' + mins + ' 分钟'
+        + '<br>Node ' + escapeHtml(data.node) + '｜' + escapeHtml(data.platform)
+    }).catch(() => { consoleInfoBox.textContent = '控制台信息：读取失败' })
+  }
 
   const checkReleaseBtn = $('btnCheckRelease')
   if (checkReleaseBtn) checkReleaseBtn.onclick = async () => {

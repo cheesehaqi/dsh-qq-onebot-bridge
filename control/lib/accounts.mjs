@@ -1030,6 +1030,23 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       return { ok: true, kind: 'ok', message: '', ports: rows }
     },
 
+    /** 控制台自身：版本 / Node / 平台 / PID / 运行时长 / 端口（只读）。 */
+    consoleInfo({ port = 0 } = {}) {
+      let version = ''
+      try { version = String(JSON.parse(readFileSync(join(repoRoot(), 'package.json'), 'utf8')).version ?? '') } catch { /* 读不到就空 */ }
+      return {
+        ok: true,
+        version,
+        node: process.version,
+        platform: process.platform + ' ' + process.arch,
+        pid: process.pid,
+        uptimeSeconds: Math.round(process.uptime()),
+        startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+        port,
+        cwd: process.cwd(),
+      }
+    },
+
     /** 确保插件目录存在（config/plugins）：只 mkdir，不下载、不安装。 */
     ensurePluginsDir() {
       const config = readConfig()
