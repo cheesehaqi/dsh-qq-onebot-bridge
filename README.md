@@ -2,7 +2,7 @@
 
 QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱动 DSH agent 会话，agent 回复自动发回 QQ。
 
-当前版本 **v0.8.2** · [发布记录（Releases）](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [更新日志](CHANGELOG.md)
+当前版本 **v0.8.3** · [发布记录（Releases）](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [更新日志](CHANGELOG.md)
 
 ## 架构
 
@@ -600,11 +600,11 @@ npm run shortcut
 
 最近五个版本（始终滚动展示）：
 
+- **v0.8.3** — 「控制台自己会体检」：版本更新检查、端口占用显示、`napcat.json` 只读预览（脱敏）、插件目录带 `config/pages` 标记、文件统计、配置回收站（还原 / 送 Windows 回收站，不硬删）、复制诊断摘要、网络未保存提示、实时测试「只看失败 + 事件过滤」；并修好场景注入群号/QQ 号被丢弃、场景下拉为空
 - **v0.8.2** — 「少点几下」：文件与账号搜索、日志时间范围与「下载跟随筛选」、操作记录导出/清空、最近一次错误卡片、**Ctrl+K 命令面板**（含账号跳转）、日志筛选偏好持久化、插件目录条目可复制路径；测试新增 DOM 时序断言与运行时冒烟（含反向验证）
 - **v0.8.1** — 「让控制台能自证」：配置备份管理（还原前另存 `.pre-restore-*`、删除移到 `config/_trash`）、操作记录持久化、日志关键词高亮 + 只看 Info 以上、一键导出脱敏诊断包、网络配置的 **WS 服务器与 HTTP 服务器段可编辑**，以及「新建」入口统一
 - **v0.8.0** — 「本地账号中心」：`/accounts` 11 个分区（基础信息 / 账号配置 / 网络配置 / 文件 / 插件 / 运行日志 / 实时测试 / 运行与设备 / 系统配置 / 操作记录 / 关于）；网络配置可增删改与启停、系统配置可改端口与回环地址、插件可启停卸载，写前均有 `.bak` 备份；实时测试支持「单发 / 即时调试 15 秒」并能点开事件看完整链路；修掉 `assistantText` 在 `content` 非数组时崩溃（会吞掉整条回复）
 - **v0.7.10** — 「能力体检 + 两处测试口径修正」：① **`/能力体检`**（`lib/conformance.js`）—— 21 个**只读**探针（状态/版本/登录号/群与好友/成员/荣誉/精华/公告/群文件/历史消息/@全体余量/禁言名单/群打卡/群相册/系统消息…），逐个分类成「支持 / 不支持 / 参数不符 / 权限不足 / 无响应 / 没有数据」，回答"这功能是真不支持还是我没用到"；写操作**永远不探**，且 `assertProbeSafety()` 会拒绝任何 `send_/set_/delete_/upload_/mark_` 条目 —— 手滑加一条写操作，体检直接拒跑。结果落到 trace、面板「高级与调试」与 `knownUnsupported`。② 两处测试口径：`inject-guard-unit` 的 7 处数组全等改成**后缀匹配**（宿主给正文加前缀不再整段崩，且不会把「注入的消息」认成「注入的消息二」）；`privacy-unit` 区分「git 检出缺 `.gitignore`（照红）」与「npm 包形态缺（显式跳过）」。面板不变（87 键）。
-- **v0.7.9** — 「换桥会怎样 + 防线三」：① **能力矩阵**（`lib/capability.js`）—— 插件一共调 71 个 OneBot action，按 **standard 32 / extension 31 / napcat 4** 三层分级；连上后读 `get_version_info` 认实现（NapCat/LLOneBot/Lagrange/…），`#call` 唯一出口挂**被动账本**（成功计数、失败记次数与错误，**不记参数**），首次失败写一条 warn trace 并直接判断「大概率是当前实现不支持」还是「查连接/权限」；`/health` 与面板「高级与调试」都能看到；新增 **docs/COMPAT.md 中英**（三层表 + 换实现检查清单）。② **出站脱敏**（防线三，`outboundRedactEnabled` 默认关）—— 发送前把 `sk-…` / `gh*_…` / `AKIA…` / JWT / `Bearer …` / 整段私钥打码（保留首尾），`outboundRedactBlock` 可改成整条拦下；**QQ 号/手机号/URL 不碰**；收口在 `sendSegments`（16 个出站调用点全覆盖）；trace 只写命中的规则名、**不写原文**。③ 面板「安全与风控」「高级与调试」两组新增状态行；至此三道防线齐：注入 dry-run → 污点窗口 → 出站脱敏。
 
 **更早的版本（v0.4 线及之前）见 [CHANGELOG.md](CHANGELOG.md)** —— 完整历史、每个版本的缺陷清单与测试计数都在那里。
 也可以直接在 [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) 页按版本过滤（每版都带 `compare/v上一版...v本版` 的 diff 链接）。

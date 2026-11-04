@@ -1,5 +1,53 @@
 # 更新日志 / Changelog
 ## v0.8 系列 —— 本地账号中心 / Local Account Center
+### v0.8.3（2026-11-04）— 让控制台自己会体检：版本、端口、配置、回收站
+
+全部在 `control/` 与 `test/`，**`lib/` 一行未动**（对补丁作者零重锚）。
+
+#### 一、能不能更新、端口通不通
+
+- **版本更新检查**（关于页）：`GET /api/accounts/release` 读 GitHub 最新 release 与本地 `package.json` 比，
+  10 分钟缓存；网络不通**如实说「查不到」**，不假装"已是最新"；
+- **端口占用**（网络配置）：`GET /api/accounts/ports` 把 `onebot11` 里出现的端口（WS 客户端 URL / WS 服务器 / HTTP 服务器）
+  逐个查 `netstat + tasklist`，卡片上标「端口 6700：监听中（DeepSeek Harness.exe）」或「未监听」；
+- **控制台自身**（关于页）：版本 / 端口 / PID / 已运行分钟数 / Node / 平台（`GET /api/accounts/console`）。
+
+#### 二、看得到才管得住
+
+- **`napcat.json` 只读预览**（系统配置）：只回顶层键值、值截断 80 字，
+  命中 `token / secret / password / cookie / key / auth` 的一律显示「（已隐藏）」，只读不写回；
+- **插件目录**：条目显示 `[config]` `[pages]` 标记；目录来自本地文件系统，**NapCat 没运行也能看**
+  （原来失败分支直接 return，把本地目录渲染整段跳过了）；
+- **文件管理**：列表上方显示「文件 N 个 · 目录 M 个 · 合计 X」，随筛选变化；
+- **关于页**：显示数据目录，并可「复制目录列表」。
+
+#### 三、回收站（不硬删）
+
+- `GET /api/accounts/trash` 列出 `config/_trash/<时间戳>/<文件>`；
+- `POST …/trash/restore` 还原回 `config/`，**重名不覆盖**（加 `.restored-<时间>`）；
+- `POST …/trash/purge` 用 Shell 的 `InvokeVerb('delete')` 送进 **Windows 回收站**；
+  失败就报错，**绝不回退到硬删除**。
+
+#### 四、少点几下
+
+- **复制诊断摘要**（基础信息）：登录状态 / 账号 / 账号数 / WebUI / 最近错误，一键进剪贴板；
+- **网络未保存提示**：改动后标题旁出现「有未保存的修改」，保存成功消失；
+- **复制连接地址**：WS 客户端卡片一键复制 URL；
+- **实时测试**：新增「只看失败」与事件过滤（traceId / 阶段 / 原因 / 模块），二者可叠加；
+- **Ctrl+K 面板**新增两个动作（检查更新、复制诊断摘要）。
+
+#### 五、修的缺陷
+
+- **场景注入的群号/QQ 号一直被丢弃**：页面发的是扁平 `{groupId, userId}`，而服务端只从 `params` 里取；
+  已改成 `{ scenario, params: { groupId, userId, target } }`；
+- **场景下拉是空的**：`loadScenarios()` 从没在打开分区时调用；顺带修了场景名取错字段（`title` → `name`）；
+- **`loadPlugins` 失败分支过早 return**：NapCat 离线时目录结构不显示（已抽成 `renderPluginTree` 两处都调）。
+
+#### 六、读数
+
+72 套 / 4329 断言全绿；元素时序 138 个 id 全就位，40 个前端 `/api` 调用全部有实现。
+
+
 ### v0.8.2（2026-11-03）— 一批「能少点几下」的小功能 + 两条能抓住事故的守卫
 
 全部在 `control/` 与 `test/`，**`lib/` 一行未动**（对补丁作者零重锚）。
