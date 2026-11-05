@@ -570,6 +570,15 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
             if (typeof api.accounts?.saveNetworkServers !== 'function') return { ok: false, message: '当前控制台不支持保存 WS 服务器' }
             return api.accounts.saveNetworkServers({ uin: String(body.uin ?? '').trim(), servers: Array.isArray(body.servers) ? body.servers : [] })
           },
+          // 0.8.4：TCP 连通性测试
+          '/api/accounts/netcheck': async () => {
+            if (typeof api.accounts?.netCheck !== 'function') return { ok: false, message: '当前控制台不支持连通性测试' }
+            return api.accounts.netCheck({
+              host: String(body.host ?? '127.0.0.1'),
+              port: Number(body.port) || 0,
+              timeoutMs: Math.min(10000, Math.max(500, Number(body.timeoutMs) || 3000)),
+            })
+          },
           // 0.8.3：回收站还原 / 送系统回收站
           '/api/accounts/trash/restore': () => {
             if (typeof api.accounts?.restoreTrash !== 'function') return { ok: false, message: '当前控制台不支持还原' }

@@ -24,6 +24,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { createConnection } from 'node:net'
 import { spawn , execFileSync } from 'node:child_process'
 import { mkdirSync, copyFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -1160,6 +1161,34 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       } catch (error) {
         return { ok: false, kind: 'error', message: '送回收站失败（未删除任何内容）：' + String(error?.message ?? error).slice(0, 120) }
       }
+    },
+
+    /**
+     * TCP 连通性测试：给一个 host:port，试着连一下（只读、3 秒超时）。
+     * 用来回答"6700 到底通不通"，而不是靠猜。
+     */
+    async netCheck({ host = '127.0.0.1', port = 0, timeoutMs = 3000 } = {}) {
+      const cleanHost = String(host ?? '').trim() || '127.0.0.1'
+      const cleanPort = Number(port)
+      if (!Number.isInteger(cleanPort) || cleanPort < 1 || cleanPort > 65535) {
+        return { ok: false, kind: 'bad-input', message: '端口必须是 1–65535 的整数' }
+      }
+      if (/[^a-zA-Z0-9.\-_:]/.test(cleanHost)) return { ok: false, kind: 'bad-input', message: '主机名不合法' }
+      const startedAt = Date.now()
+      return await new Promise((resolve) => {
+        let settled = false
+        const socket = createConnection({ host: cleanHost, port: cleanPort })
+        const finish = (result) => {
+          if (settled) return
+          settled = true
+          try { socket.destroy() } catch { /* 忽略 */ }
+          resolve(result)
+        }
+        socket.setTimeout(timeoutMs)
+        socket.once('connect', () => finish({ ok: true, kind: 'ok', message: '连上了', host: cleanHost, port: cleanPort, latencyMs: Date.now() - startedAt }))
+        socket.once('timeout', () => finish({ ok: false, kind: 'timeout', message: cleanPort + ' 在 ' + timeoutMs + 'ms 内没有响应（可能没在监听）', host: cleanHost, port: cleanPort, latencyMs: Date.now() - startedAt }))
+        socket.once('error', (error) => finish({ ok: false, kind: 'error', message: '连不上：' + String(error?.code ?? error?.message ?? error), host: cleanHost, port: cleanPort, latencyMs: Date.now() - startedAt }))
+      })
     },
 
     /** 确保插件目录存在（config/plugins）：只 mkdir，不下载、不安装。 */

@@ -402,7 +402,7 @@
         <span class="sub" style="margin:0 0 0 8px">当前自动登录：<b id="autoLoginNow">—</b></span></div>
         <p class="sub">来自 <code>bootmain/config</code> 的 <code>onebot11_&lt;QQ号&gt;.json</code> / <code>napcat_&lt;QQ号&gt;.json</code>；只读文件名，不改内容。</p>
         <table>
-          <thead><tr><th>QQ 号</th><th>OneBot 配置</th><th>NapCat 配置</th><th>登录状态</th><th>自动登录</th><th style="text-align:right">操作</th></tr></thead>
+          <thead><tr><th>QQ 号</th><th>OneBot 配置</th><th>NapCat 配置</th><th>登录状态</th><th>自动登录</th><th>连接</th><th style="text-align:right">操作</th></tr></thead>
           <tbody id="accountRows"><tr><td colspan="6"><div class="skeleton" style="width:60%"></div></td></tr></tbody>
         </table>
       </div>
@@ -881,7 +881,24 @@
     $('mAccounts').textContent = accounts.length
     $('mApis').textContent = degraded.length === 0 ? '全部' : `${4 - degraded.length}/4`
     renderAccounts(accounts, webui.autoLoginAccount ?? '')
+    loadConnSummary()
     loadSys()
+  }
+
+  /** 账号配置页也要显示"每个号有几条连接"：单独查一次 network（只读文件）。 */
+  async function loadConnSummary() {
+    const data = await api('/api/accounts/network')
+    if (data.ok !== true) return
+    const summary = {}
+    for (const row of data.accounts ?? []) {
+      const parts = []
+      if ((row.clients ?? []).length > 0) parts.push('WS 客户端 ' + row.clients.length)
+      if ((row.servers ?? []).length > 0) parts.push('WS 服务器 ' + row.servers.length)
+      if ((row.https ?? []).length > 0) parts.push('HTTP ' + row.https.length)
+      summary[row.uin] = parts.length > 0 ? parts.join(' · ') : '无'
+    }
+    state.netSummary = summary
+    if (Array.isArray(state.accountRows)) renderAccounts(state.accountRows, state.autoUin ?? '')
   }
 
   function renderAccounts(rows, auto) {
@@ -905,6 +922,7 @@
       <td>${row.hasNapCatConfig ? '<span class="tag ok">有</span>' : '<span class="tag">无</span>'}</td>
       <td>${row.uin === onlineUin ? '<span class="tag ok">在线</span>' : (loggedIn ? '<span class="tag">其它号</span>' : '<span class="tag">未登录</span>')}</td>
       <td>${row.uin === auto ? '<span class="tag star">自动登录</span>' : '<span class="tag">—</span>'}</td>
+      <td><span class="tag" id="accountConnBadge">${(state.netSummary?.[row.uin] ?? '')}</span></td>
       <td style="text-align:right">
         <button data-quick="${row.uin}">快速登录</button>
         <button data-auto="${row.uin}" data-on="${row.uin === auto ? '1' : '0'}">${row.uin === auto ? '取消自动登录' : '设为自动登录'}</button>
@@ -1352,6 +1370,15 @@
     const toolbar = $('networkToolbar')
     const total = netDraft.reduce((sum, row) => sum + row.clients.length + (row.servers?.length ?? 0) + (row.https?.length ?? 0), 0)
     $('networkBadge').textContent = netDraft.length + ' 个账号 / ' + total + ' 条连接'
+    // 顺手记下"每个号有几条连接"，给账号配置页那一列用
+    state.netSummary = {}
+    for (const row of netDraft) {
+      const parts = []
+      if ((row.clients ?? []).length > 0) parts.push('WS 客户端 ' + row.clients.length)
+      if ((row.servers ?? []).length > 0) parts.push('WS 服务器 ' + row.servers.length)
+      if ((row.https ?? []).length > 0) parts.push('HTTP ' + row.https.length)
+      state.netSummary[row.uin] = parts.length > 0 ? parts.join(' · ') : '无'
+    }
 
     if (toolbar) {
       toolbar.innerHTML = NET_TABS.map(([key, label]) => '<button data-filter="' + key + '" class="' + (netFilter === key ? 'primary' : '') + '">' + label + '</button>').join('')
@@ -1381,7 +1408,8 @@
             + '<input data-field="name:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.name) + '" placeholder="名称" style="width:100%;margin-bottom:8px">'
             + '<input data-field="url:' + uinIndex + ':' + index + '" value="' + escapeHtml(client.url) + '" placeholder="ws://127.0.0.1:6700/" style="width:100%;margin-bottom:10px">'
             + '<div class="sub" style="margin:-4px 0 8px" data-port-tag="' + (function (url) { const m = /:(\d{2,5})(?:\/|$)/.exec(String(url || '')); return m ? m[1] : '' })(client.url) + '"></div>'
-            + '<div class="row"><button data-copyurl="' + uinIndex + ':' + index + '">复制地址</button>'
+            + '<div class="row"><button data-netcheck="' + uinIndex + ':' + index + '">测试连接</button>'
+            + '<button data-copyurl="' + uinIndex + ':' + index + '">复制地址</button>'
             + '<button data-del="' + uinIndex + ':' + index + '" class="danger">删除</button></div>'
             + '<div class="sub" data-state="' + uinIndex + '" style="margin:6px 0 0"></div>'
             + '</div>')
@@ -1451,6 +1479,7 @@
 
     for (const el of body.querySelectorAll('[data-toggle]')) el.onclick = () => toggleClient(el.dataset.toggle)
     for (const el of body.querySelectorAll('[data-del]')) el.onclick = () => removeClient(el.dataset.del)
+    for (const el of body.querySelectorAll('[data-netcheck]')) el.onclick = () => testConnection(el.dataset.netcheck, el)
     for (const el of body.querySelectorAll('[data-copyurl]')) el.onclick = async () => {
       const [uinIndex, clientIndex] = splitKey(el.dataset.copyurl)
       const url = netDraft[uinIndex]?.clients?.[clientIndex]?.url ?? ''
@@ -1498,6 +1527,22 @@
     netDirty = true
     server.enable = server.enable === false
     renderNetwork()
+  }
+
+  /** TCP 连通性测试：从 ws://host:port/ 里抠出 host:port 去连一下。 */
+  async function testConnection(key, button) {
+    const [uinIndex, clientIndex] = splitKey(key)
+    const url = netDraft[uinIndex]?.clients?.[clientIndex]?.url ?? ''
+    const match = /^(wss?):\/\/([^/:]+)(?::(\d+))?/i.exec(String(url).trim())
+    if (!match) { toast('这个地址解析不出 host:port', 'bad'); return }
+    const host = match[2]
+    const port = Number(match[3] ?? (match[1].toLowerCase() === 'wss' ? 443 : 80))
+    busy(button, true, '测试中…')
+    const result = await post('/api/accounts/netcheck', { host, port })
+    busy(button, false)
+    if (result.ok === true) toast(host + ':' + port + ' 通（' + (result.latencyMs ?? 0) + 'ms）', 'ok')
+    else toast(host + ':' + port + ' 不通：' + (result.message ?? '未知'), 'bad')
+    opLog('测连通 ' + host + ':' + port + '：' + (result.ok === true ? '通' : '不通'))
   }
 
   function toggleClient(key) {
