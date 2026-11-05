@@ -244,7 +244,7 @@ check('词表改动后热重载', reloaded.includes('敏感词'), reloaded.trim(
     allowsChat({ allowUsers: [], allowGroups: [], allowAllChats: true }, priv(1003)) === true
     && allowsChat({ allowUsers: [], allowGroups: [], allowAllChats: true }, grp(9999, 1003)) === true)
   /**
-   * ★ v0.8.4（收自 551123 的补丁）：allowUsersPrivateOnly —— 把「允许的用户」限定为只管私聊。
+   * ★ v0.8.4（收自 551123 的补丁）：allowUsersPrivateOnly —— 把「QQ 用户」限定为只管私聊。
    *   默认关 = 原行为（群里发送者也要在 allowUsers 里）；打开后群里只看 allowGroups。
    */
   const withFlag = { ...base, allowUsersPrivateOnly: true }

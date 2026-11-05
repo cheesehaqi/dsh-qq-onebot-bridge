@@ -889,7 +889,7 @@ check('运行时状态行会真的渲染出来（group.status）',
   })())
 /**
  * ★ v0.7.0：管理员名单（`adminUsers`）进面板 —— 以前只能改 YAML，而它是 /设管理、/批量踢 的准入门。
- *   三条钉子：① 它是「AI账号与白名单」组里的 list 行；② 标签写明"必须同时在允许的用户里"；
+ *   三条钉子：① 它是「AI账号与白名单」组里的 list 行；② 标签写明"必须同时在 QQ 用户里"；
  *   ③ 组提示里也补了同一句（消息先过 allowUsers，管理员不在里面命令就不会响应）。
  */
 check('★adminUsers 面板行存在，且标签与组提示都写明它受 allowUsers 约束',
@@ -898,8 +898,8 @@ check('★adminUsers 面板行存在，且标签与组提示都写明它受 allo
     const row = group.rows.find((item) => item.key === 'adminUsers')
     return row !== undefined && row.type === 'list'
       && /管理员/.test(row.label)
-      && /必须同时出现在「允许的用户」里/.test(String(row.hint))
-      && /管理员名单里的号也必须出现在「允许的用户」里/.test(String(group.note))
+      && /必须同时出现在「QQ 用户」里/.test(String(row.hint))
+      && /管理员名单里的号也必须出现在「QQ 用户」里/.test(String(group.note))
   })(),
   brief(PANEL_GROUPS.find((item) => item.id === 'whitelist')?.rows.map((row) => `${row.key}:${row.type}`)))
 /**
@@ -2267,8 +2267,8 @@ const clientVersion = (() => {
         }, {
           // 号码列表行（v0.6.8，白名单）：一条一个 chip + 输入框 + 「+ 添加」。
           key: 'allowUsers',
-          label: '允许的用户（QQ 号）',
-          hint: '私聊白名单：只有列表里的 QQ 号可以私聊机器人。**空 = 拒绝所有私聊**。',
+          label: 'QQ 用户',
+          hint: '能私聊它的 QQ 号。**空 = 拒绝所有私聊**。',
           needs: '',
           type: 'list',
           value: [2000000001],
@@ -2310,7 +2310,7 @@ const clientVersion = (() => {
       const searching = shallowText(render, [{ ...fixture, filter: '静默' }])
       return searching.text.includes('匹配')
         && searching.text.includes('静默时段')
-        && !searching.text.includes('允许的用户（QQ 号）')
+        && !searching.text.includes('QQ 用户')
     })(),
     '搜索「静默」')
   check('★搜索无命中：给"换个词/清空"的提示，而不是空白',
@@ -2331,9 +2331,9 @@ const clientVersion = (() => {
    * ★ v0.6.8 白名单行（号码列表）：chip 显示号码 + 一个输入框 + 「+ 添加/50」。
    */
   check('★浅渲染：白名单行画出号码 chip、输入框与「+ 添加」',
-    readyText.includes('允许的用户（QQ 号）') && readyText.includes('2000000001')
+    readyText.includes('QQ 用户') && readyText.includes('2000000001')
     && readyText.includes('+ 添加（1/50）')
-    && ready.inputs.some((item) => item.label === '允许的用户（QQ 号）：要添加的号码')
+    && ready.inputs.some((item) => item.label === 'QQ 用户：要添加的号码')
     && ready.buttons.some((btn) => btn.text === '×'),
     `buttons=${ready.buttons.map((b) => b.text).join('')}`)
   /**
