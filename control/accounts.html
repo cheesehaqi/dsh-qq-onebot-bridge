@@ -471,7 +471,7 @@
           <div class="row" style="margin-top:16px"><button id="btnGuid">查备份</button></div>
         </div>
         <div class="card">
-          <h2>接口可用性</h2>
+          <h2>接口可用性 <button id="btnRecheckAll" style="margin-left:8px">全部重新检测</button></h2>
           <p class="sub">顶部信息条按这几个接口的返回判定；这里列出逐个状态。</p>
           <dl class="kv">
             <dt>NapCat 版本</dt><dd id="apiNapcat">—</dd>
@@ -1438,6 +1438,7 @@
             + '<input data-sfield="name:' + uinIndex + ':' + serverIndex + '" value="' + escapeHtml(server.name || '') + '" placeholder="名称" style="width:100%;margin-bottom:8px">'
             + '<input data-sfield="port:' + uinIndex + ':' + serverIndex + '" value="' + (server.port ?? '') + '" placeholder="端口，如 3001" style="width:100%;margin-bottom:8px">'
             + '<input data-sfield="host:' + uinIndex + ':' + serverIndex + '" value="' + escapeHtml(server.host || '') + '" placeholder="监听地址（可空，如 0.0.0.0）" style="width:100%">'
+            + '<div class="row" style="margin-top:8px"><button data-sportcheck="' + uinIndex + ':' + serverIndex + '">测试本机端口</button></div>'
             + '</div>')
         })
       }
@@ -1461,6 +1462,7 @@
             + '<div class="sub" style="margin:0 0 6px" data-port-tag="' + (http.port ?? '') + '"></div>'
             + '<input data-hfield="port:' + uinIndex + ':' + httpIndex + '" value="' + (http.port ?? '') + '" placeholder="端口，如 3000" style="width:100%;margin-bottom:8px">'
             + '<input data-hfield="host:' + uinIndex + ':' + httpIndex + '" value="' + escapeHtml(http.host || '') + '" placeholder="监听地址（可空）" style="width:100%">'
+            + '<div class="row" style="margin-top:8px"><button data-hportcheck="' + uinIndex + ':' + httpIndex + '">测试本机端口</button></div>'
             + '</div>')
         })
       }
@@ -1492,6 +1494,18 @@
     for (const el of body.querySelectorAll('[data-field]')) el.oninput = () => editField(el.dataset.field, el.value)
     for (const el of body.querySelectorAll('[data-sfield]')) el.oninput = () => editServerField(el.dataset.sfield, el.value)
     for (const el of body.querySelectorAll('[data-stoggle]')) el.onclick = () => toggleServer(el.dataset.stoggle)
+    for (const el of body.querySelectorAll('[data-sportcheck]')) el.onclick = () => {
+      const [uinIndex, serverIndex] = splitKey(el.dataset.sportcheck)
+      const port = Number(netDraft[uinIndex]?.servers?.[serverIndex]?.port)
+      if (!Number.isInteger(port) || port < 1) { toast('先填一个端口', 'bad'); return }
+      checkPort('127.0.0.1', port, el)
+    }
+    for (const el of body.querySelectorAll('[data-hportcheck]')) el.onclick = () => {
+      const [uinIndex, httpIndex] = splitKey(el.dataset.hportcheck)
+      const port = Number(netDraft[uinIndex]?.https?.[httpIndex]?.port)
+      if (!Number.isInteger(port) || port < 1) { toast('先填一个端口', 'bad'); return }
+      checkPort('127.0.0.1', port, el)
+    }
     for (const el of body.querySelectorAll('[data-addserver]')) el.onclick = () => addServer(Number(el.dataset.addserver))
     for (const el of body.querySelectorAll('[data-addhttp]')) el.onclick = () => addHttpServer(Number(el.dataset.addhttp))
     for (const el of body.querySelectorAll('[data-hfield]')) el.oninput = () => editHttpField(el.dataset.hfield, el.value)
@@ -1527,6 +1541,16 @@
     netDirty = true
     server.enable = server.enable === false
     renderNetwork()
+  }
+
+  /** 测本机某个端口通不通（服务器段用它）。 */
+  async function checkPort(host, port, button) {
+    busy(button, true, '测试中…')
+    const result = await post('/api/accounts/netcheck', { host, port })
+    busy(button, false)
+    if (result.ok === true) toast(host + ':' + port + ' 通（' + (result.latencyMs ?? 0) + 'ms）', 'ok')
+    else toast(host + ':' + port + ' 不通：' + (result.message ?? '未知'), 'bad')
+    opLog('测端口 ' + host + ':' + port + '：' + (result.ok === true ? '通' : '不通'))
   }
 
   /** TCP 连通性测试：从 ws://host:port/ 里抠出 host:port 去连一下。 */
@@ -1898,6 +1922,16 @@
         if (Array.isArray(state.accountRows)) renderAccounts(state.accountRows, state.autoUin ?? '')
       },
     }))
+    const fileItems = (Array.isArray(state.fileNames) ? state.fileNames : []).slice(0, 40).map((name) => ({
+      label: '文件：' + name,
+      run: () => {
+        activate('files')
+        fileQuery = name
+        const input = $('fileSearch')
+        if (input) input.value = name
+        loadFiles()
+      },
+    }))
     const actions = [
       { label: '动作：刷新登录状态', run: () => refreshStatus(false) },
       { label: '动作：刷新页面数据', run: () => { loadMeta(); refreshStatus(true); opLog('刷新页面数据') } },
@@ -1907,7 +1941,7 @@
       { label: '动作：导出诊断包（脱敏）', run: () => window.open('/api/export?redact=1&token=' + encodeURIComponent(token), '_blank', 'noopener') },
       { label: '动作：清空操作记录', run: () => { try { localStorage.removeItem(OP_LOG_KEY) } catch { /* 忽略 */ } renderOpLog(); toast('操作记录已清空', 'ok') } },
     ]
-    return [...sections, ...accountItems, ...actions]
+    return [...sections, ...accountItems, ...fileItems, ...actions]
   }
 
   const renderPalette = () => {
@@ -2000,6 +2034,16 @@
   const foldBackup = $('foldBackup')
   if (foldBackup) {
     foldBackup.addEventListener('toggle', () => { if (foldBackup.open) loadBackups() })
+  }
+
+  const recheckBtn = $('btnRecheckAll')
+  if (recheckBtn) recheckBtn.onclick = async () => {
+    busy(recheckBtn, true, '检测中…')
+    await loadMeta()
+    await refreshStatus(true)
+    busy(recheckBtn, false)
+    toast('已重新检测', 'ok')
+    opLog('重新检测接口状态')
   }
 
   const exportBtn = $('btnExport')
@@ -2123,6 +2167,7 @@
           + '<td>' + (entry.isDir ? '—' : humanSize(entry.size)) + '</td>'
           + '<td class="sub" style="margin:0">' + (entry.mtime ? new Date(entry.mtime).toLocaleString('zh-CN', { hour12: false }) : '—') + '</td></tr>').join('')
         + '</tbody></table>'
+    state.fileNames = entries.map((entry) => entry.name)
     opLog('刷新文件列表')
   }
 
@@ -2550,12 +2595,21 @@
   $('btnLogDownload').onclick = () => {
     // 有筛选（级别 / 关键词 / 时间 / 折叠）时导出的就是筛选后的行，否则退回原文
     const filtered = Array.isArray(logKept) && logKept.length > 0 ? logKept : null
-    const content = filtered !== null ? filtered.join('\n') : logText
+    const header = [
+      '# 账号中心日志导出',
+      '# 时间：' + new Date().toLocaleString('zh-CN', { hour12: false }),
+      '# 级别：' + level + (logInfoOnly === true ? '（只看 Info 以上）' : ''),
+      '# 关键词：' + (logKeyword === '' ? '（无）' : logKeyword),
+      '# 时间范围：' + (logRangeMs === 0 ? '全部' : logRangeMs / 60000 + ' 分钟'),
+      '# 折叠超长行：' + (logFoldLong === true ? '开' : '关'),
+      '',
+    ].join('\n')
+    const content = header + (filtered !== null ? filtered.join('\n') : logText)
     if (content === '') { toast('没有可下载的内容', 'warn'); return }
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
-    link.download = 'qq-account-log-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.log'
+    link.download = 'qq-account-log-' + level + '-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.log'
     link.click()
     setTimeout(() => URL.revokeObjectURL(link.href), 2000)
     opLog('下载日志')
