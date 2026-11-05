@@ -60,6 +60,16 @@
     input, textarea, select{ background:var(--card); color:var(--fg); border-color:var(--line) }
   }
 
+  /* 可折叠块：summary 长得像小标题，展开后内容有缩进 */
+  details.fold{ border:1px solid var(--line); border-radius:12px; padding:0 14px; margin:14px 0 0; background:var(--card) }
+  details.fold > summary{ cursor:pointer; padding:12px 0; font-weight:600; font-size:13px; list-style:none; display:flex; align-items:center; gap:8px }
+  details.fold > summary::-webkit-details-marker{ display:none }
+  details.fold > summary::before{ content:'▸'; color:var(--muted); transition:transform .15s }
+  details.fold[open] > summary::before{ transform:rotate(90deg) }
+  details.fold > summary .tag{ margin-left:auto; font-weight:400 }
+  details.fold > summary .tag:empty{ display:none }
+  details.fold > .foldBody{ padding:0 0 14px }
+
   *{box-sizing:border-box}
   html,body{height:100%}
   body{margin:0;background:var(--bg);color:var(--fg);
@@ -415,12 +425,20 @@
       <div class="row" style="margin-bottom:10px"><input id="fileSearch" placeholder="按文件名过滤（支持 *.json）" style="flex:1"></div>
       <div id="filesSummary" class="sub" style="margin:0 0 8px">—</div>
       <div id="filesBody" class="empty">切换到这里会自动加载</div>
-      <h3 style="font-size:13px;margin:18px 0 8px">回收站 <span class="badge" id="trashBadge">—</span></h3>
-      <p class="sub" style="margin:0 0 10px">「删除备份」会把文件移进 <code>config/_trash/</code>；这里可以还原，或送进 <b>Windows 回收站</b>（不是硬删除）。</p>
-      <div id="trashRows" class="empty">切换到这里会自动加载</div>
-      <h3 style="font-size:13px;margin:18px 0 8px">配置备份 <span class="badge" id="backupBadge">—</span></h3>
-      <p class="sub" style="margin:0 0 10px">每次写配置前都会留一份 <code>.bak-时间戳</code>；还原前会把当前文件另存 <code>.pre-restore-*</code>，删除是移到 <code>config/_trash/</code>，都不会真删。</p>
-      <div id="backupRows" class="empty">切换到这里会自动加载</div>
+      <details class="fold" id="foldTrash">
+        <summary>回收站 <span class="sub" style="margin:0;font-weight:400">删除的备份会进这里，可还原或送系统回收站</span><span class="tag" id="trashBadge"></span></summary>
+        <div class="foldBody">
+          <p class="sub" style="margin:0 0 10px">「删除备份」把文件移进 <code>config/_trash/</code>；这里能还原，或送进 <b>Windows 回收站</b>（不是硬删除）。</p>
+          <div id="trashRows" class="empty">展开时自动加载</div>
+        </div>
+      </details>
+      <details class="fold" id="foldBackup">
+        <summary>配置备份 <span class="sub" style="margin:0;font-weight:400">每次写配置前留的 .bak-时间戳</span><span class="tag" id="backupBadge"></span></summary>
+        <div class="foldBody">
+          <p class="sub" style="margin:0 0 10px">还原前会把当前文件另存 <code>.pre-restore-*</code>；删除是移到 <code>config/_trash/</code>，都不会真删。</p>
+          <div id="backupRows" class="empty">展开时自动加载</div>
+        </div>
+      </details>
       <div class="row" style="margin-top:14px"><button id="btn-files">刷新</button>
         <button class="primary" id="btn-openFiles">在资源管理器中打开 →</button>
         <button id="btn-copyDir">复制目录路径</button>
@@ -431,8 +449,10 @@
       <h2>插件管理 <span class="badge" id="pluginsBadge">—</span></h2>
       <p class="sub">启用 / 停用 / 卸载（卸载会删文件，二次确认）<code style="margin-left:6px">/api/accounts/plugins</code></p>
       <div id="pluginsBody" class="empty">切换到这里会自动加载</div>
-      <h3 style="font-size:13px;margin:16px 0 6px">插件目录 <span class="badge" id="pluginTreeBadge">—</span></h3>
-      <div id="pluginTree" class="sub" style="margin:0">切换到这里会自动加载</div>
+      <details class="fold">
+        <summary>插件目录 <span class="tag" id="pluginTreeBadge"></span></summary>
+        <div class="foldBody"><div id="pluginTree" class="sub" style="margin:0">展开时自动加载</div></div>
+      </details>
       <div class="row" style="margin-top:14px">
         <button id="btn-plugins">刷新</button>
         <button class="primary" id="btn-openPlugins">打开插件目录 →</button>
@@ -475,9 +495,13 @@
       <div class="row" style="margin-top:14px"><button id="btn-config">刷新</button></div>
     </div>
       <div class="card wide">
-        <h2>napcat.json 只读预览 <span class="badge" id="napcatCfgBadge">—</span></h2>
-        <p class="sub">顶层键值，值截断到 80 字；<b>命中 token / secret / password / cookie / key 的一律显示「（已隐藏）」</b>。只读，不写回。</p>
-        <div id="napcatCfgBody" class="empty">切换到这里会自动加载</div>
+        <details class="fold" style="margin-top:0">
+          <summary>napcat.json 只读预览 <span class="tag" id="napcatCfgBadge"></span></summary>
+          <div class="foldBody">
+            <p class="sub" style="margin:0 0 10px">顶层键值，值截断到 80 字；<b>命中 token / secret / password / cookie / key 的一律显示「（已隐藏）」</b>。只读，不写回。</p>
+            <div id="napcatCfgBody" class="empty">展开时自动加载</div>
+          </div>
+        </details>
         <div class="row" style="margin-top:12px"><button id="btnNapcatCfg">刷新</button></div>
       </div>
 </section>
@@ -1923,6 +1947,16 @@
     opLog('检查更新：' + (data.newer === true ? '有新版 ' + data.latest : '已是最新'))
   }
 
+  // 折叠块：第一次展开时才去请求（省得每次进页面都打两个接口）
+  const foldTrash = $('foldTrash')
+  if (foldTrash) {
+    foldTrash.addEventListener('toggle', () => { if (foldTrash.open) loadTrash() })
+  }
+  const foldBackup = $('foldBackup')
+  if (foldBackup) {
+    foldBackup.addEventListener('toggle', () => { if (foldBackup.open) loadBackups() })
+  }
+
   const exportBtn = $('btnExport')
   if (exportBtn) exportBtn.onclick = () => {
     // 走控制台已有的 /api/export：redact=1 → QQ 号掩码、消息只留长度，可直接发人
@@ -1940,12 +1974,49 @@
     return (bytes / 1048576).toFixed(1) + ' MB'
   }
   let fileQuery = ''
+  async function loadBackups() {
+    const body = $('backupRows')
+    if (!body) return
+    const data = await api('/api/accounts/backups')
+    const list = Array.isArray(data.backups) ? data.backups : []
+    $('backupBadge').textContent = data.ok === true ? (list.length === 0 ? '空' : list.length + ' 份') : '读不到'
+    if (data.ok !== true) { body.innerHTML = '<div class="empty">' + escapeHtml(data.message ?? '取不到备份列表') + '</div>'; return }
+    if (list.length === 0) { body.innerHTML = '<div class="empty">还没有备份（写过一次配置才会有）</div>'; return }
+    body.innerHTML = '<table><thead><tr><th>文件</th><th>大小</th><th>时间</th><th style="text-align:right">操作</th></tr></thead><tbody>'
+      + list.slice(0, 30).map((item) => '<tr><td><code>' + escapeHtml(item.name) + '</code></td>'
+        + '<td>' + humanSize(item.size) + '</td>'
+        + '<td class="sub" style="margin:0">' + (item.mtime ? new Date(item.mtime).toLocaleString('zh-CN', { hour12: false }) : '—') + '</td>'
+        + '<td style="text-align:right"><button data-restore="' + escapeHtml(item.name) + '">还原</button> '
+        + '<button class="danger" data-trashbk="' + escapeHtml(item.name) + '">删除</button></td></tr>').join('')
+      + '</tbody></table>'
+    for (const button of body.querySelectorAll('[data-restore]')) button.onclick = () => restoreBackup(button.dataset.restore, button)
+    for (const button of body.querySelectorAll('[data-trashbk]')) button.onclick = () => trashBackup(button.dataset.trashbk, button)
+  }
+
+  async function restoreBackup(name, button) {
+    if (!confirm('用备份「' + name + '」覆盖当前配置？当前文件会先另存为 .pre-restore-*')) return
+    busy(button, true, '还原中…')
+    const result = await post('/api/accounts/backups/restore', { name })
+    busy(button, false)
+    if (result.ok === true) { toast('已还原：' + name, 'ok'); opLog('还原配置备份 ' + name); loadBackups(); loadFiles() }
+    else toast('还原失败：' + (result.message ?? result.reason ?? '未知'), 'bad')
+  }
+
+  async function trashBackup(name, button) {
+    if (!confirm('把备份「' + name + '」移到 config/_trash？（不是真删）')) return
+    busy(button, true, '移动中…')
+    const result = await post('/api/accounts/backups/trash', { name })
+    busy(button, false)
+    if (result.ok === true) { toast('已移入回收：' + name, 'ok'); opLog('删除配置备份 ' + name); loadBackups(); loadTrash() }
+    else toast('删除失败：' + (result.message ?? result.reason ?? '未知'), 'bad')
+  }
+
   async function loadTrash() {
     const body = $('trashRows')
     if (!body) return
     const data = await api('/api/accounts/trash')
     const list = Array.isArray(data.entries) ? data.entries : []
-    $('trashBadge').textContent = data.ok === true ? list.length + ' 份' : '读不到'
+    $('trashBadge').textContent = data.ok === true ? (list.length === 0 ? '空' : list.length + ' 份') : '读不到'
     if (data.ok !== true) { body.innerHTML = '<div class="empty">' + escapeHtml(data.message ?? '读不到回收站') + '</div>'; return }
     if (list.length === 0) { body.innerHTML = '<div class="empty">回收站是空的</div>'; return }
     body.innerHTML = '<table><thead><tr><th>文件</th><th>大小</th><th>时间</th><th style="text-align:right">操作</th></tr></thead><tbody>'
