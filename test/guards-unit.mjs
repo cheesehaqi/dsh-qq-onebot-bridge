@@ -243,6 +243,20 @@ check('词表改动后热重载', reloaded.includes('敏感词'), reloaded.trim(
   check('★回应所有人：所有私聊与所有群都放行（名单为空也一样）',
     allowsChat({ allowUsers: [], allowGroups: [], allowAllChats: true }, priv(1003)) === true
     && allowsChat({ allowUsers: [], allowGroups: [], allowAllChats: true }, grp(9999, 1003)) === true)
+  /**
+   * ★ v0.8.4（收自 551123 的补丁）：allowUsersPrivateOnly —— 把「允许的用户」限定为只管私聊。
+   *   默认关 = 原行为（群里发送者也要在 allowUsers 里）；打开后群里只看 allowGroups。
+   */
+  const withFlag = { ...base, allowUsersPrivateOnly: true }
+  check('allowUsersPrivateOnly 默认关：群里仍要求发送者在 allowUsers 里（行为不变）',
+    allowsChat(base, grp(2002, 1003)) === false
+    && allowsChat({ ...base, allowUsersPrivateOnly: false }, grp(2002, 1003)) === false)
+  check('allowUsersPrivateOnly 打开：群里不再要求发送者在 allowUsers 里',
+    allowsChat(withFlag, grp(2002, 1003)) === true)
+  check('allowUsersPrivateOnly 打开：群本身不在 allowGroups 时仍然拒绝',
+    allowsChat(withFlag, grp(9999, 1003)) === false)
+  check('allowUsersPrivateOnly 打开：私聊仍然严格按 allowUsers',
+    allowsChat(withFlag, priv(1001)) === true && allowsChat(withFlag, priv(1003)) === false)
   check('回应所有人不影响"验证期答题放行"的语义（verifyPending 仍按实参走）',
     allowsChat({ allowUsers: [], allowGroups: [], allowAllChats: false }, priv(1004), { verifyPending: true }) === true
     && allowsChat({ allowUsers: [], allowGroups: [], allowAllChats: false }, priv(1004), { verifyPending: false }) === false)

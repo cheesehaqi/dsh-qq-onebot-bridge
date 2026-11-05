@@ -153,11 +153,11 @@ const missed = PANEL_KEYS.filter((key) => {
 })
 check('凡 schema 里带 apiKey/baseUrl/provider/model 的开关都标了依赖',
   missed.length === 0, missed.join(','))
-check('依赖分布合理（既有"开箱即用"也有需要准备的，且总数为 87 = 69 开关 + 12 数值 + 1 时段 + 3 名单 + 2 句式）',
+check('依赖分布合理（既有"开箱即用"也有需要准备的，且总数为 88 = 70 开关 + 12 数值 + 1 时段 + 3 名单 + 2 句式）',
   allRows.filter((entry) => entry.needs === '').length >= 5
   && allRows.filter((entry) => entry.needs !== '').length >= 20
-  && allRows.length === 87
-  && boolRows.length === 69 && numRows.length === 12
+  && allRows.length === 88
+  && boolRows.length === 70 && numRows.length === 12
   && allRows.filter((entry) => entry.type === 'times').length === 1
   && allRows.filter((entry) => entry.type === 'list').length === 3
   && allRows.filter((entry) => entry.type === 'patterns').length === 2,
@@ -912,7 +912,7 @@ check('★「AI账号与白名单」只放"谁能让它开口"（不放回复样
     const chat = PANEL_GROUPS.find((item) => item.id === 'chat')
     return group !== undefined && group.title === 'AI账号与白名单'
       // 准入门（群里只理被 @ 的 / 允许私聊）和白名单是同一件事：谁能让它开口
-      && group.rows.map((row) => `${row.key}:${row.type}`).join(',') === 'botQq:number,allowAllChats:boolean,replyOnlyWhenMentioned:boolean,acceptPrivate:boolean,allowUsers:list,allowGroups:list,adminUsers:list'
+      && group.rows.map((row) => `${row.key}:${row.type}`).join(',') === 'botQq:number,allowAllChats:boolean,replyOnlyWhenMentioned:boolean,allowUsersPrivateOnly:boolean,acceptPrivate:boolean,allowUsers:list,allowGroups:list,adminUsers:list'
       // 对话基础里不再留这两个开关（避免两处都能改、看着像重复）
       && !chat.rows.some((row) => row.key === 'replyOnlyWhenMentioned' || row.key === 'acceptPrivate')
       /**
