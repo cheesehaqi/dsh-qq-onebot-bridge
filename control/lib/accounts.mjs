@@ -27,7 +27,7 @@ import { createHash } from 'node:crypto'
 import { createConnection } from 'node:net'
 import { spawn , execFileSync } from 'node:child_process'
 import { mkdirSync, copyFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** NapCat WebUI 的端点（按源码固定；`method` 只是首选，失败会回退）。 */
@@ -1209,20 +1209,36 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
       const config = readConfig()
       return config.exists ? dirname(config.path) : ''
     },
-    /** 文件管理（只读）：列 config 目录。刻意只列这一层，不做递归、不提供下载任意路径。 */
-    files() {
+    /**
+     * 文件管理（只读）：列 config 目录，可下钻一层子目录（`rel`）。
+     * 安全边界：`rel` 只能是相对路径，不许 `..`、不许绝对路径，解析后必须仍在 config 根之内。
+     * 仍然不做递归、不读文件内容、不提供下载。
+     */
+    files({ rel = '' } = {}) {
       const config = readConfig()
-      const dir = config.exists ? dirname(config.path) : ''
-      if (dir === '') return { ok: false, kind: 'no-config', message: '没有可用的 WebUI 配置', dir, entries: [] }
+      const root = config.exists ? dirname(config.path) : ''
+      if (root === '') return { ok: false, kind: 'no-config', message: '没有可用的 WebUI 配置', dir: '', root: '', rel: '', entries: [] }
+      const clean = String(rel ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+      if (clean.includes('..') || clean.includes('\u0000')) {
+        return { ok: false, kind: 'bad-input', message: '路径不合法（不允许 ..）', dir: root, root, rel: '', entries: [] }
+      }
+      const dir = clean === '' ? root : join(root, clean)
+      const resolvedRoot = resolve(root)
+      const resolvedDir = resolve(dir)
+      if (resolvedDir !== resolvedRoot && resolvedDir.startsWith(resolvedRoot + sep) === false) {
+        return { ok: false, kind: 'bad-input', message: '只能看 config 目录里面的东西', dir: root, root, rel: '', entries: [] }
+      }
       let names = []
-      try { names = readdirSync(dir) } catch (error) { return { ok: false, kind: 'error', message: String(error?.message ?? error), dir, entries: [] } }
+      try { names = readdirSync(dir) } catch (error) {
+        return { ok: false, kind: 'error', message: String(error?.message ?? error).slice(0, 120), dir: resolvedDir, root, rel: clean, entries: [] }
+      }
       const entries = names.map((name) => {
         try {
           const info = statSync(join(dir, name))
           return { name, size: info.size, isDir: info.isDirectory(), mtime: info.mtimeMs }
         } catch { return { name, size: 0, isDir: false, mtime: 0 } }
       }).sort((a, b) => b.mtime - a.mtime)
-      return { ok: true, kind: 'ok', message: '', dir, entries }
+      return { ok: true, kind: 'ok', message: '', dir: resolvedDir, root: resolvedRoot, rel: clean, entries }
     },
     /** 关于：版本哈希 / 最新 tag / 镜像列表（三个都只读，失败互不拖累）。 */
     async about() {

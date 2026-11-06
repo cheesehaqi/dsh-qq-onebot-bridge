@@ -305,6 +305,7 @@
       <span class="spacer"></span>
       <span class="pill" id="verPill">NapCat — · QQ —</span>
       <button class="ghost" id="btnReload">刷新</button>
+      <div class="sub" id="themeActual" style="margin:4px 0 0;font-size:12px">—</div>
     </div>
 
     <!-- 基础信息 -->
@@ -423,6 +424,10 @@
       <h2>文件管理 <span class="badge" id="filesBadge">—</span></h2>
       <p class="sub">列 bootmain/config 目录（只读）<code style="margin-left:6px">/api/accounts/files</code></p>
       <div class="row" style="margin-bottom:10px"><input id="fileSearch" placeholder="按文件名过滤（支持 *.json）" style="flex:1"></div>
+      <div class="row" style="margin:0 0 8px;align-items:center">
+        <button id="btnFilesUp">← 上一级</button>
+        <span class="sub" id="filesPath" style="margin:0">/</span>
+      </div>
       <div id="filesSummary" class="sub" style="margin:0 0 8px">—</div>
       <div id="filesBody" class="empty">切换到这里会自动加载</div>
       <details class="fold" id="foldTrash">
@@ -481,6 +486,11 @@
         </div>
       </div>
       <div class="card wide" style="margin-top:16px">
+        <h2>端口全景 <span class="badge" id="portsBadge">—</span></h2>
+        <p class="sub">控制台端口 + 桥用到的端口 + <code>onebot11</code> 里配置的端口。</p>
+        <div id="portsBody" class="sub" style="margin:0 0 10px">进入这个分区时自动加载</div>
+        <div class="row" style="margin-bottom:18px"><button id="btnPorts">刷新端口</button></div>
+
         <h2>运行统计 <span class="badge" id="statsBadge">—</span></h2>
         <p class="sub">读本地 trace 聚合<code style="margin-left:6px">/api/accounts/stats</code></p>
         <div id="statsBody" class="empty">切换到这里会自动加载</div>
@@ -1045,6 +1055,10 @@
     else document.documentElement.setAttribute('data-theme', mode)
     $('themeText').textContent = '主题：' + THEME_LABEL[mode]
     try { localStorage.setItem(THEME_KEY, mode) } catch { /* 隐私模式下写不了，忽略 */ }
+    const attr = document.documentElement.getAttribute('data-theme')
+    const actual = attr !== null ? attr : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    const actualBox = $('themeActual')
+    if (actualBox) actualBox.textContent = '当前显示：' + (actual === 'dark' ? '暗色' : '亮色') + (mode === 'auto' ? '（跟随系统）' : '')
   }
   let themeMode = 'auto'
   // 地址栏里的 ?theme=dark 优先（截图/分享用；不能压过用户自己的选择，所以只在没存过时才用）
@@ -1834,6 +1848,14 @@
     if (Array.isArray(state.accountRows)) renderAccounts(state.accountRows, state.autoUin ?? '')
   }
 
+  const filesUpBtn = $('btnFilesUp')
+  if (filesUpBtn) filesUpBtn.onclick = () => {
+    const parts = fileRel.split('/').filter(Boolean)
+    parts.pop()
+    fileRel = parts.join('/')
+    loadFiles()
+  }
+
   const fileSearch = $('fileSearch')
   if (fileSearch) fileSearch.oninput = () => { fileQuery = fileSearch.value.trim(); loadFiles() }
 
@@ -2036,6 +2058,9 @@
     foldBackup.addEventListener('toggle', () => { if (foldBackup.open) loadBackups() })
   }
 
+  const portsBtn = $('btnPorts')
+  if (portsBtn) portsBtn.onclick = () => { loadPortPanorama(); opLog('刷新端口全景') }
+
   const recheckBtn = $('btnRecheckAll')
   if (recheckBtn) recheckBtn.onclick = async () => {
     busy(recheckBtn, true, '检测中…')
@@ -2063,6 +2088,7 @@
     return (bytes / 1048576).toFixed(1) + ' MB'
   }
   let fileQuery = ''
+  let fileRel = ''
   async function loadBackups() {
     const body = $('backupRows')
     if (!body) return
@@ -2139,7 +2165,7 @@
 
   async function loadFiles() {
     const btn = $('btn-files'); busy(btn, true, '读取中…')
-    const data = await api('/api/accounts/files'); busy(btn, false)
+    const data = await api('/api/accounts/files?rel=' + encodeURIComponent(fileRel)); busy(btn, false)
     const body = $('filesBody')
     if (data.ok !== true) {
       $('filesBadge').textContent = KIND[data.kind] ?? '失败'
@@ -2147,6 +2173,11 @@
       return
     }
     filesDir = data.dir ?? ''
+    fileRel = String(data.rel ?? '')
+    const pathBox = $('filesPath')
+    if (pathBox) pathBox.textContent = fileRel === '' ? '/' : '/' + fileRel.split('/').join(' / ')
+    const upBtn = $('btnFilesUp')
+    if (upBtn) upBtn.disabled = fileRel === ''
     const entries = data.entries ?? []
     const visibleEntries = fileQuery === ''
       ? entries
@@ -2163,11 +2194,17 @@
     if (summaryBox) summaryBox.textContent = '文件 ' + fileCount + ' 个 · 目录 ' + dirCount + ' 个 · 合计 ' + humanSize(totalBytes)
     body.innerHTML = visibleEntries.length === 0 ? '<div class="empty">' + (fileQuery === '' ? '目录是空的' : '没有匹配「' + escapeHtml(fileQuery) + '」的文件') + '</div>'
       : '<table><thead><tr><th>文件</th><th>大小</th><th>修改时间</th></tr></thead><tbody>'
-        + visibleEntries.map((entry) => '<tr><td><code>' + entry.name + '</code>' + (entry.isDir ? ' <span class="tag">目录</span>' : '') + '</td>'
+        + visibleEntries.map((entry) => '<tr><td>' + (entry.isDir ? '<button data-opendir="' + escapeHtml(entry.name) + '" style="all:unset;cursor:pointer"><code>' + escapeHtml(entry.name) + '/</code></button>' : '<code>' + escapeHtml(entry.name) + '</code>') + (entry.isDir ? ' <span class="tag">目录</span>' : '') + '</td>'
           + '<td>' + (entry.isDir ? '—' : humanSize(entry.size)) + '</td>'
           + '<td class="sub" style="margin:0">' + (entry.mtime ? new Date(entry.mtime).toLocaleString('zh-CN', { hour12: false }) : '—') + '</td></tr>').join('')
         + '</tbody></table>'
     state.fileNames = entries.map((entry) => entry.name)
+    for (const button of body.querySelectorAll('[data-opendir]')) {
+      button.onclick = () => {
+        fileRel = fileRel === '' ? button.dataset.opendir : fileRel + '/' + button.dataset.opendir
+        loadFiles()
+      }
+    }
     opLog('刷新文件列表')
   }
 
@@ -2201,8 +2238,39 @@
   }
 
   // 统计：数字 + 阶段条形 + 最近失败
+  /** 端口全景：合并 /api/status 的已知端口与 onebot11 里配置的端口。 */
+  async function loadPortPanorama() {
+    const box = $('portsBody')
+    if (!box) return
+    const [status, ports] = await Promise.all([api('/api/status'), api('/api/accounts/ports')])
+    const rows = []
+    for (const row of status.ports ?? []) {
+      rows.push({ port: row.port, label: row.label ?? row.name, listening: row.listening === true, owner: row.process ?? '' })
+    }
+    const seen = new Set(rows.map((row) => row.port))
+    for (const row of ports.ports ?? []) {
+      if (seen.has(row.port)) {
+        // 同一端口在两边都出现时只留一行，标一句“配置里也有”
+        const hit = rows.find((item) => item.port === row.port)
+        if (hit && !hit.label.includes('onebot11')) hit.label += '（onebot11 也配置了）'
+        continue
+      }
+      seen.add(row.port)
+      rows.push({ port: row.port, label: 'onebot11 配置', listening: row.listening === true, owner: row.process ?? '' })
+    }
+    $('portsBadge').textContent = rows.length + ' 个'
+    if (rows.length === 0) { box.textContent = '没有可显示的端口'; return }
+    rows.sort((a, b) => a.port - b.port)
+    box.innerHTML = '<table><thead><tr><th>端口</th><th>来源</th><th>状态</th><th>进程</th></tr></thead><tbody>'
+      + rows.map((row) => '<tr><td><code>' + row.port + '</code></td>'
+        + '<td class="sub" style="margin:0">' + escapeHtml(row.label) + '</td>'
+        + '<td>' + (row.listening === true ? '<span class="tag ok">监听中</span>' : '<span class="tag">未监听</span>') + '</td>'
+        + '<td class="sub" style="margin:0">' + escapeHtml(row.owner || '—') + '</td></tr>').join('')
+      + '</tbody></table>'
+  }
+
   /** 分区里同时有设备信息与运行统计，进入时两个都拉。 */
-  function loadStatsAndDevice() { loadStats(); loadDevice() }
+  function loadStatsAndDevice() { loadStats(); loadDevice(); loadPortPanorama() }
 
   async function loadStats() {
     const btn = $('btn-stats'); busy(btn, true, '读取中…')

@@ -402,7 +402,7 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         return
       }
       if (request.method === 'GET' && path === '/api/accounts/files') {
-        json(response, 200, api.accounts.files())
+        json(response, 200, api.accounts.files({ rel: url.searchParams.get('rel') ?? '' }))
         return
       }
       // v0.7.11：运行统计（读本地 trace）/ 插件列表 / 关于
