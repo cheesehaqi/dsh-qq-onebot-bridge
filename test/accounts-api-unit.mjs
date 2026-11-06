@@ -117,7 +117,7 @@ const post = async (path, payload) => {
   check('files：子目录能列出来', sub.body?.ok === true && sub.body.rel === 'plugins' && sub.body.entries.some((e) => e.name === 'hello.txt'), brief(sub.body?.entries))
   const dotdot = await get('/api/accounts/files?rel=..')
   check('files：.. 被拒绝（不越出 config）', dotdot.body?.ok === false && String(dotdot.body?.message).includes('..'), brief(dotdot.body))
-  const abs = await get('/api/accounts/files?rel=' + encodeURIComponent('C:/Windows'))
+  const abs = await get('/api/accounts/files?rel=' + encodeURIComponent('/etc/passwd'))
   check('files：绝对路径被拒绝', abs.body?.ok === false, brief(abs.body))
   const missing = await get('/api/accounts/files?rel=nope')
   check('files：不存在的子目录如实报错（不是空列表）', missing.body?.ok === false && typeof missing.body?.message === 'string', brief(missing.body))
