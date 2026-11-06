@@ -447,6 +447,7 @@ The two you will use most:
 
 ## More docs
 
+- **[docs/ACCESS.md](docs/ACCESS.md)** — **access matrix**: which messages pass once the four gates and the two allowlists combine (including `allowUsersPrivateOnly`)
 - **[docs/DEBUG.en.md](docs/DEBUG.en.md)** — debugging: trace, offline replay, event injection, one-shot diagnostics, diagnostic bundles, acceptance page
 - **[docs/EXTENSIONS.en.md](docs/EXTENSIONS.en.md)** — the **extension seam**: the `ctx.qqBridge` outlet, read-only events, the seven provider rules, `instanceId`, taint `source`, and the config keys that affect third parties
 - **[docs/COMPAT.en.md](docs/COMPAT.en.md)** — **what happens when you swap the OneBot implementation**: all 71 actions in three tiers (standard / extension / NapCat-only), a swap checklist, and why there is no active probing

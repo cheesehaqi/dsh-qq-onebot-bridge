@@ -523,6 +523,7 @@ node test/replay-live-host.mjs --token <控制台 token>   # 录制 → 离线�
 
 ## 更多文档
 
+- **[docs/ACCESS.md](docs/ACCESS.md)** —— **准入组合真值表**：四个准入门 + 两份名单叠加时，什么样的消息会被放行（含 llowUsersPrivateOnly 的影响）
 - **[docs/DEBUG.md](docs/DEBUG.md)** —— 调试 / 排障：trace、离线回放、事件注入、一键体检、诊断包、硬约束验收台
 - **[docs/EXTENSIONS.md](docs/EXTENSIONS.md)** —— **扩展接缝**：`ctx.qqBridge` 的出口、只读事件、工具 provider 的七条规矩、`instanceId`、污点 `source`、会影响到第三方的配置键
 - **[docs/COMPAT.md](docs/COMPAT.md)** —— **换 OneBot 实现会怎样**：71 个 action 的三层分级（标准 / 扩展 / NapCat 专属）、换实现的检查清单、以及为什么不做"主动探针"
