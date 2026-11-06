@@ -435,6 +435,11 @@
         <div class="foldBody">
           <p class="sub" style="margin:0 0 10px">「删除备份」把文件移进 <code>config/_trash/</code>；这里能还原，或送进 <b>Windows 回收站</b>（不是硬删除）。</p>
           <div id="trashRows" class="empty">展开时自动加载</div>
+          <div class="row" style="margin-top:10px">
+            <button id="btnPurgeOld">清理旧备份</button>
+            <input id="purgeDays" type="number" min="1" max="365" value="7" style="width:80px">
+            <span class="sub" style="margin:0">天前的（送系统回收站，不是硬删）</span>
+          </div>
         </div>
       </details>
       <details class="fold" id="foldBackup">
@@ -628,6 +633,8 @@
           <button id="btnLogAuto" class="hidden">自动刷新：关</button>
           <button id="btnLogCopy">复制</button>
           <button id="btnLogDownload">下载</button>
+          <input id="logTraceInput" placeholder="traceId（t-…）" style="max-width:180px">
+          <button id="btnLogChain">看链路</button>
           <input id="logSearch" placeholder="关键词过滤" style="flex:1;min-width:140px">
         </div>
         <div class="row" style="margin-bottom:10px">
@@ -643,6 +650,7 @@
         </div>
         <pre id="logView" style="margin:0;padding:14px;border-radius:12px;background:var(--bg);border:1px solid var(--line);
           height:calc(100vh - 360px);min-height:240px;overflow:auto;font:12.5px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all">还没有加载日志</pre>
+        <div id="logChain" class="sub" style="margin:12px 0 0;display:none"></div>
       </div>
     </section>
 
@@ -1848,6 +1856,9 @@
     if (Array.isArray(state.accountRows)) renderAccounts(state.accountRows, state.autoUin ?? '')
   }
 
+  const purgeOldBtn = $('btnPurgeOld')
+  if (purgeOldBtn) purgeOldBtn.onclick = () => purgeOldTrash(purgeOldBtn)
+
   const filesUpBtn = $('btnFilesUp')
   if (filesUpBtn) filesUpBtn.onclick = () => {
     const parts = fileRel.split('/').filter(Boolean)
@@ -2145,7 +2156,23 @@
     for (const button of body.querySelectorAll('[data-trpurge]')) button.onclick = () => purgeTrash(button.dataset.trpurge, button)
   }
 
-  async function restoreTrash(rel, button) {
+  async function purgeOldTrash(button) {
+        const days = Number($('purgeDays')?.value) || 7
+        if (!confirm('把 ' + days + ' 天前的回收站备份送进 Windows 回收站？')) return
+        busy(button, true, '清理中…')
+        const result = await post('/api/accounts/trash/purge-old', { days })
+        busy(button, false)
+        if (result.ok === true) {
+          toast('已清理 ' + (result.purged ?? 0) + ' 条（保留 ' + (result.kept ?? 0) + ' 条）', 'ok')
+          opLog('批量清理回收站：' + (result.purged ?? 0) + ' 条')
+          loadTrash()
+        } else {
+          toast('清理未全部成功：' + (result.message ?? '未知'), 'bad')
+          loadTrash()
+        }
+      }
+
+      async function restoreTrash(rel, button) {
     busy(button, true, '还原中…')
     const result = await post('/api/accounts/trash/restore', { rel })
     busy(button, false)
@@ -2654,6 +2681,34 @@
       infoOnlyInit.classList.toggle('primary', logInfoOnly)
     }
   })()
+
+  const logChainBtn = $('btnLogChain')
+  if (logChainBtn) logChainBtn.onclick = async () => {
+    const box = $('logChain')
+    const traceId = ($('logTraceInput')?.value ?? '').trim()
+    if (traceId === '') {
+      // 没填就从当前日志里猜一个（第一处 t-xxxxxxxx）
+      const guess = /\bt-[a-z0-9]{4,}\b/i.exec(logText)
+      if (guess === null) { toast('没填 traceId，日志里也没找到', 'bad'); return }
+      $('logTraceInput').value = guess[0]
+      toast('用日志里找到的 ' + guess[0], 'ok')
+      return
+    }
+    box.style.display = ''
+    box.textContent = '查询中…'
+    const data = await api('/api/trace?traceId=' + encodeURIComponent(traceId))
+    const chain = Array.isArray(data.chain) ? data.chain : []
+    if (data.ok !== true) { box.textContent = '查不到：' + (data.reason ?? '未知'); return }
+    if (chain.length === 0) { box.textContent = '这个 traceId 没有事件（' + traceId + '）'; return }
+    box.innerHTML = '<b>' + escapeHtml(traceId) + '</b> · ' + chain.length + ' 条事件'
+      + '<table style="margin-top:8px"><thead><tr><th>时间</th><th>阶段</th><th>结果</th><th>原因</th></tr></thead><tbody>'
+      + chain.map((event) => '<tr><td>' + escapeHtml(String(event.at ?? event.ts ?? '').slice(11, 19)) + '</td>'
+        + '<td>' + escapeHtml(event.stage ?? '') + '</td>'
+        + '<td>' + (event.ok === false ? '✗' : '✓') + '</td>'
+        + '<td>' + escapeHtml(event.reason ?? '') + '</td></tr>').join('')
+      + '</tbody></table>'
+    opLog('看链路 ' + traceId + '（' + chain.length + ' 条）')
+  }
 
   const logRangeSelect = $('logRange')
   if (logRangeSelect) logRangeSelect.onchange = () => {

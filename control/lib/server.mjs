@@ -584,6 +584,10 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
             if (typeof api.accounts?.restoreTrash !== 'function') return { ok: false, message: '当前控制台不支持还原' }
             return api.accounts.restoreTrash({ rel: String(body.rel ?? '') })
           },
+          '/api/accounts/trash/purge-old': () => {
+            if (typeof api.accounts?.purgeTrashOld !== 'function') return { ok: false, message: '当前控制台不支持批量清理' }
+            return api.accounts.purgeTrashOld({ days: body.days === undefined || body.days === null || body.days === "" ? 7 : Number(body.days) })
+          },
           '/api/accounts/trash/purge': () => {
             if (typeof api.accounts?.purgeTrash !== 'function') return { ok: false, message: '当前控制台不支持清理' }
             return api.accounts.purgeTrash({ rel: String(body.rel ?? '') })

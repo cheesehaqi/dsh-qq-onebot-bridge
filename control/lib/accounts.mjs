@@ -1137,6 +1137,36 @@ export function createAccountsApi({ napcatBat = '', webUiFile = '', fetchImpl = 
     },
 
     /**
+     * 批量清理回收站里"超过 days 天"的旧备份：逐条送系统回收站（不硬删）。
+     * 只处理 config/_trash 下的一层，days 必须是正整数；一条失败不影响其它。
+     */
+    purgeTrashOld({ days = 7, now = () => Date.now(), exec } = {}) {
+      const clean = Number(days)
+      if (!Number.isInteger(clean) || clean < 1 || clean > 365) {
+        return { ok: false, kind: 'bad-input', message: '天数必须是 1–365 的整数' }
+      }
+      const listed = this.trashEntries()
+      if (listed.ok !== true) return { ...listed, purged: 0, kept: 0 }
+      const cutoff = now() - clean * 24 * 60 * 60 * 1000
+      const old = listed.entries.filter((item) => Number(item.mtime) > 0 && Number(item.mtime) < cutoff)
+      let purged = 0
+      const failures = []
+      for (const item of old) {
+        const result = exec === undefined ? this.purgeTrash({ rel: item.rel }) : this.purgeTrash({ rel: item.rel, exec })
+        if (result.ok === true) purged += 1
+        else failures.push(item.rel + '：' + (result.message ?? '未知'))
+      }
+      return {
+        ok: failures.length === 0,
+        kind: failures.length === 0 ? 'ok' : 'partial',
+        message: failures.length === 0 ? '' : ('有 ' + failures.length + ' 条没清掉：' + failures.slice(0, 3).join('；')),
+        purged,
+        kept: listed.entries.length - old.length,
+        candidates: old.length,
+      }
+    },
+
+    /**
      * 把回收站里的文件送进 **Windows 回收站**（不是硬删除）。
      * 用 Shell.Application 的 InvokeVerb('delete')，失败就如实报错、绝不回退到删除。
      */

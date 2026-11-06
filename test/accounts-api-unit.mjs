@@ -69,6 +69,12 @@ const api = {
     // 端口占用注入假 netstat/tasklist
     portStatus: () => realAccounts.portStatus({ exec: fakeExec }),
   },
+  traceChain(traceId) {
+    // 真控制台用 events 里同一 traceId 的事件拼链路；测试只需形状
+    return traceId === 't-untraced'
+      ? [{ at: '2026-11-06T00:00:00.000Z', stage: 'inject', ok: true, reason: '测试' }]
+      : []
+  },
   async status() { return { ok: true, ports: [], processes: [], runtime: null } },
   async diagnose() { return { ok: true } },
   async qr() { return { exists: false } },
@@ -147,6 +153,28 @@ const post = async (path, payload) => {
   check('trash：能从回收站还原', restore.body?.ok === true, brief(restore.body))
   const after = await get('/api/accounts/trash')
   check('trash：还原后回收站少一份', (after.body?.entries ?? []).length < list.body.entries.length, `${list.body.entries.length} → ${(after.body?.entries ?? []).length}`)
+}
+
+// ---------- trash/purge-old（批量清理）----------
+{
+  const bad0 = await post('/api/accounts/trash/purge-old', { days: 0 })
+  const badBig = await post('/api/accounts/trash/purge-old', { days: 400 })
+  check('purge-old：天数为 0 或过大一律拒绝（不静默退回默认值）',
+    bad0.body?.ok === false && badBig.body?.ok === false
+    && String(bad0.body?.message).includes('1–365'), brief([bad0.body, badBig.body]))
+  const def = await post('/api/accounts/trash/purge-old', {})
+  check('purge-old：不传 days 时按默认 7 天（空回收站也算成功）',
+    def.body?.ok === true && def.body.purged === 0, brief(def.body))
+}
+
+// ---------- trace 链路 ----------
+{
+  const res = await get('/api/trace?traceId=t-untraced')
+  check('trace：给 traceId 时返回 chain 数组（没有事件就是空数组）',
+    res.body?.ok === true && Array.isArray(res.body.chain), brief(res.body))
+  const missing = await get('/api/trace?traceId=t-does-not-exist')
+  check('trace：不存在的 traceId 也返回空数组而不是报错',
+    missing.body?.ok === true && Array.isArray(missing.body.chain) && missing.body.chain.length === 0, brief(missing.body))
 }
 
 // ---------- napcat-config（脱敏）----------
