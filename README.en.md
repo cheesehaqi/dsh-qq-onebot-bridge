@@ -2,7 +2,7 @@
 
 A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ messages drive DSH agent sessions directly, and agent replies are sent back to QQ automatically.
 
-Current version **v0.8.4** · [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [Changelog](CHANGELOG.md)
+Current version **v0.8.5** · [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [Changelog](CHANGELOG.md)
 
 ## Architecture
 
@@ -601,11 +601,11 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 
 The five most recent versions (always kept rolling):
 
+- **v0.8.5** — guard rails first: contract tests for 8 new and 13 old endpoints (route coverage 21/41 → 41/41, which immediately caught a missing `unlinkSync` import that made "delete backup" and "restore from trash" return 500), drill-down for files and plugins, a port panorama, batch trash cleanup, traceId chains from the log page, `docs/ACCESS.md` access matrix, and `tools/audit.mjs`; **`lib/` untouched**
 - **v0.8.4** — TCP reachability check for every endpoint, a "connections" column on the accounts page, collapsible long lists loaded on demand, filtered log exports with a header, a re-check button for API availability, file search in the palette; plus the **whitelist split** (`allowUsersPrivateOnly`, off by default) and the renamed QQ 用户 / QQ 群聊 lists
 - **v0.8.3** — "the console checks itself": release check, port-usage display, read-only `napcat.json` preview (redacted), plugin-dir markers, file stats, a config trash (restore / send to Windows Recycle Bin, never hard-delete), copyable diagnostic summary, unsaved-changes hint, and fail-only/event filters in live testing; fixes scenario injection dropping group/user ids
 - **v0.8.2** — "fewer clicks": file/account search, log time-range filter and filtered download, operation-log export/clear, a "last error" card, a **Ctrl+K command palette** (including per-account jumps), persisted log filters, and copyable plugin-directory paths; tests gained a DOM-timing assertion and a runtime smoke run with negative controls
 - **v0.8.1** — "make the console prove itself": config backup management (restore keeps a `.pre-restore-*` copy, delete moves to `config/_trash`), persistent operation log, log keyword highlighting + Info-only filter, one-click redacted diagnostic export, and **editable WS/HTTP server sections** in network config
-- **v0.8.0** — local account center: `/accounts` with 11 sections (overview / accounts / network / files / plugins / logs / live testing / runtime & device / config / operations / about); editable network config with `.bak` backups, loopback-only webui port/host editing, plugin enable-disable-uninstall, "single shot" vs "15-second live debug" injection with full trace chains, plus a fix for the `assistantText` crash that swallowed entire model replies
 
 **Older versions (the v0.4 line and earlier) are in [CHANGELOG.md](CHANGELOG.md)** — the full history, including every release's defect list and test counts.
 You can also filter by version on the [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) page (each entry carries a `compare/v<previous>...v<this>` diff link).

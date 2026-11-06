@@ -1,5 +1,43 @@
 # 更新日志 / Changelog
 ## v0.8 系列 —— 本地账号中心 / Local Account Center
+### v0.8.5（2026-11-06）— 补护栏、补下钻、补文档
+
+这版**没有动 `lib/`**（`git diff v0.8.4..HEAD -- lib/` 为空），改动全在 `control/` + `test/` + `docs/` + `tools/`。
+
+#### 一、先把护栏补齐
+
+- **新增 `test/accounts-api-unit.mjs`（31 条）**：8 个新接口的契约测试 —— files（子目录 / ".." 拒绝 / 绝对路径 / 不存在）、
+  backups（列表 / 还原 / 越界文件）、trash（移入 / 列出 / 还原）、napcat-config（脱敏 / 摘要 / 不泄露原始密钥）、
+  console、release、ports（注入假 netstat）、netcheck（连通 / 拒绝 / 非法入参 / 无 token）；
+- **新增 `test/accounts-api2-unit.mjs`（15 条）**：13 个老接口的契约 —— meta / info / sys / guid / about / plugins / network /
+  logs / logs/live / stats / qr-image（比 PNG 字节）/ avatar（缓存头 + 缺参报错）/ open-folder（只验失败分支，不弹窗口）；
+- **路由覆盖 21/41 → 41/41**。
+
+> ★ 这一层第一次跑就抓到一个真 bug：`accounts.mjs` 里 `trashBackup` / `restoreTrash` 调了 `unlinkSync` 但没 import，
+> **「删除备份」和「从回收站还原」两个按钮从 0.8.1 起一直是 500**。已修。
+
+#### 二、控制台能做的事更多了
+
+- **文件管理可下钻**：`GET /api/accounts/files?rel=<子目录>`，只允许 config 根之内（".." 与越界路径拒绝）；
+  页面加「← 上一级」与面包屑，目录可点进入；
+- **插件目录可下钻**：同样的方式看 `plugins/<子目录>`，复制路径会带上当前子目录前缀；
+- **端口全景**（运行与设备）：合并 `/api/status` 与 `onebot11` 里的端口，同一端口只留一行并标注来源；
+- **回收站批量清理**：`POST /api/accounts/trash/purge-old { days }`，只清 N 天前的，逐条送 **Windows 回收站**（不硬删）；
+  `days` 必须是 1–365，传 0/400 直接拒绝（不静默退回默认值）；
+- **日志按 traceId 看链路**：填 traceId 查该链路的阶段/结果/原因；不填时从当前日志里猜一个并回填；
+- **主题显示当前实际值**：「当前显示：亮色（跟随系统）」，跟随系统时也看得出实际生效的是哪个；
+- **命令面板**新增「插件：xxx」条目（打开过插件管理之后）。
+
+#### 三、文档与工具
+
+- **`docs/ACCESS.md` 准入组合真值表**：把 `allowsChat` 的 8 条短路顺序写成表，再说明 `acceptPrivate` /
+  `replyOnlyWhenMentioned` 两道行为层闸口与名单层的关系，附常见组合与五个易踩点；README 中英都加了链接；
+- **`tools/audit.mjs` 结构审计**（`npm run audit`）：语法 / 页面时序 / 路由一致性 / 路由覆盖 / 关键文件行数下限，退出码 0-1。
+
+#### 四、读数
+
+74 套 / 4379 断言全绿；`node tools/audit.mjs` 五项全过。
+
 ### v0.8.4（2026-11-05）— 连通性、折叠、白名单拆分
 
 这版**动了三个 `lib/` 文件**（见末尾「补丁面变更」），其余都在 `control/`。

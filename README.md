@@ -2,7 +2,7 @@
 
 QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱动 DSH agent 会话，agent 回复自动发回 QQ。
 
-当前版本 **v0.8.4** · [发布记录（Releases）](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [更新日志](CHANGELOG.md)
+当前版本 **v0.8.5** · [发布记录（Releases）](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [更新日志](CHANGELOG.md)
 
 ## 架构
 
@@ -601,11 +601,11 @@ npm run shortcut
 
 最近五个版本（始终滚动展示）：
 
+- **v0.8.5** — 补护栏（8 个新接口 + 13 个老接口的契约测试，路由覆盖 41/41，并抓出 `unlinkSync` 未导入导致「删除备份/回收站还原」一直 500）、文件与插件目录可下钻、端口全景、回收站批量清理、日志按 traceId 看链路、`docs/ACCESS.md` 准入真值表、`tools/audit.mjs` 结构审计；**`lib/` 未动**
 - **v0.8.4** — 端口连通性测试（三段都能测）、账号页「连接」列、长列表收进折叠块（展开才加载）、日志导出带筛选说明头、接口「全部重新检测」、面板搜文件；**白名单语义拆分**（`allowUsersPrivateOnly`，默认关）；设置页两项改名「QQ 用户」「QQ 群聊」
 - **v0.8.3** — 「控制台自己会体检」：版本更新检查、端口占用显示、`napcat.json` 只读预览（脱敏）、插件目录带 `config/pages` 标记、文件统计、配置回收站（还原 / 送 Windows 回收站，不硬删）、复制诊断摘要、网络未保存提示、实时测试「只看失败 + 事件过滤」；并修好场景注入群号/QQ 号被丢弃、场景下拉为空
 - **v0.8.2** — 「少点几下」：文件与账号搜索、日志时间范围与「下载跟随筛选」、操作记录导出/清空、最近一次错误卡片、**Ctrl+K 命令面板**（含账号跳转）、日志筛选偏好持久化、插件目录条目可复制路径；测试新增 DOM 时序断言与运行时冒烟（含反向验证）
 - **v0.8.1** — 「让控制台能自证」：配置备份管理（还原前另存 `.pre-restore-*`、删除移到 `config/_trash`）、操作记录持久化、日志关键词高亮 + 只看 Info 以上、一键导出脱敏诊断包、网络配置的 **WS 服务器与 HTTP 服务器段可编辑**，以及「新建」入口统一
-- **v0.8.0** — 「本地账号中心」：`/accounts` 11 个分区（基础信息 / 账号配置 / 网络配置 / 文件 / 插件 / 运行日志 / 实时测试 / 运行与设备 / 系统配置 / 操作记录 / 关于）；网络配置可增删改与启停、系统配置可改端口与回环地址、插件可启停卸载，写前均有 `.bak` 备份；实时测试支持「单发 / 即时调试 15 秒」并能点开事件看完整链路；修掉 `assistantText` 在 `content` 非数组时崩溃（会吞掉整条回复）
 
 **更早的版本（v0.4 线及之前）见 [CHANGELOG.md](CHANGELOG.md)** —— 完整历史、每个版本的缺陷清单与测试计数都在那里。
 也可以直接在 [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) 页按版本过滤（每版都带 `compare/v上一版...v本版` 的 diff 链接）。
