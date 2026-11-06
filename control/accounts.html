@@ -461,7 +461,13 @@
       <div id="pluginsBody" class="empty">切换到这里会自动加载</div>
       <details class="fold">
         <summary>插件目录 <span class="tag" id="pluginTreeBadge"></span></summary>
-        <div class="foldBody"><div id="pluginTree" class="sub" style="margin:0">展开时自动加载</div></div>
+        <div class="foldBody">
+          <div class="row" id="pluginSubBar" style="display:none;margin-bottom:8px;align-items:center">
+            <button id="btnPluginUp">← 上级</button>
+            <span class="sub" id="pluginSubPath" style="margin:0"></span>
+          </div>
+          <div id="pluginTree" class="sub" style="margin:0">展开时自动加载</div>
+        </div>
       </details>
       <div class="row" style="margin-top:14px">
         <button id="btn-plugins">刷新</button>
@@ -1752,6 +1758,29 @@
   /** 插件管理：真列表 + 启用/停用 + 卸载（卸载要二次确认）。 */
   let pluginCache = []
   /** 插件目录结构渲染（失败分支也要用，所以抽出来）。 */
+  let pluginRel = ''
+
+  /** 插件目录下钻：用 /api/accounts/files?rel=plugins/<子路径> 列下一层。 */
+  async function loadPluginSub() {
+    const box = $('pluginTree')
+    if (!box) return
+    const data = await api('/api/accounts/files?rel=' + encodeURIComponent('plugins/' + pluginRel))
+    const bar = $('pluginSubBar')
+    if (bar) bar.style.display = ''
+    const pathBox = $('pluginSubPath')
+    if (pathBox) pathBox.textContent = 'plugins / ' + pluginRel.split('/').join(' / ')
+    $('pluginTreeBadge').textContent = (data.entries ?? []).length + ' 项'
+    if (data.ok !== true) { box.innerHTML = '<span style="color:var(--danger)">' + escapeHtml(data.message ?? '读不到') + '</span>'; return }
+    const entries = data.entries ?? []
+    box.innerHTML = entries.length === 0
+      ? '（这个目录是空的）'
+      : entries.map((entry) => {
+        const dirAttr = entry.isDir === true ? ' data-plugdir="' + escapeHtml(entry.name) + '"' : ''
+        const marks = entry.isDir ? '/' : ''
+        return '<button class="tag" data-plugpath="' + escapeHtml(entry.name) + '"' + dirAttr + ' style="margin:2px;cursor:pointer">' + escapeHtml(entry.name) + marks + '</button>'
+      }).join(' ')
+  }
+
   function renderPluginTree(info) {
     const tree = info ?? { exists: false, entries: [] }
     const treeBox = $('pluginTree')
@@ -1769,7 +1798,8 @@
             if (entry.hasConfig === true) marks.push('config')
             if (entry.hasPages === true) marks.push('pages')
             const label = escapeHtml(entry.name) + (entry.isDir ? '/' : '') + (marks.length > 0 ? ' [' + marks.join('+') + ']' : '')
-            return '<button class="tag" data-plugpath="' + escapeHtml(entry.name) + '" title="点击复制完整路径" style="margin:2px;cursor:pointer">' + label + '</button>'
+            const dirAttr = entry.isDir === true ? ' data-plugdir="' + escapeHtml(entry.name) + '"' : ''
+            return '<button class="tag" data-plugpath="' + escapeHtml(entry.name) + '"' + dirAttr + ' title="' + (entry.isDir ? '点击进入目录' : '点击复制完整路径') + '" style="margin:2px;cursor:pointer">' + label + '</button>'
           }).join(' '))
     }
   }
@@ -1787,6 +1817,7 @@
     const list = Array.isArray(data.data?.plugins) ? data.data.plugins : (Array.isArray(data.data) ? data.data : [])
     pluginCache = list
     $('pluginsBadge').textContent = list.length + ' 个'
+    state.pluginNames = list.map((item) => item.name ?? item.id ?? '').filter(Boolean)
     renderPluginTree(data.tree)
  + (data.data?.pluginManagerNotFound ? '（插件管理器未加载）' : '')
     if (list.length === 0) { body.innerHTML = '<div class="empty">（没有安装插件）</div>'; return }
@@ -1965,6 +1996,10 @@
         loadFiles()
       },
     }))
+    const pluginItems = (Array.isArray(state.pluginNames) ? state.pluginNames : []).slice(0, 40).map((name) => ({
+      label: '插件：' + name,
+      run: () => { activate('plugins'); const box = $('pluginTree'); if (box && box.scrollIntoView) box.scrollIntoView({ block: 'center' }) },
+    }))
     const actions = [
       { label: '动作：刷新登录状态', run: () => refreshStatus(false) },
       { label: '动作：刷新页面数据', run: () => { loadMeta(); refreshStatus(true); opLog('刷新页面数据') } },
@@ -1974,7 +2009,7 @@
       { label: '动作：导出诊断包（脱敏）', run: () => window.open('/api/export?redact=1&token=' + encodeURIComponent(token), '_blank', 'noopener') },
       { label: '动作：清空操作记录', run: () => { try { localStorage.removeItem(OP_LOG_KEY) } catch { /* 忽略 */ } renderOpLog(); toast('操作记录已清空', 'ok') } },
     ]
-    return [...sections, ...accountItems, ...fileItems, ...actions]
+    return [...sections, ...accountItems, ...fileItems, ...pluginItems, ...actions]
   }
 
   const renderPalette = () => {
