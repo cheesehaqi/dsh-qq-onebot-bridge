@@ -5,7 +5,7 @@
 ## 一、仓库状态
 
 ```
-路径    D:\Deepseek\dsh-qq-onebot-bridge
+路径    工作区根下的 dsh-qq-onebot-bridge（不进仓库的绝对路径，按你本机实际位置）
 分支    main
 HEAD    f972b10  tooling(audit): 第 ⑥ 项打包形态检查
 版本    0.8.5（tag：v0.8.0 … v0.8.5 都在）
@@ -26,7 +26,7 @@ node tools/audit.mjs            # 6 项结构体检，退出码 0/1
 
 ## 三、给别人（551123）的承诺与事实
 
-- 他的补丁面是 `lib/bridge.js`、`lib/index.js`、`lib/panel.js`，加 `control/lib/server.mjs`、`control/lib/supervisor.mjs`、`control/ui.html`、`config.mjs`、`package.json` 的 `files`；
+- 他的补丁面是 `lib/bridge.js`、`lib/index.js`、`lib/panel.js`，加 `control/lib/server.mjs`、`control/lib/supervisor.mjs`、`control/ui.html`、`control/lib/config.mjs`、`package.json` 的 `files`；
 - **0.8.4 的补丁面行号（0.8.5 未变）**：
   ```
   lib/bridge.js   323 → 323,3；3180 → 3182；3652 → 3654
@@ -40,10 +40,11 @@ node tools/audit.mjs            # 6 项结构体检，退出码 0/1
 ## 四、节制
 
 - **发版动作**（bump / tag / push release / 打包）必须先说明再动；日常代码改动直接做；
-- 删除一律走 `D:\Deepseek\scripts\safe-delete.ps1`；
+- 删除一律走工作区的 `scripts/safe-delete.ps1`（回收站优先，绝不裸删）；
 - 改非 ASCII 文件只能用 read/edit/write 或 Node 的 `readFileSync`/`writeFileSync`（**不要**用 PowerShell 的 `Get-Content`/`Set-Content`）；
-- 写补丁脚本时别在模板字符串里嵌反引号（踩过三次），复杂替换直接用 `edit` 工具；
-- 对外文字里的每个数字都要先用命令核（踩过：把"3 条 POST 路由"写成"3 条路由"，实际 1 条）。
+- 写补丁脚本时别在模板字符串里嵌反引号（踩过 2 次：`qq-release-085.mjs`、`qq-audit-pack-check.mjs` 都是 `SyntaxError`），复杂替换直接用 `edit` 工具；
+- PowerShell 里 `node -e` 带中文/引号/反斜杠会被拆坏（踩过多次：`Expected unicode escape`、`Unterminated regexp`）——改成写临时 `.mjs` 再用 `node` 跑；
+- 对外文字里的每个数字都要先用命令核（踩过：把"1 条 POST 动作"写成"3 条路由"；更早还有"新增 7 套测试"实为 6 套、"assistantText 覆盖对象与空数组"实际不覆盖）。
 
 ## 五、下一步候选（按用户已表态的口径）
 
