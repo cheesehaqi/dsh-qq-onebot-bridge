@@ -33,7 +33,7 @@ window.__ModuleLoader__.load({
      * 浏览器只在**页面加载时**取一次 bundle，没法热替换，所以只能刷新一次页面。
      * 与其让用户对着没变化的界面猜，不如自己认出来并给一个「刷新页面」按钮（见下面的 qqai-stale 横幅）。
      */
-    const CLIENT_VERSION = '0.8.6'
+    const CLIENT_VERSION = '0.8.7'
 
     const CSS = `
 .qqai-wrap{display:flex;flex-direction:column;gap:14px;font-size:13px;color:var(--dsw-alias-label-primary,#111)}

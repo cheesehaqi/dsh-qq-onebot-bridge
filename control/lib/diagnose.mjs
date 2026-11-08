@@ -54,7 +54,7 @@ export function runDiagnose({ config, snapshot, runtime, events = [], now = Date
     '需要扫码登录时点「启动 NapCat」；仅聊天不需要它也能收消息（反向 WS 由 NapCat 主动连出）', 'warn'))
   const tts = row('tts')
   const ttsWanted = runtime?.features?.ttsEnabled === true
-  checks.push(item('port-tts', `GPT-SoVITS ${tts?.port ?? '?'}`, !ttsWanted || tts?.listening,
+  checks.push(item('port-tts', `语音服务 ${tts?.port ?? '?'}`, !ttsWanted || tts?.listening,
     tts?.listening ? `PID ${tts.pid}` : (ttsWanted ? '未运行但 ttsEnabled=true' : '未运行（ttsEnabled=false，无影响）'),
     'ttsEnabled=true 而 9880 未运行时，每条回复都会记一条 tts failed（文字照发）', 'warn'))
 

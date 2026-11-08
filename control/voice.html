@@ -22,6 +22,11 @@
     --bg:#0f1720; --panel:#17222e; --line:#243447; --fg:#e6edf3; --dim:#8aa0b4;
     --ok:#3fb950; --warn:#d29922; --bad:#f85149; --unknown:#8b949e; --accent:#4a9eff;
   }
+  body.embed{background:transparent}
+  body.embed header{position:static;background:transparent;padding:6px 10px}
+  body.embed header .brand,body.embed #consoleTop{display:none}
+  body.embed main{max-width:none;padding:10px}
+  body.embed .grid2{gap:10px}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
     font:14px/1.6 "Microsoft YaHei",system-ui,-apple-system,"Segoe UI",sans-serif}
@@ -103,6 +108,43 @@
   <section class="card">
     <h2>语音模块状态 <span class="meta">（卡在哪、下一步点哪里）</span></h2>
     <div id="voiceStatus" class="meta">（读取中…）</div>
+    <div class="row" style="margin-top:10px">
+      <label class="meta"><input type="checkbox" id="ttsEnabledToggle" onchange="toggleVoice('tts')" /> 语音回复（TTS）</label>
+      <label class="meta">后端 <select id="ttsProviderSelect" title="TTS 后端" onchange="setVoiceProvider('tts')">
+        <option value="azure">Azure</option>
+        <option value="openai">OpenAI 兼容</option>
+        <option value="local">本地 GPT-SoVITS</option>
+      </select></label>
+      <label class="meta"><input type="checkbox" id="sttEnabledToggle" onchange="toggleVoice('stt')" /> 语音转文字（STT）</label>
+      <label class="meta">后端 <select id="sttProviderSelect" title="STT 后端" onchange="setVoiceProvider('stt')">
+        <option value="dsh">本地 SenseVoice</option>
+        <option value="cloud">云端（OpenAI 兼容）</option>
+      </select></label>
+      <span class="meta" id="toggleState"></span>
+    </div>
+    <div class="hint">开关和后端写的是插件配置（ttsEnabled / sttEnabled / ttsProvider / sttProvider），宿主会热重载 2–3 秒；改完这里的状态会自动刷新。</div>
+    <div class="row" style="margin-top:8px">
+      <button id="voiceServiceStart" onclick="startVoiceService()">启动语音服务</button>
+      <button id="voiceServiceStop" onclick="stopVoiceService()">停止语音服务</button>
+      <span class="meta" id="voiceServiceState"></span>
+    </div>
+    <div class="hint">语音服务 = 本机 GPT-SoVITS api_v2（127.0.0.1:9880），只有 TTS 后端选 <b>local</b> 时才需要启动；首次加载模型约 30–60 秒。</div>
+    <details class="tune" id="voiceConfigBox" style="margin-top:10px">
+      <summary>服务配置（音色 / 参考音频 / 地址 / 模型；<b>不含密钥</b>）</summary>
+      <div class="grid2" style="margin-top:8px">
+        <label class="meta">音色（ttsVoice）<input id="cfgTtsVoice" placeholder="如 zh-CN-XiaoxiaoNeural" /></label>
+        <label class="meta">TTS 模型（ttsModel）<input id="cfgTtsModel" placeholder="如 tts-1" /></label>
+        <label class="meta">本地服务地址（ttsLocalUrl）<input id="cfgTtsLocalUrl" placeholder="http://127.0.0.1:9880" /></label>
+        <label class="meta">本地参考音频（ttsLocalRefAudio）<input id="cfgTtsLocalRefAudio" placeholder="完整路径，如 D:\\voice\\ref.wav" /></label>
+        <label class="meta">参考文本（ttsLocalPromptText）<input id="cfgTtsLocalPromptText" placeholder="参考音频里说了什么" /></label>
+        <label class="meta">STT 模型（sttModel）<input id="cfgSttModel" placeholder="如 glm-asr-2512" /></label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="primary" onclick="saveVoiceConfig()">保存服务配置</button>
+        <span class="meta" id="voiceConfigState"></span>
+      </div>
+      <div class="hint">只提交填了值的字段（空 = 不改）；密钥（ttsApiKey / sttApiKey）不在这里改，请去 DSH 设置页。</div>
+    </details>
   </section>
 
   <div class="grid2">
@@ -172,8 +214,18 @@
         </div>
         <div class="row" style="margin-top:8px"><button onclick="resetTtsTune()">恢复默认</button></div>
       </details>
+      <div class="row" style="margin-top:8px">
+        <select id="presetSelect" style="min-width:150px" title="细调预设（存在本浏览器）"></select>
+        <button onclick="savePreset()">保存当前为预设</button>
+        <button onclick="applyPreset()">应用</button>
+        <button onclick="deletePreset()">删除</button>
+        <button onclick="document.getElementById('presetFile').click()">导入</button>
+        <button onclick="exportPresets()">导出</button>
+        <input type="file" id="presetFile" accept="application/json" style="display:none" onchange="importPresets(this)" />
+      </div>
+      <div class="hint">预设只存在本浏览器（localStorage），只影响试听；上次的细调参数会在刷新后自动恢复。</div>
       <div class="row">
-        <button class="primary" onclick="testTts()">合成并试听</button>
+        <button class="primary" onclick="testTts()" title="Ctrl+Enter">合成并试听</button>
         <span class="meta" id="voiceTtsState"></span>
       </div>
       <div id="voiceTtsOut" class="meta"></div>
@@ -230,9 +282,17 @@
 
 <script>
 const token = new URLSearchParams(location.search).get('token') || '';
+// 被控制台以 iframe 嵌入时（?embed=1）：隐藏大标题与「回控制台」，只留状态/刷新，避免双重页头
+const EMBED = new URLSearchParams(location.search).get('embed') === '1';
+if (EMBED) document.body.classList.add('embed');
 const VERDICT_TEXT = { ok: '就绪', partial: '有卡点', off: '未启用' };
 const ATTEMPT_LIMIT = 5;
+// 细调预设 / 上次参数（都只存本浏览器，不写回配置）
+const PRESET_KEY = 'qq-voice-presets-v1';
+const PRESET_VERSION = 1;
+const LAST_TUNE_KEY = 'qq-voice-tune-last-v1';
 let attempts = [];
+let lastTts = null;
 let recorder = null;
 let chunks = [];
 let stream = null;
@@ -289,9 +349,14 @@ function wavSpec(base64) {
     return 'WAV ' + Math.round(rate / 1000) + 'kHz · ' + (channels === 1 ? '单声道' : channels + ' 声道') + ' · ' + bits + 'bit';
   } catch { return ''; }
 }
-function blockerTextOf(part) {
-  const first = ((part && part.blockers) || [])[0];
-  return first ? first.reason + '　↳ ' + first.hint : '';
+/**
+ * 把每个卡点都列出来（不只是第一条）：
+ * 比如 ttsEnabled 关着 + 云端没 key 时，两条都显示；打开开关后第一条消失、只剩 key 那条，
+ * 用户不用猜“下一个卡点是什么”。
+ */
+function blockerHints(part) {
+  return (((part && part.blockers) || []).map((item) =>
+    '<div class="hint">↳ ' + escapeHtml(item.reason) + '　' + escapeHtml(item.hint) + '</div>')).join('');
 }
 
 function shortPath(path) {
@@ -373,6 +438,133 @@ function resetTtsTune() {
   toast('细调参数已清空（回到配置默认）');
 }
 
+// ---------------------------------------------------------- 细调预设 ----
+// 存在 localStorage：预设/上次参数都只对本浏览器有效，不写配置、不发 QQ。
+const PRESET_FIELDS = {
+  textLang: 'voiceTextLang', voice: 'voiceVoice',
+  azureStyle: 'azureStyle', azureRate: 'azureRate', azureVolume: 'azureVolume',
+  openaiSpeed: 'openaiSpeed', speed: 'openaiSpeed',
+  refAudio: 'refAudio', refText: 'refText', refLang: 'refLang',
+  localSpeed: 'localSpeed', temperature: 'temperature', topK: 'topK', topP: 'topP',
+  repetitionPenalty: 'repetitionPenalty', seed: 'seed',
+};
+let restoredLastTune = false;
+
+function readJsonStore(key) {
+  try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
+}
+function writeJsonStore(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* 隐私模式/配额满时静默降级 */ }
+}
+function readPresets() {
+  const data = readJsonStore(PRESET_KEY);
+  if (!data || data.version !== PRESET_VERSION || !Array.isArray(data.items)) return [];
+  return data.items.filter((item) => item && typeof item.name === 'string' && item.name.trim() !== ''
+    && item.overrides && typeof item.overrides === 'object' && !Array.isArray(item.overrides));
+}
+function writePresets(items) { writeJsonStore(PRESET_KEY, { version: PRESET_VERSION, items }); }
+
+function renderPresetOptions(selected = '') {
+  const select = document.getElementById('presetSelect');
+  if (!select) return;
+  const items = readPresets();
+  select.innerHTML = '<option value="">预设：' + (items.length === 0 ? '无（先保存一个）' : '选择…') + '</option>'
+    + items.map((item) => '<option value="' + escapeHtml(item.name) + '"'
+      + (item.name === selected ? ' selected' : '') + '>' + escapeHtml(item.name) + '</option>').join('');
+}
+
+function currentTune() { return { provider: voiceProvider, overrides: collectTtsOverrides() }; }
+
+/** 把预设里的参数填回控件（只填给过的键，空字段保持空 = 用配置）。 */
+function applyOverrides(overrides) {
+  for (const [key, id] of Object.entries(PRESET_FIELDS)) {
+    const value = overrides[key];
+    if (value === undefined || value === null) continue;
+    const el = document.getElementById(id);
+    if (el) el.value = String(value);
+  }
+  if (overrides.pitch !== undefined || overrides.azurePitch !== undefined) {
+    const pitch = document.getElementById('pitch');
+    if (pitch) pitch.value = String(overrides.pitch ?? overrides.azurePitch);
+  }
+}
+
+function savePreset() {
+  const tune = currentTune();
+  const name = String(prompt('预设名称（同名会覆盖）', '') || '').trim().slice(0, 40);
+  if (name === '') return;
+  const items = readPresets().filter((item) => item.name !== name);
+  items.push({ name, at: Date.now(), ...tune });
+  writePresets(items);
+  renderPresetOptions(name);
+  toast('预设已保存：' + name);
+}
+
+function applyPreset() {
+  const select = document.getElementById('presetSelect');
+  const name = select ? select.value : '';
+  const preset = readPresets().find((item) => item.name === name);
+  if (!preset) { toast('先选一个预设'); return; }
+  applyOverrides(preset.overrides || {});
+  toast('已应用预设：' + name + '（只影响这次试听）');
+}
+
+function deletePreset() {
+  const select = document.getElementById('presetSelect');
+  const name = select ? select.value : '';
+  if (!name) { toast('先选一个预设'); return; }
+  const items = readPresets().filter((item) => item.name !== name);
+  writePresets(items);
+  renderPresetOptions();
+  toast('已删除预设：' + name);
+}
+
+function exportPresets() {
+  const items = readPresets();
+  if (items.length === 0) { toast('还没有预设可导出'); return; }
+  const blob = new Blob([JSON.stringify({ version: PRESET_VERSION, items }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'qq-voice-presets.json';
+  link.click();
+  URL.revokeObjectURL(url);
+  toast('已导出 ' + items.length + ' 个预设');
+}
+
+function importPresets(input) {
+  const file = input && input.files ? input.files[0] : null;
+  if (!file) return;
+  file.text().then((text) => {
+    let data = null;
+    try { data = JSON.parse(text); } catch { throw new Error('不是有效的 JSON'); }
+    if (!data || data.version !== PRESET_VERSION || !Array.isArray(data.items)) throw new Error('格式不对（需要 version:1 + items 数组）');
+    const incoming = data.items.filter((item) => item && typeof item.name === 'string' && item.name.trim() !== ''
+      && item.overrides && typeof item.overrides === 'object' && !Array.isArray(item.overrides));
+    if (incoming.length === 0) throw new Error('里面没有可用的预设');
+    const merged = readPresets().filter((item) => !incoming.some((next) => next.name === item.name));
+    writePresets([...merged, ...incoming]);
+    renderPresetOptions();
+    toast('已导入 ' + incoming.length + ' 个预设（同名覆盖）');
+  }).catch((error) => toast('导入失败：' + error.message))
+    .finally(() => { input.value = ''; });
+}
+
+/** 记住上一次试听用的参数（只存本浏览器），下次打开自动恢复。 */
+function rememberLastTune(provider, overrides) {
+  writeJsonStore(LAST_TUNE_KEY, { provider: String(provider || ''), overrides, at: Date.now() });
+}
+function restoreLastTune(tts) {
+  if (restoredLastTune) return;
+  restoredLastTune = true;
+  const data = readJsonStore(LAST_TUNE_KEY);
+  if (!data || !data.overrides || typeof data.overrides !== 'object') return;
+  if (data.provider && tts && tts.provider && data.provider !== tts.provider) return;
+  applyOverrides(data.overrides);
+  renderPresetOptions();
+  toast('已恢复上次试听参数（只影响试听）');
+}
+
 /** 按 provider 显示/隐藏细调字段，并把配置里的当前值写进 placeholder。 */
 function applyTtsFields(tts, stt) {
   voiceProvider = String(tts.provider || '');
@@ -407,25 +599,215 @@ function renderStatus(data) {
     : '音色 ' + (tts.voice || '-');
   const sttDetail = (stt.model || '?') + (stt.language ? ' · 语言 ' + stt.language : '');
   applyTtsFields(tts, stt);
+  restoreLastTune(tts);
+  const ttsToggle = document.getElementById('ttsEnabledToggle');
+  if (ttsToggle) ttsToggle.checked = tts.enabled === true;
+  const sttToggle = document.getElementById('sttEnabledToggle');
+  if (sttToggle) sttToggle.checked = stt.enabled === true;
+  const ttsProviderSelect = document.getElementById('ttsProviderSelect');
+  if (ttsProviderSelect) {
+    ttsProviderSelect.value = String(tts.provider || '');
+    ttsProviderSelect.dataset.prev = ttsProviderSelect.value;
+  }
+  const sttProviderSelect = document.getElementById('sttProviderSelect');
+  if (sttProviderSelect) {
+    sttProviderSelect.value = String(stt.provider || '');
+    sttProviderSelect.dataset.prev = sttProviderSelect.value;
+  }
+  setServiceButtons(String(tts.provider || ''));
+  const fillPlaceholder = (id, text) => {
+    const el = document.getElementById(id);
+    if (el && String(el.value).trim() === '' && text) el.placeholder = '当前：' + text;
+  };
+  fillPlaceholder('cfgTtsVoice', tts.voice);
+  fillPlaceholder('cfgTtsLocalUrl', tts.localUrl);
+  fillPlaceholder('cfgTtsLocalRefAudio', tts.refAudioName ? tts.refAudioName + '（只给文件名，重填完整路径）' : '');
+  fillPlaceholder('cfgSttModel', stt.provider === 'cloud' ? stt.model : '');
   document.getElementById('voiceStatus').innerHTML =
     '<div class="check"><span>' + (tts.ready === true ? '✅' : '⚠️') + '</span><div class="body">'
     + '<b>TTS</b>：' + escapeHtml(stateOf(tts)) + ' · ' + escapeHtml(tts.provider || '?') + ' · ' + escapeHtml(ttsDetail)
-    + (tts.ready === true ? '' : '<div class="hint">↳ ' + escapeHtml(blockerTextOf(tts)) + '</div>') + '</div></div>'
+    + (tts.ready === true ? '' : blockerHints(tts)) + '</div></div>'
     + '<div class="check"><span>' + (stt.ready === true ? '✅' : '⚠️') + '</span><div class="body">'
     + '<b>STT</b>：' + escapeHtml(stateOf(stt)) + ' · ' + escapeHtml(stt.provider || '?') + ' · ' + escapeHtml(sttDetail)
-    + (stt.ready === true ? '' : '<div class="hint">↳ ' + escapeHtml(blockerTextOf(stt)) + '</div>') + '</div></div>'
+    + (stt.ready === true ? '' : blockerHints(stt)) + '</div></div>'
     + '<div class="hint">宿主 speechToText：' + (data.hostService === true ? '可用' : '不可用（走 dsh 时必须先启用「语音输入」bundle）')
     + (data.host ? ' · 宿主地址 ' + escapeHtml(data.host) : '') + '</div>';
   const pill = document.getElementById('verdictPill');
   const ready = tts.ready === true && stt.ready === true;
-  const anyOff = tts.enabled === false && stt.enabled === false;
-  pill.className = 'pill ' + (anyOff ? 'unknown' : (ready ? 'ok' : 'warn'));
-  pill.textContent = anyOff ? '都没启用' : (ready ? '都就绪' : '有卡点');
+  const bothOff = tts.enabled === false && stt.enabled === false;
+  const oneOff = (tts.enabled === false) !== (stt.enabled === false);
+  pill.className = 'pill ' + (bothOff ? 'unknown' : (ready ? 'ok' : 'warn'));
+  // 关掉是一个明确状态，不是“异常”：两个都关 = 未启用，只关一个 = 部分未启用
+  pill.textContent = bothOff ? '未启用' : (oneOff ? '部分未启用' : (ready ? '都就绪' : '有卡点'));
   document.getElementById('stamp').textContent = '状态更新于 ' + stampNow();
 }
 
-async function loadVoiceStatus(force) {
+/**
+ * 切换语音模块开关：POST /api/voice/toggle → 控制台 → 宿主 /qqai/panel/set-batch
+ * （写 profile 的 cordis.patch.yml，宿主热重载 2–3 秒）。
+ */
+async function toggleVoice(kind) {
+  const id = kind === 'tts' ? 'ttsEnabledToggle' : 'sttEnabledToggle';
+  const box = document.getElementById(id);
+  const state = document.getElementById('toggleState');
+  const value = box ? box.checked : false;
+  if (state) state.textContent = '写入配置…';
   try {
+    const result = await api('/api/voice/toggle', { method: 'POST', body: JSON.stringify({ [kind]: value }) });
+    if (result.ok !== true) {
+      if (box) box.checked = !value;
+      if (state) state.textContent = '⚠️ ' + (result.reason || '切换失败');
+      toast('切换失败：' + (result.reason || '未知原因'));
+      return;
+    }
+    if (state) state.textContent = '✅ ' + (result.reason || '已写入');
+    toast(result.reason || '已写入配置');
+    // 宿主热重载需要 2–3 秒，之后自动刷新两次状态
+    setTimeout(() => loadVoiceStatus(false), 3500);
+    setTimeout(() => loadVoiceStatus(false), 8000);
+  } catch (error) {
+    if (box) box.checked = !value;
+    if (state) state.textContent = '⚠️ ' + error.message;
+  }
+}
+
+/**
+ * 切换 TTS / STT 后端（ttsProvider / sttProvider）：与开关走同一条写入链路。
+ * 换后端后宿主热重载，页面 2–3 秒后自动刷新（细调字段也会按新 provider 显隐）。
+ */
+async function setVoiceProvider(kind) {
+  const select = document.getElementById(kind === 'tts' ? 'ttsProviderSelect' : 'sttProviderSelect');
+  const state = document.getElementById('toggleState');
+  if (!select) return;
+  const value = select.value;
+  const prev = select.dataset.prev || '';
+  if (state) state.textContent = '写入配置…';
+  try {
+    const body = kind === 'tts' ? { ttsProvider: value } : { sttProvider: value };
+    const result = await api('/api/voice/toggle', { method: 'POST', body: JSON.stringify(body) });
+    if (result.ok !== true) {
+      select.value = prev;
+      if (state) state.textContent = '⚠️ ' + (result.reason || '切换失败');
+      toast('切换失败：' + (result.reason || '未知原因'));
+      return;
+    }
+    select.dataset.prev = value;
+    if (state) state.textContent = '✅ ' + (result.reason || '已写入');
+    toast(result.reason || '已写入配置');
+    setTimeout(() => loadVoiceStatus(false), 3500);
+    setTimeout(() => loadVoiceStatus(false), 8000);
+  } catch (error) {
+    select.value = prev;
+    if (state) state.textContent = '⚠️ ' + error.message;
+  }
+}
+
+/**
+ * 保存「服务配置」里的非密钥字段：只提交填了值的项（空 = 不改），
+ * 密钥仍只在 DSH 设置页改。
+ */
+async function saveVoiceConfig() {
+  const fields = {
+    ttsVoice: 'cfgTtsVoice',
+    ttsModel: 'cfgTtsModel',
+    ttsLocalUrl: 'cfgTtsLocalUrl',
+    ttsLocalRefAudio: 'cfgTtsLocalRefAudio',
+    ttsLocalPromptText: 'cfgTtsLocalPromptText',
+    sttModel: 'cfgSttModel',
+  };
+  const values = {};
+  for (const [key, id] of Object.entries(fields)) {
+    const el = document.getElementById(id);
+    const value = String(el?.value ?? '').trim();
+    if (value !== '') values[key] = value;
+  }
+  const state = document.getElementById('voiceConfigState');
+  if (Object.keys(values).length === 0) {
+    if (state) state.textContent = '先填至少一项（空 = 不改）';
+    return;
+  }
+  if (state) state.textContent = '写入配置…';
+  try {
+    const result = await api('/api/voice/toggle', { method: 'POST', body: JSON.stringify({ values }) });
+    if (result.ok !== true) {
+      if (state) state.textContent = '⚠️ ' + (result.reason || '保存失败');
+      toast('保存失败：' + (result.reason || '未知原因'));
+      return;
+    }
+    if (state) state.textContent = '✅ ' + (result.reason || '已写入');
+    toast(result.reason || '服务配置已写入');
+    for (const id of Object.values(fields)) {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    }
+    setTimeout(() => loadVoiceStatus(false), 3500);
+    setTimeout(() => loadVoiceStatus(false), 8000);
+  } catch (error) {
+    if (state) state.textContent = '⚠️ ' + error.message;
+  }
+}
+
+/** 只有 TTS 后端是 local 时才需要本机 GPT-SoVITS 服务；其它后端禁用这两个按钮。 */
+function setServiceButtons(provider) {
+  const local = provider === 'local';
+  for (const id of ['voiceServiceStart', 'voiceServiceStop']) {
+    const button = document.getElementById(id);
+    if (!button) continue;
+    button.disabled = !local;
+    button.title = local ? '' : 'TTS 后端不是 local，不需要启动本机语音服务';
+  }
+}
+
+/** 直接从语音页启动本机语音服务（控制台的 /api/tts/start，最多等 20 秒确认端口）。 */
+async function startVoiceService() {
+  const state = document.getElementById('voiceServiceState');
+  const button = document.getElementById('voiceServiceStart');
+  if (state) state.textContent = '启动中…（首次加载模型约 30–60 秒）';
+  if (button) button.disabled = true;
+  try {
+    const result = await api('/api/tts/start', { method: 'POST' });
+    if (result.ok !== true) {
+      if (state) state.textContent = '⚠️ ' + (result.reason || '启动失败');
+      toast('启动失败：' + (result.reason || '未知原因'));
+      return;
+    }
+    if (state) state.textContent = '✅ ' + (result.reason || '已启动');
+    toast(result.reason || '语音服务已启动');
+    // 首次加载可能要 60 秒：5/20/40 秒各刷一次状态
+    setTimeout(() => loadVoiceStatus(false), 5000);
+    setTimeout(() => loadVoiceStatus(false), 20000);
+    setTimeout(() => loadVoiceStatus(false), 40000);
+  } catch (error) {
+    if (state) state.textContent = '⚠️ ' + error.message;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function stopVoiceService() {
+  if (!confirm('停止语音服务？')) return;
+  const state = document.getElementById('voiceServiceState');
+  const button = document.getElementById('voiceServiceStop');
+  if (state) state.textContent = '停止中…';
+  if (button) button.disabled = true;
+  try {
+    const result = await api('/api/tts/stop', { method: 'POST' });
+    if (result.ok !== true) {
+      if (state) state.textContent = '⚠️ ' + (result.reason || '停止失败');
+      toast('停止失败：' + (result.reason || '未知原因'));
+      return;
+    }
+    if (state) state.textContent = '✅ ' + (result.reason || '已停止');
+    toast(result.reason || '语音服务已停止');
+    setTimeout(() => loadVoiceStatus(false), 1500);
+  } catch (error) {
+    if (state) state.textContent = '⚠️ ' + error.message;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function loadVoiceStatus(force) {  try {
     const result = await api('/api/voice/status');
     if (result.ok === false && !result.tts) {
       document.getElementById('voiceStatus').textContent = '⚠️ ' + (result.reason || '读取失败');
@@ -455,17 +837,75 @@ function blobToBase64(blob) {
   });
 }
 
+function copyText(text) {
+  const value = String(text ?? '');
+  const fallback = () => {
+    const area = document.createElement('textarea');
+    area.value = value;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    area.remove();
+    toast(ok ? '已复制' : '复制失败（浏览器不允许）');
+    return ok;
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(value).then(() => { toast('已复制'); return true; }).catch(fallback);
+  }
+  return Promise.resolve(fallback());
+}
+
+function paramsJson(params) { return JSON.stringify(params || {}, null, 2); }
+
+function downloadBlobUrl(url, name) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+}
+
+function downloadAttempt(index) {
+  const item = attempts[index];
+  if (!item) return;
+  downloadBlobUrl(item.url, 'voice-attempt-' + (attempts.length - index) + '.' + (item.format === 'mp3' ? 'mp3' : 'wav'));
+}
+
+function copyAttemptParams(index) {
+  const item = attempts[index];
+  if (item) copyText(paramsJson(item.params));
+}
+
+function copyLastTtsParams() {
+  if (lastTts) copyText(paramsJson(lastTts.params));
+}
+
+/** 把最近几条试听整理成 Markdown 表，方便贴到群里/issue 对比。 */
+function copyAttemptsTable() {
+  if (attempts.length === 0) { toast('还没有试听记录'); return; }
+  const rows = attempts.map((item, index) =>
+    '| #' + (attempts.length - index) + ' | ' + item.ms + ' ms | ' + (paramsSummary(item.params) || '配置默认') + ' |');
+  copyText('| 试听 | 耗时 | 参数 |\n|---|---|---|\n' + rows.join('\n'));
+}
+
 function renderAttempts() {
   const box = document.getElementById('voiceAttempts');
   if (attempts.length === 0) { box.innerHTML = ''; return; }
-  box.innerHTML = '<div class="meta" style="margin-top:10px">最近试听（最多 ' + ATTEMPT_LIMIT + ' 条，方便 A/B）</div>'
+  box.innerHTML = '<div class="row" style="margin-top:10px;justify-content:space-between">'
+    + '<span class="meta">最近试听（最多 ' + ATTEMPT_LIMIT + ' 条，方便 A/B）</span>'
+    + '<button onclick="copyAttemptsTable()">复制对比表</button></div>'
     + attempts.map((item, index) => {
       const summary = paramsSummary(item.params);
+      const ext = item.format === 'mp3' ? 'mp3' : 'wav';
       return '<div class="attempt"><b>#' + (attempts.length - index) + ' ' + escapeHtml(item.text.slice(0, 60)) + '</b>'
         + '<div class="hint">' + escapeHtml(item.provider || '') + ' · ' + sizeText(item.bytes) + ' · ' + item.ms + ' ms'
         + (item.spec ? ' · ' + escapeHtml(item.spec) : '')
         + (summary ? ' · ' + escapeHtml(summary) : '') + '</div>'
-        + '<audio controls src="' + item.url + '" style="width:100%;margin-top:6px"></audio></div>';
+        + '<audio controls src="' + item.url + '" style="width:100%;margin-top:6px"></audio>'
+        + '<div class="row" style="margin-top:4px"><a href="' + item.url + '" download="voice-attempt-' + (attempts.length - index) + '.' + ext + '">下载</a>'
+        + '<button onclick="copyAttemptParams(' + index + ')">复制参数</button></div></div>';
     }).join('');
 }
 
@@ -486,12 +926,16 @@ async function testTts() {
     const url = URL.createObjectURL(base64ToBlob(result.audio, result.format === 'wav' ? 'audio/wav' : 'audio/mpeg'));
     const summary = paramsSummary(result.params);
     const spec = result.format === 'wav' ? wavSpec(result.audio) : String(result.format || '').toUpperCase();
+    const ext = result.format === 'mp3' ? 'mp3' : 'wav';
+    lastTts = { url, format: result.format, params: result.params || overrides, bytes: result.bytes || 0, ms: result.ms || 0 };
     out.innerHTML = '<audio controls autoplay src="' + url + '" style="width:100%;margin-top:6px"></audio>'
       + '<div class="hint">' + escapeHtml(result.provider || '') + ' · ' + sizeText(result.bytes)
       + ' · ' + (result.ms || 0) + ' ms' + (spec ? ' · ' + escapeHtml(spec) : '')
-      + ' · 只是试听，没有发到 QQ' + (summary ? ' · ' + escapeHtml(summary) : '') + '</div>';
+      + ' · 只是试听，没有发到 QQ' + (summary ? ' · ' + escapeHtml(summary) : '') + '</div>'
+      + '<div class="row" style="margin-top:4px"><a href="' + url + '" download="voice-last.' + ext + '">下载</a>'
+      + '<button onclick="copyLastTtsParams()">复制参数</button></div>';
     attempts.unshift({
-      text, provider: result.provider || '', params: result.params || overrides, spec,
+      text, provider: result.provider || '', params: result.params || overrides, spec, format: result.format,
       bytes: result.bytes || 0, ms: result.ms || 0, url,
     });
     while (attempts.length > ATTEMPT_LIMIT) {
@@ -499,6 +943,7 @@ async function testTts() {
       try { URL.revokeObjectURL(dropped.url) } catch { /* 已释放 */ }
     }
     renderAttempts();
+    rememberLastTune(result.provider || voiceProvider, overrides);
     state.textContent = '✅ 合成好了';
   } catch (error) {
     state.textContent = '';
@@ -571,6 +1016,18 @@ async function sendFile(input) {
 if (!token) document.getElementById('tokenHint').style.display = '';
 const consoleTop = document.getElementById('consoleTop');
 if (consoleTop && token) consoleTop.href = '/?token=' + encodeURIComponent(token);
+renderPresetOptions();
+// Ctrl+Enter 直接合成（手不用离开输入框）
+document.getElementById('voiceText').addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    event.preventDefault();
+    testTts();
+  }
+});
+// 开关在 DSH 设置里改完不用手动点刷新：可见时每 15 秒拉一次；切回来/聚焦立刻拉
+setInterval(() => { if (!document.hidden) loadVoiceStatus(false); }, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadVoiceStatus(false); });
+window.addEventListener('focus', () => loadVoiceStatus(false));
 loadVoiceStatus(false);
 </script>
 </body>

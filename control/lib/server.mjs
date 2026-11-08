@@ -526,6 +526,16 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         json(response, 200, { ok: result.ok, report: result.report, text: result.text, verdict: result.report?.verdict })
         return
       }
+      /** 体检趋势：最近 N 次体检的一行摘要（时间/结论/计数），数据来自 qq-health-history.jsonl。 */
+      if (request.method === 'GET' && path === '/api/health/history') {
+        if (typeof api.healthHistory !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持体检趋势', entries: [] })
+          return
+        }
+        const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 30))
+        json(response, 200, await api.healthHistory({ limit }))
+        return
+      }
       /**
        * 语音调试：状态直接透传宿主 `/qqai/voice/status`（TTS/STT 是否就绪、卡在哪）。
        */
@@ -807,6 +817,25 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
               language: String(body.language ?? '').slice(0, 16),
               model: String(body.model ?? '').slice(0, 80),
             })
+          },
+          // 语音模块开关：写到 profile 的 cordis.patch.yml（ttsEnabled / sttEnabled），
+          // 走宿主的 /qqai/panel/set-batch（校验 + 批量写 + 热重载），控制台不自己拼 YAML。
+          '/api/voice/toggle': () => {
+            if (typeof api.voiceToggle !== 'function') return { ok: false, reason: '当前控制台不支持切换语音设置' }
+            const payload = {}
+            if (typeof body.tts === 'boolean') payload.tts = body.tts
+            if (typeof body.stt === 'boolean') payload.stt = body.stt
+            if (typeof body.ttsProvider === 'string') payload.ttsProvider = body.ttsProvider.trim().toLowerCase()
+            if (typeof body.sttProvider === 'string') payload.sttProvider = body.sttProvider.trim().toLowerCase()
+            if (body.values && typeof body.values === 'object' && !Array.isArray(body.values)) {
+              const values = {}
+              for (const [key, raw] of Object.entries(body.values).slice(0, 20)) {
+                if (typeof raw === 'string') values[key] = raw
+              }
+              if (Object.keys(values).length > 0) payload.values = values
+            }
+            if (Object.keys(payload).length === 0) return { ok: false, reason: '没有要切换的语音设置（tts/stt/ttsProvider/sttProvider 都是空）' }
+            return api.voiceToggle(payload)
           },
           '/api/config': () => {
             if (typeof saveConfig !== 'function') return { ok: false, reason: '配置保存不可用' }

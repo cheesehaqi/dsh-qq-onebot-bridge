@@ -2,7 +2,7 @@
 
 A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ messages drive DSH agent sessions directly, and agent replies are sent back to QQ automatically.
 
-Current version **v0.8.6** · [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [Changelog](CHANGELOG.md)
+Current version **v0.8.7** · [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [Changelog](CHANGELOG.md)
 
 ## Architecture
 
@@ -65,9 +65,9 @@ After installing the plugin and **restarting the host once** (so the panel route
 - **One click writes it**: only this plugin's own config block inside the profile's `cordis.patch.yml` (other entries and comments are preserved), keys outside the whitelist or non-boolean values are rejected, and the write is a **temp-file-then-rename atomic replace** with a `.bak-qqai` backup.
 - **How it applies**: DSH hot-reloads that plugin entry (the QQ bridge reconnects for a second or two); if hot reload is off, restart the host.
 - **Hosts without a web server** (e.g. the TUI profile) simply have no such page — the `ctx.inject(['webServer'])` block never runs there and the plugin works as usual.
-- **The bottom of the page links the changelog and the debug entry points**: `更新日志（v0.6.0）` (the GitHub `CHANGELOG.md`), `调试文档` (the README debugging section) and `调试台（独立控制台）`. The addresses are derived from `package.json` / `qq-control.json`.
+- **The bottom of the page links the changelog and the debug entry points**: `更新日志（v0.6.0）` (the GitHub `CHANGELOG.md`), `调试文档` (the README debugging section) and `控制台（独立进程）`. The addresses are derived from `package.json` / `qq-control.json`.
   - **The console is a separate process and the plugin never starts it for you**: the panel probes `127.0.0.1:8799` and says `运行中` or `未启动` truthfully; when it is down, that row prints the exact command to start it.
-  - The 调试台 link goes through the host's `/qqai/console`: when the console is up it 302s to the **tokenized** address (no manual token copying), and when it is down it returns a page telling you which command to run — no more "clicked it and it just would not connect". The token is read server-side only and never appears in the panel payload.
+  - The 控制台（独立进程） link goes through the host's `/qqai/console`: when the console is up it 302s to the **tokenized** address (no manual token copying), and when it is down it returns a page telling you which command to run — no more "clicked it and it just would not connect". The token is read server-side only and never appears in the panel payload.
 
 > Need a key that is not on the panel? Edit the profile's `cordis.patch.yml` directly (the panel header shows which file that is). The panel deliberately exposes only the everyday switches instead of being a general config editor.
 
@@ -467,13 +467,14 @@ npm run control            # or: node control/bin/qq-control.mjs --open
 
 ```
 
-The console's left sidebar groups cards by purpose (**overview / live events / diagnostics & reports / record · replay · inject / data & jobs / logs**); the top-right keeps only four global actions
-(refresh / one-shot diagnosis / export bundle / health report), and the voice lab lives in the sidebar (standalone page `/voice`). Switching groups only toggles visibility — hidden cards keep polling and receiving SSE.
+The console's left sidebar groups cards by purpose (**overview / live events / diagnostics & reports / record · replay · inject / data & jobs / logs**) plus a seventh **voice lab** group; the top-right keeps only four global actions
+(refresh / one-shot diagnosis / export bundle / health report). The voice lab opens as a console group (the content is still served by `/voice` and lazy-loaded in an iframe). Switching groups only toggles visibility — hidden cards keep polling and receiving SSE.
+Press **Ctrl+K** (⌘K on macOS) to open the command palette and search groups / cards / actions directly.
 
 | Capability | Detail |
 |---|---|
 | Port overview | listening state, owning PID and process name for console 8799 / host 3080 / OneBot 6700 / NapCat 6099 / GPT-SoVITS 9880; the connection count on 6700 *is* the "bot online" signal |
-| Start / stop | start, stop and restart the host (always with `--no-open`, logs appended to `qq-host-out.log` / `qq-host-err.log`), start/stop NapCat and QQ, start/stop GPT-SoVITS, stop everything at once |
+| Start / stop | start, stop and restart the host (always with `--no-open`, logs appended to `qq-host-out.log` / `qq-host-err.log`), start/stop NapCat and QQ, start/stop the **voice service** (GPT-SoVITS; **launches `.venv\Scripts\pythonw.exe api_v2.py`** (no console window; falls back to python.exe), not the interactive bat, then checks whether 9880 is listening), stop everything at once |
 | Start pre-flight | checks 3080/6700 first and refuses to start with "port ← process#PID" instead of failing silently |
 | Free a port | one-click `taskkill /T /F` for the process owning a watched port (guard rail: only watched-port owners and known bot processes, never an unrelated PID) |
 | Logs | host stdout / stderr / bridge debug log with live follow and line count |
@@ -482,8 +483,10 @@ The console's left sidebar groups cards by purpose (**overview / live events / d
 | Debugging | "录制 · 回放 · 注入": lists every recorded inbound event from `qq-inbox.jsonl`, replays any of them offline (sandbox + dry-run) or injects a synthetic event; the injection queue state (lines / consumed this run / dry-run) is shown inline |
 | Acceptance | "硬约束验收台" at the top: live evidence for all 6 hard constraints (no silent branch / trace id / replay / diagnosis / export / injection), with "where to click" for anything not met; `GET /api/acceptance` |
 | Health report | **`/report`**: merges the per-check diagnosis and the 6 hard constraints into one page — one-line verdict, "fix these first" (ordered by consequence), grouped details, evidence per constraint with "go look →" deep links; read-only, printable to PDF, one-click copy of the whole text (handy when asking someone else to look); `GET /api/report` |
+| Health trend | Card under "diagnostics & reports": every diagnosis appends one line to `qq-health-history.jsonl` (time / verdict / passed / blocked); the latest 30 points are shown newest-first with the change in failures; `GET /api/health/history`, refreshed every 30 s |
 | Change history | "设置项变更历史" card: every setting the console wrote (path config / WebUI / network config) keeps its **old → new**; token-like keys are recorded as "value hidden"; stored in `<working dir>\qq-settings-history.jsonl`, served by `GET /api/history`, read-only with keyword filtering and copy |
-| Voice lab | **`/voice`** (standalone page, entry in the left sidebar): first shows where the voice module is stuck (switch / local reference audio / cloud key / host `speechToText`), then lets you hear a one-line TTS sample, or record / pick an audio file and see the transcript; **fine-tuning**: voice / speed / **±12 semitone pitch** / style (Azure, OpenAI) and reference audio / sampling knobs for GPT-SoVITS (`temperature` / `top_k` / `top_p` / `seed`…), STT language (auto/Chinese/English/Japanese) / cloud model — all **per-attempt** (never written back, out-of-range fails loudly); the last 5 samples stay around for A/B; it finds the host itself (including a desktop-started host on a random port); **local only, never sends to QQ** |
+| Command palette | **Ctrl+K (⌘K)**: filter and jump to any of the six groups or 15 cards, or run refresh / one-shot diagnosis / export bundle / open report / open voice lab; ↑↓ to move, Enter to run, Esc to close. The sidebar has a visible "🔍 搜索 / 跳转 Ctrl K" entry, so it is discoverable without the keyboard; the sidebar selection block slides to the active group |
+| Voice lab | The console's left "语音调试" group (the page is still `/voice`, with `embed=1` hiding its big header; `/voice` also opens directly): first shows where the voice module is stuck (switch / local reference audio / cloud key / host `speechToText`), then lets you hear a one-line TTS sample, or record / pick an audio file and see the transcript; **fine-tuning**: voice / speed / **±12 semitone pitch** / style (Azure, OpenAI) and reference audio / sampling knobs for GPT-SoVITS (`temperature` / `top_k` / `top_p` / `seed`…), STT language (auto/Chinese/English/Japanese) / cloud model — all **per-attempt** (never written back, out-of-range fails loudly); save named presets (browser-local, import/export); the last 5 samples stay for A/B (download audio, copy params / comparison table); the last used tuning is restored after a refresh; **Ctrl+Enter** synthesizes; all blockers are listed and the status auto-refreshes every 15 s (immediately when refocused); the page can toggle "语音回复 (TTS)" / "语音转文字 (STT)" and switch backends (TTS: Azure / OpenAI / local GPT-SoVITS; STT: local SenseVoice / cloud), writing plugin config with a host hot-reload; the "服务配置" panel can edit voice / model / local URL / reference audio / reference text / STT model (**no secrets** — API keys stay in DSH settings); when the TTS backend is local, the page can start/stop the voice service directly; it finds the host itself (including a desktop-started host on a random port); **local only, never sends to QQ** |
 | Security | binds `127.0.0.1` only, every API needs the token, and any request carrying a cross-site `Origin` is rejected |
 
 > A future tray/desktop build can simply wrap this HTTP API in Electron/Tauri — no logic rewrite needed.
@@ -591,8 +594,10 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 
 | Item | Rule |
 |---|---|
-| Diagnostic bundle | "导出诊断包" exports **redacted by default**: QQ ids are masked digit-by-digit (first two kept) and message bodies become "[已脱敏 N 字]"; the bundle carries a `REDACTED.json` describing the policy. Unchecking the box exports plaintext (with a warning toast) |
+| Diagnostic bundle | "导出诊断包" exports **redacted by default**: QQ ids are masked digit-by-digit (first two kept), message bodies become "[已脱敏 N 字]", and **token / apiKey / Bearer / `sk-…` are replaced with `<已隐藏>`**; the bundle carries a `REDACTED.json` describing the policy. Unchecking the box exports plaintext (with a warning toast) |
 | Runtime artefacts | `qq-inbox.jsonl` (message bodies), `qq-trace.jsonl` (chat keys + text snippets), `qq-runtime.json`, `qq-actions.log` are written to the local working directory only and are **all covered by `.gitignore`** (`qq-*/`, `qq-*.json`, `qq-*.jsonl`, `qq-*.log` plus explicit entries), so a cwd inside the repo still cannot commit them |
+| Console log | the startup URLs are printed as `token=<已隐藏>` (`--open` still opens the internal tokenized URL); the token lives only in the ignored `qq-control.json` and is never written to `qq-control-out.log` |
+| Host log | `qq-host-out.log` is DSH's own output and may contain the host token (`?token=…`). It is outside the repo and gitignored, but **do not share it raw**; the redacted diagnostic bundle masks it |
 | Recording redaction | `inboxRedact: true` masks QQ ids already at record time |
 | The repository | contains no keys, passwords or real QQ ids: secrets live only in your DSH profile config (outside the repo), and `test/privacy-unit.mjs` re-scans every tracked file on each test run (the private ids are read from your machine-local config or `DSH_QQ_PRIVATE_IDS`, never stored in the test) |
 | Console | binds `127.0.0.1` only, every endpoint needs the token (kept in the ignored `qq-control.json`), cross-site Origins are rejected |
@@ -607,11 +612,11 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 
 The five most recent versions (always kept rolling):
 
+- **v0.8.7** — Ctrl+K command palette + sliding sidebar selection; the voice lab moves into the console (in-page toggles / backend switch / service config / start-stop, now via pythonw so a closed window cannot abort it); a "health trend" card; privacy hardening (console-log tokens masked, diagnostic bundle masks token / apiKey / Bearer / `sk-…`)
 - **v0.8.6** — debuggability trio for the console: a standalone health-report page `/report`, settings change history, and a standalone voice lab `/voice` (TTS/STT trials plus per-attempt voice / speed / ±12 semitone pitch / sampling overrides); console rebuilt with a six-group sidebar and single-column cards; `lib/` only gains voice routes and TTS parameters — **the patch-surface files `bridge.js` / `index.js` / `panel.js` are untouched**
 - **v0.8.5** — guard rails first: contract tests for 8 new and 13 old endpoints (route coverage 21/41 → 41/41, which immediately caught a missing `unlinkSync` import that made "delete backup" and "restore from trash" return 500), drill-down for files and plugins, a port panorama, batch trash cleanup, traceId chains from the log page, `docs/ACCESS.md` access matrix, and `tools/audit.mjs`; **`lib/` untouched**
 - **v0.8.4** — TCP reachability check for every endpoint, a "connections" column on the accounts page, collapsible long lists loaded on demand, filtered log exports with a header, a re-check button for API availability, file search in the palette; plus the **whitelist split** (`allowUsersPrivateOnly`, off by default) and the renamed QQ 用户 / QQ 群聊 lists
 - **v0.8.3** — "the console checks itself": release check, port-usage display, read-only `napcat.json` preview (redacted), plugin-dir markers, file stats, a config trash (restore / send to Windows Recycle Bin, never hard-delete), copyable diagnostic summary, unsaved-changes hint, and fail-only/event filters in live testing; fixes scenario injection dropping group/user ids
-- **v0.8.2** — "fewer clicks": file/account search, log time-range filter and filtered download, operation-log export/clear, a "last error" card, a **Ctrl+K command palette** (including per-account jumps), persisted log filters, and copyable plugin-directory paths; tests gained a DOM-timing assertion and a runtime smoke run with negative controls
 
 **Older versions (the v0.4 line and earlier) are in [CHANGELOG.md](CHANGELOG.md)** — the full history, including every release's defect list and test counts.
 You can also filter by version on the [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) page (each entry carries a `compare/v<previous>...v<this>` diff link).

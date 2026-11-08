@@ -142,11 +142,18 @@ server.listen(config.ports.control, '127.0.0.1', () => {
   const reportUrl = `http://127.0.0.1:${config.ports.control}/report?token=${config.token}`
   const voiceUrl = `http://127.0.0.1:${config.ports.control}/voice?token=${config.token}`
   const url = wantsAccounts ? accountsUrl : rootUrl
+  /**
+   * 输出到终端/日志的地址一律把 token 打成 `<已隐藏>`：
+   * `--open` 仍然用**带 token 的内部 URL** 打开，所以本机使用不受影响；
+   * 但 stdout 被重定向成 `qq-control-out.log` 时，日志里不再留 token。
+   */
+  const masked = (target) => String(target).replace(/([?&]token=)[^&]*/i, '$1<已隐藏>')
   console.log('🐋 小鲸鱼控制台已启动')
-  console.log(`   ${wantsAccounts ? '账号中心' : '控制台'}：${url}`)
-  if (!wantsAccounts) console.log(`   账号中心：${accountsUrl}`)
-  console.log(`   体检报告：${reportUrl}`)
-  console.log(`   语音调试：${voiceUrl}`)
+  console.log(`   ${wantsAccounts ? '账号中心' : '控制台'}：${masked(url)}`)
+  if (!wantsAccounts) console.log(`   账号中心：${masked(accountsUrl)}`)
+  console.log(`   体检报告：${masked(reportUrl)}`)
+  console.log(`   语音调试：${masked(voiceUrl)}`)
+  console.log('   token 已隐藏：手动打开时从 qq-control.json 的 token 字段取；从 DSH 面板「控制台」入口打开会自动带上')
   console.log(`   配置文件：${configFile}`)
   console.log(`   受管端口：${Object.entries(config.ports).map(([name, port]) => `${PORT_LABELS[name] ?? name}=${port}`).join('  ')}`)
   console.log(`   宿主命令：${config.nodeExe} ${config.dshBin} web --no-open`)

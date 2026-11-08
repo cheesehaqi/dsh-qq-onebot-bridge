@@ -469,6 +469,13 @@ check('坏行退化为纯文本掩码而不是抛错', redactJsonLine(`{坏行 g
 check('整份 JSONL 逐行处理', redactByKind('qq-inbox.jsonl', `${line}\n${line}\n`).split('\n').filter(Boolean).length === 2)
 check('JSON 文件按结构脱敏', JSON.parse(redactByKind('qq-runtime.json', JSON.stringify({ sessions: [{ chatKey: `u:${USER}` }] }))).sessions[0].chatKey === `u:${MASKED_USER}`)
 check('日志文件只掩码数字', redactByKind('qq-bridge-debug.log', `msg from u${USER} g${GROUP}`) === `msg from u${MASKED_USER} g${MASKED_GROUP}`)
+const tokenLine = 'GET http://127.0.0.1:3080/?token=abc123DEF456'
+const tokenLog = redactByKind('qq-host-out.log', tokenLine)
+check('日志脱敏：URL 里的 token 也打码（不只数字）',
+  !tokenLog.includes('abc123DEF456') && tokenLog.includes('token=<已隐藏>'), tokenLog)
+const jsonSecrets = redactByKind('qq-runtime.json', JSON.stringify({ token: 'abc123DEF456', apiKey: 'sk-abcdefghijklmnop' }))
+check('JSON 脱敏：token / apiKey 字段整段打码',
+  !jsonSecrets.includes('abc123DEF456') && !jsonSecrets.includes('sk-abcdefghijklmnop'), jsonSecrets)
 check('脱敏说明与包内容一致', redactionNote().redacted === true && redactionNote().policy.includes('掩码'))
 
 // ------------------------------------------------------------ ⑦ 汇总输出 --

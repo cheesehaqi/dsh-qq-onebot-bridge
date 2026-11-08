@@ -603,6 +603,24 @@ check('POST 拒绝白名单外的键（面板不会变成任意配置编辑器�
 const rejected2 = makeResponse()
 await setHandler(fakeRequest('POST', { key: 'ttsEnabled', value: 'yes' }, JSON_HEADERS), rejected2)
 check('POST 拒绝非布尔值', rejected2.out.status === 400, rejected2.out.body)
+const providerWrite = makeResponse()
+await setHandler(fakeRequest('POST', { key: 'ttsProvider', value: 'local' }, JSON_HEADERS), providerWrite)
+check('POST 允许写语音后端 ttsProvider（面板白名单特例）',
+  providerWrite.out.status === 200 && JSON.parse(providerWrite.out.body).ok === true
+  && /^\s*ttsProvider: "?local"?$/m.test(readFileSync(patchPath, 'utf8')), providerWrite.out.body)
+const badProviderWrite = makeResponse()
+await setHandler(fakeRequest('POST', { key: 'sttProvider', value: 'nope' }, JSON_HEADERS), badProviderWrite)
+check('POST 拒绝非法语音后端值', badProviderWrite.out.status === 400
+  && JSON.parse(badProviderWrite.out.body).reason.includes('只能'), badProviderWrite.out.body)
+const voiceValueWrite = makeResponse()
+await setHandler(fakeRequest('POST', { key: 'ttsVoice', value: 'nova' }, JSON_HEADERS), voiceValueWrite)
+check('POST 允许写语音服务配置（ttsVoice）',
+  voiceValueWrite.out.status === 200 && /^\s*ttsVoice: "?nova"?$/m.test(readFileSync(patchPath, 'utf8')),
+  voiceValueWrite.out.body)
+const tooLongValue = makeResponse()
+await setHandler(fakeRequest('POST', { key: 'ttsVoice', value: 'x'.repeat(500) }, JSON_HEADERS), tooLongValue)
+check('POST 拒绝过长的语音配置值', tooLongValue.out.status === 400
+  && JSON.parse(tooLongValue.out.body).reason.includes('太长'), tooLongValue.out.body)
 
 /**
  * ★ v0.6.7：数值控件（风控阈值）的写入校验。
@@ -2220,7 +2238,7 @@ const clientVersion = (() => {
         { id: 'account', label: 'QQ助手账号（登录 / 扫码）', href: '/qqai/account', hint: '机器人账号的扫码 / 登录状态页；**需要先运行 NapCat**（没起来就点上面的「启动 NapCat」），点开就是带 token 的地址，不用手输' },
         { id: 'changelog', label: '更新日志（v9.9.9）', href: 'https://example.invalid/CHANGELOG.md', hint: '每个版本的改动' },
         { id: 'readme-debug', label: '调试文档', href: 'https://example.invalid/docs/DEBUG.md', hint: 'trace / 回放 / 体检 / 注入的用法' },
-        { id: 'console', label: '调试台（独立控制台）', href: '/qqai/console', running: false, state: '未启动 · 需要单独运行：node x', hint: '调试台是独立进程' },
+        { id: 'console', label: '控制台（独立进程）', href: '/qqai/console', running: false, state: '未启动 · 需要单独运行：node x', hint: '调试台是独立进程' },
       ],
       groups: [{
         id: 'chat',
@@ -2390,7 +2408,7 @@ const clientVersion = (() => {
   check('组内顺序：账号第一 → 更新日志 → 调试文档 → 调试台压最底下，链接目标都挂上了',
     readyText.indexOf('QQ助手账号') < readyText.indexOf('更新日志')
     && readyText.indexOf('更新日志') < readyText.indexOf('调试文档')
-    && readyText.indexOf('调试文档') < readyText.indexOf('调试台')
+    && readyText.indexOf('调试文档') < readyText.indexOf('控制台（独立进程）')
     && ready.hrefs.includes('/qqai/account') && ready.hrefs.includes('/qqai/console'),
     ready.hrefs.join(' | '))
   check('账号入口在整份页面里只出现一次（不会组里 + 别处各来一条）',
@@ -2410,7 +2428,7 @@ const clientVersion = (() => {
     brief(accountRow.text.slice(-90)))
   const consoleRow = ready.linkRows.find((row) => row.href === '/qqai/console')
   check('调试台那一行同样整行可点（含"未启动 · 需要单独运行…"那段）',
-    consoleRow !== undefined && consoleRow.text.includes('调试台（独立控制台）')
+    consoleRow !== undefined && consoleRow.text.includes('控制台（独立进程）')
     && consoleRow.text.includes('未启动') && consoleRow.target === '_blank',
     brief(consoleRow))
   // 快捷操作（用户："不能自己快捷启动吗？比如加到哪个控制选项中"）：两个按钮，且状态跟着 napcat.running 走。
@@ -2477,7 +2495,7 @@ const clientVersion = (() => {
     && readyText.includes('quietHours（1 / 8 段）'),
     `timeInputs=${ready.inputs.filter((item) => item.type === 'time').length} buttons=${ready.buttons.map((b) => b.text).join('')}`)
   check('浅渲染：「相关链接」与调试台状态都渲染出来（链接目标查 href 属性）',
-    readyText.includes('更新日志（v9.9.9）') && readyText.includes('调试台（独立控制台）')
+    readyText.includes('更新日志（v9.9.9）') && readyText.includes('控制台（独立进程）')
     && ready.hrefs.includes('/qqai/console') && ready.hrefs.some((href) => href.includes('CHANGELOG.md'))
     && readyText.includes('未启动 · 需要单独运行：node x'),
     `${readyText.slice(0, 100)}  hrefs=${JSON.stringify(ready.hrefs)}`)

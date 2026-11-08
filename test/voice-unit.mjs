@@ -431,6 +431,7 @@ const hostServer = createServer(async (request, response) => {
   if (url.pathname === '/qqai/voice/status') return send({ ok: true, tts: { ready: true }, stt: { ready: true }, hostService: true })
   if (url.pathname === '/qqai/voice/tts') return send({ ok: true, audio: 'AAAA', format: 'wav', bytes: 3, ms: 12, provider: 'local' })
   if (url.pathname === '/qqai/voice/stt') return send({ ok: true, text: '你好', provider: 'dsh', bytes: 3, wavBytes: 10, ms: 20 })
+  if (url.pathname === '/qqai/panel/set-batch') return send({ ok: true, changed: true, keys: ['ttsEnabled'] })
   send({ ok: false, reason: 'unknown' })
 })
 await new Promise((resolve) => hostServer.listen(0, '127.0.0.1', resolve))
@@ -470,6 +471,26 @@ await sup.voiceStt({ audioBase64: 'YWJj', ext: 'ogg', language: 'ja' })
 check('代理：STT 语言覆盖也转发给宿主', JSON.parse(calls.at(-1).body).language === 'ja')
 await sup.voiceStt({ audioBase64: 'YWJj', ext: 'ogg', model: 'custom-asr' })
 check('代理：STT 模型覆盖也转发给宿主', JSON.parse(calls.at(-1).body).model === 'custom-asr')
+const toggled = await sup.voiceToggle({ tts: true })
+const toggleCall = calls.at(-1)
+check('代理：语音开关写宿主 /qqai/panel/set-batch',
+  toggled.ok === true && toggleCall.path === '/qqai/panel/set-batch'
+  && JSON.parse(toggleCall.body).entries.some((entry) => entry.key === 'ttsEnabled' && entry.value === true)
+  && toggleCall.token === 'host-token-1', toggleCall.body)
+const toggledProvider = await sup.voiceToggle({ ttsProvider: 'local' })
+check('代理：切换 TTS 后端写 ttsProvider',
+  toggledProvider.ok === true
+  && JSON.parse(calls.at(-1).body).entries.some((entry) => entry.key === 'ttsProvider' && entry.value === 'local'),
+  calls.at(-1).body)
+const badProvider = await sup.voiceToggle({ sttProvider: 'nope' })
+check('代理：未知 STT 后端被拒', badProvider.ok === false && badProvider.reason.includes('cloud'))
+const valuesWritten = await sup.voiceToggle({ values: { ttsVoice: 'nova', ttsLocalUrl: 'http://127.0.0.1:9880' } })
+check('代理：服务配置 values 转发给宿主',
+  valuesWritten.ok === true
+  && JSON.parse(calls.at(-1).body).entries.some((entry) => entry.key === 'ttsVoice' && entry.value === 'nova'),
+  calls.at(-1).body)
+const badValueKey = await sup.voiceToggle({ values: { nope: 'x' } })
+check('代理：未知服务配置键被拒', badValueKey.ok === false && badValueKey.reason.includes('nope'))
 const missingLog = createSupervisor({ ...supConfig, logs: { ...supConfig.logs, hostOut: join(proxyDir, 'nope.log') } }, { exec: noExec, logger: { info() {}, warn() {}, error() {} } })
 const missing = await missingLog.voiceStatus()
 check('找不到宿主（无日志 + 无候选端口）时说清原因', missing.ok === false && missing.reason.includes('找不到宿主'))
@@ -505,7 +526,7 @@ hostServer.close()
 
 // ------------------------------------------------- ③b 控制台 HTTP ----
 const token = createToken()
-const seen = { tts: 0, stt: 0, lastTts: null, lastStt: null }
+const seen = { tts: 0, stt: 0, lastTts: null, lastStt: null, toggle: null }
 const server = createControlServer({
   config: supConfig,
   token,
@@ -515,6 +536,7 @@ const server = createControlServer({
     voiceStatus: async () => ({ ok: true, tts: { ready: true }, stt: { ready: false, blockers: [] }, hostService: true }),
     voiceTts: async (args) => { seen.tts += 1; seen.lastTts = args; return { ok: true, audio: 'AAAA', text: args.text, bytes: 3, ms: 1, format: 'wav', provider: 'local', voice: args.voice, textLang: args.textLang } },
     voiceStt: async (args) => { seen.stt += 1; seen.lastStt = args; return { ok: true, text: `len-${args.audioBase64.length}-${args.ext}-${args.language ?? ''}` } },
+    voiceToggle: async (args) => { seen.toggle = args; return { ok: true, changed: true, reason: '已写入配置' } },
   },
   ui: '<h1>console</h1>',
   voiceUi: '<h1>语音页</h1>',
@@ -548,6 +570,22 @@ const bigAudio = 'A'.repeat(100 * 1024)
 const sttHttp = await (await fetch(`${base}/api/voice/stt?token=${token}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ audioBase64: bigAudio, ext: 'webm', language: 'ja' }) })).json()
 check('STT 接受 100 KB 的音频体（> 默认 64 KB 上限）', sttHttp.ok === true && sttHttp.text === `len-${bigAudio.length}-webm-ja`, sttHttp.text)
 check('接口把 STT 语言覆盖转给 supervisor', seen.lastStt.language === 'ja')
+const toggleHttp = await (await fetch(`${base}/api/voice/toggle?token=${token}`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tts: true }),
+})).json()
+check('接口把语音开关转给 supervisor', toggleHttp.ok === true && seen.toggle && seen.toggle.tts === true, JSON.stringify(seen.toggle))
+const providerHttp = await (await fetch(`${base}/api/voice/toggle?token=${token}`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ttsProvider: 'local' }),
+})).json()
+check('接口把 TTS 后端切换转给 supervisor', providerHttp.ok === true && seen.toggle.ttsProvider === 'local', JSON.stringify(seen.toggle))
+const valuesHttp = await (await fetch(`${base}/api/voice/toggle?token=${token}`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ values: { ttsVoice: 'nova' } }),
+})).json()
+check('接口把服务配置 values 转给 supervisor', valuesHttp.ok === true && seen.toggle.values?.ttsVoice === 'nova', JSON.stringify(seen.toggle))
+const badToggle = await (await fetch(`${base}/api/voice/toggle?token=${token}`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+})).json()
+check('语音开关空请求被挡下', badToggle.ok === false)
 check('语音接口需要 token', (await fetch(`${base}/api/voice/status`)).status === 401)
 check('语音接口拒绝跨站 Origin',
   (await fetch(`${base}/api/voice/status?token=${token}`, { headers: { Origin: 'https://evil.example' } })).status === 403)
@@ -578,6 +616,27 @@ for (const fn of ['loadVoiceStatus', 'renderStatus', 'testTts', 'toggleRecord', 
   if (!new RegExp(`(async )?function ${fn}\\(`).test(pageScript)) { failed++; console.log('FAIL', `语音页缺少函数 ${fn}`) }
 }
 check('语音页函数齐全', true)
+check('状态 pill 用「未启用 / 部分未启用」，不再写「都没启用」',
+  pageScript.includes("'未启用'") && pageScript.includes("'部分未启用'") && !pageScript.includes('都没启用'))
+check('语音开关有控件并接到 /api/voice/toggle',
+  voicePageHtml.includes('id="ttsEnabledToggle"') && voicePageHtml.includes('id="sttEnabledToggle"')
+  && pageScript.includes('function toggleVoice(') && pageScript.includes("api('/api/voice/toggle'")
+  && pageScript.includes('ttsToggle.checked = tts.enabled === true'))
+check('切换后自动刷新状态（宿主热重载 2–3 秒）',
+  /setTimeout\(\(\) => loadVoiceStatus\(false\), 3500\)/.test(pageScript))
+check('可切换 TTS/STT 后端（下拉 + 写入链路）',
+  voicePageHtml.includes('id="ttsProviderSelect"') && voicePageHtml.includes('id="sttProviderSelect"')
+  && pageScript.includes('function setVoiceProvider(') && pageScript.includes('ttsProvider: value')
+  && pageScript.includes('ttsProviderSelect.value = String(tts.provider'))
+check('服务配置可编辑（非密钥）并走 values 写入',
+  ['cfgTtsVoice', 'cfgTtsModel', 'cfgTtsLocalUrl', 'cfgTtsLocalRefAudio', 'cfgTtsLocalPromptText', 'cfgSttModel']
+    .every((id) => voicePageHtml.includes(`id="${id}"`))
+  && pageScript.includes('function saveVoiceConfig(') && pageScript.includes('values })'))
+check('语音页可直接启停本机语音服务（仅 local 后端）',
+  voicePageHtml.includes('id="voiceServiceStart"') && voicePageHtml.includes('id="voiceServiceStop"')
+  && pageScript.includes('function startVoiceService(') && pageScript.includes('function stopVoiceService(')
+  && pageScript.includes("api('/api/tts/start'") && pageScript.includes("api('/api/tts/stop'")
+  && pageScript.includes('button.disabled = !local'))
 check('语音页脚本可解析', (() => { try { new Function(pageScript); return true } catch { return false } })())
 check('页面请求三个语音接口',
   pageScript.includes("api('/api/voice/status')") && pageScript.includes("api('/api/voice/tts'") && pageScript.includes("api('/api/voice/stt'"))
@@ -605,6 +664,36 @@ check('音调：Azure 走 prosody、其它 provider 走内置变调',
   pageScript.includes("voiceProvider === 'azure' ? 'azurePitch' : 'pitch'") && voicePageHtml.includes('内置变调'))
 check('页面解释 16kHz 的来历（DSH 本地识别的硬要求）',
   voicePageHtml.includes('只接受') && voicePageHtml.includes('16kHz') && voicePageHtml.includes('训练采样率'))
+for (const id of ['presetSelect', 'presetFile']) {
+  if (!voicePageHtml.includes(`id="${id}"`)) { failed++; console.log('FAIL', `语音页缺少预设控件 #${id}`) }
+}
+check('导入是按钮（有框）且在导出左边',
+  voicePageHtml.includes("onclick=\"document.getElementById('presetFile').click()\">导入</button>")
+  && voicePageHtml.indexOf('>导入</button>') < voicePageHtml.indexOf('>导出</button>')
+  && !voicePageHtml.includes('<label class="meta" style="margin:0;cursor:pointer">'))
+check('细调预设：localStorage + 版本 1 + 读写/导入导出齐全',
+  pageScript.includes("const PRESET_KEY = 'qq-voice-presets-v1'")
+  && pageScript.includes('const PRESET_VERSION = 1')
+  && ['readPresets', 'writePresets', 'renderPresetOptions', 'applyOverrides', 'savePreset', 'applyPreset', 'deletePreset', 'exportPresets', 'importPresets']
+    .every((fn) => new RegExp(`function ${fn}\\(`).test(pageScript)))
+check('上次试听参数会记住并自动恢复',
+  pageScript.includes("const LAST_TUNE_KEY = 'qq-voice-tune-last-v1'")
+  && /rememberLastTune\(result\.provider/.test(pageScript) && /restoreLastTune\(tts\)/.test(pageScript))
+check('预设只影响试听（不写配置、不发 QQ）',
+  !/api\('\/api\/(config|send)/.test(pageScript) && pageScript.includes('只影响这次试听'))
+check('试听可下载/复制参数/复制对比表',
+  ['copyText', 'paramsJson', 'downloadAttempt', 'copyAttemptParams', 'copyAttemptsTable', 'copyLastTtsParams']
+    .every((fn) => new RegExp(`function ${fn}\\(`).test(pageScript))
+  && pageScript.includes('复制对比表') && pageScript.includes('download="voice-attempt-'))
+check('Ctrl+Enter 直接合成', /event\.key === 'Enter'/.test(pageScript)
+  && /addEventListener\('keydown'/.test(pageScript) && pageScript.includes("document.getElementById('voiceText')"))
+check('卡点全部列出（不只第一条）',
+  /function blockerHints\(part\)/.test(pageScript) && /\(part && part\.blockers\) \|\| \[\]\)\.map/.test(pageScript)
+  && !pageScript.includes('blockerTextOf'))
+check('状态自动刷新：15 秒轮询 + 切回/聚焦立即刷新',
+  pageScript.includes("setInterval(() => { if (!document.hidden) loadVoiceStatus(false); }, 15000)")
+  && pageScript.includes("addEventListener('visibilitychange'")
+  && pageScript.includes("window.addEventListener('focus'"))
 check('TTS 结果会显示实际采样率（WAV 头解析）',
   pageScript.includes('function wavSpec') && pageScript.includes('wavSpec(result.audio)'))
 check('试听保留最近 5 条用于 A/B（并释放旧 URL）',
@@ -617,10 +706,15 @@ check('结果文本统一转义', /escapeHtml\(result\.text/.test(pageScript) &&
 check('页面只调用 /api/voice（没有发 QQ 的旁路）', !/api\('\/api\/(inject|send|host|napcat|config)/.test(pageScript))
 check('没有 token 时给出说明', pageScript.includes("getElementById('tokenHint').style.display = ''"))
 const consoleUi = readUi(join(import.meta.dirname, '..', 'control', 'ui.html'))
-check('语音调试入口移到左侧导航（不再占右上角）',
-  consoleUi.includes('class="navitem voiceLink"') && consoleUi.includes('语音调试')
-  && /<header>[\s\S]*?<\/header>/.test(consoleUi) && !/<header>[\s\S]*?voiceLink[\s\S]*?<\/header>/.test(consoleUi))
-check('入口会带上 token', consoleUi.includes("voiceLink.href = '/voice?token='"))
+check('语音调试是控制台里的一个分组（不再单开一页）',
+  consoleUi.includes('data-tab="voice"') && consoleUi.includes('id="voiceFrame"') && consoleUi.includes('语音调试')
+  && !consoleUi.includes('class="navitem voiceLink"')
+  && !/<header>[\s\S]*?语音调试[\s\S]*?<\/header>/.test(consoleUi))
+check('iframe 懒加载并带 token / embed 参数',
+  /function loadVoiceFrame\(\)/.test(consoleUi)
+  && consoleUi.includes("'/voice?embed=1'") && consoleUi.includes('encodeURIComponent(token)'))
+check('语音页支持 embed 模式（隐藏大标题与回控制台）',
+  voicePageHtml.includes("classList.add('embed')") && voicePageHtml.includes('body.embed header .brand'))
 check('控制台不再内嵌语音卡（已挪到独立页）', !consoleUi.includes('id="voiceText"') && !consoleUi.includes('function loadVoice('))
 
 rmSync(dir, { recursive: true, force: true })

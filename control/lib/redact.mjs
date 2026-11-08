@@ -29,6 +29,28 @@ export function maskDigits(value) {
   return String(value).replace(/[\d０-９]{6,}/g, (digits) => `${digits.slice(0, 2)}${'*'.repeat(digits.length - 2)}`)
 }
 
+/**
+ * 掩码密钥（token / apiKey / Bearer / sk-…）。
+ *
+ * 为什么单独做：`maskDigits` 只盖数字，而 token 往往是字母数字混合——日志里
+ * `?token=abc123DEF` 或 `"token": "..."` 经它处理后会留下字母部分，诊断包发出去
+ * 仍然等于泄露。这里按"URL 参数 / JSON 字符串 / YAML 赋值 / Bearer / sk-"五种形态
+ * 统一打成 `<已隐藏>`，不依赖上下文。
+ */
+export function maskSecrets(value) {
+  return String(value)
+    // URL 查询参数：?token=… / &api_key=…
+    .replace(/([?&](?:token|access_token|api_key|apiKey)=)[^&\s"'<>]+/gi, '$1<已隐藏>')
+    // Authorization: Bearer …
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1<已隐藏>')
+    // OpenAI 风格 key
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, '<已隐藏>')
+    // JSON："token": "…" / "apiKey": "…"
+    .replace(/("(?:apiKey|api_key|token|secret|password)"\s*:\s*")[^"]*(")/gi, '$1<已隐藏>$2')
+    // YAML / INI：ttsApiKey: …（整行值）
+    .replace(/(^\s*[\w.-]*(?:apiKey|token|secret|password)\s*:\s*)\S.*$/gim, '$1<已隐藏>')
+}
+
 /** 数字型 QQ 号：保留前两位、其余补 0（`100000001` → `100000000`）。 */
 export function maskNumber(value) {
   const text = String(value)
@@ -42,6 +64,8 @@ export function redactObject(value) {
     const out = {}
     for (const [key, item] of Object.entries(value)) {
       const safeKey = maskDigits(key)   // 键名本身也可能是 QQ 号（如积分/统计里以号做键）
+      // 密钥类字段整段打码：不管值是字符串还是对象，都不留在诊断包里。
+      if (/token|api[_-]?key|secret|password/i.test(key)) { out[safeKey] = '<已隐藏>'; continue }
       if (typeof item === 'string' && TEXT_KEYS.has(key)) { out[safeKey] = REDACTED_TEXT(item.length); continue }
       if (NUMERIC_KEEP.has(key)) { out[safeKey] = item; continue }
       out[safeKey] = redactObject(item)
@@ -49,7 +73,7 @@ export function redactObject(value) {
     return out
   }
   if (typeof value === 'number') return maskNumber(value)
-  if (typeof value === 'string') return maskDigits(value)
+  if (typeof value === 'string') return maskSecrets(maskDigits(value))
   return value
 }
 
@@ -60,7 +84,7 @@ export function redactJsonLine(line) {
   try {
     return JSON.stringify(redactObject(JSON.parse(trimmed)))
   } catch {
-    return maskDigits(line)
+    return maskSecrets(maskDigits(line))
   }
 }
 
@@ -87,7 +111,7 @@ export function redactByKind(name, text) {
 /** 日志脱敏：数字掩码 + 冒号后的正文替换为长度占位（保留时间戳/阶段，去掉内容）。 */
 export function redactLog(text) {
   return String(text).split(/\r?\n/).map((line) => {
-    const masked = maskDigits(line)
+    const masked = maskSecrets(maskDigits(line))
     const cut = masked.indexOf(': ')
     if (cut < 0 || masked.length - cut - 2 < 8) return masked
     const head = masked.slice(0, cut + 2)
@@ -100,7 +124,7 @@ export function redactLog(text) {
 export function redactionNote() {
   return {
     redacted: true,
-    policy: 'QQ 号按位掩码（保留前两位，含全角数字与键名）；text/content/reason 等字段整体替换为长度；日志行冒号后的正文替换为长度；时间戳与计数类字段保持不变以保留时间线',
+    policy: 'QQ 号按位掩码（保留前两位，含全角数字与键名）；text/content/reason 等字段整体替换为长度；日志行冒号后的正文替换为长度；token / apiKey / Bearer / sk-… 一律替换为 <已隐藏>；时间戳与计数类字段保持不变以保留时间线',
     generatedAt: new Date().toISOString(),
   }
 }

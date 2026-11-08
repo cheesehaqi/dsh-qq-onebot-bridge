@@ -220,6 +220,11 @@ check('③ 如实反映"还没跑过回放"（证据不足/告警都在允许范
 check('真实快照进了关键事实', generated.report.facts.some((fact) => fact.value === 'v0.8.5'))
 check('健康检查接口形状稳定（report/text/ok）',
   Object.keys(generated).sort().join(',') === 'ok,report,text')
+const healthHistory = sup.healthHistory({ limit: 5 })
+check('体检历史落盘并可倒序读回',
+  healthHistory.ok === true && healthHistory.entries.length >= 1
+  && healthHistory.entries[0].at > 0 && typeof healthHistory.entries[0].verdict === 'string',
+  healthHistory.file)
 const forced = await sup.healthReport({ force: true })
 check('force 选项可用且不改变结构', forced.report.constraints.length === 6)
 
@@ -237,6 +242,11 @@ const server = createControlServer({
       seen.push(options)
       return { ok: fakeReport.ok, report: fakeReport, text: formatHealthReport(fakeReport) }
     },
+    healthHistory: async ({ limit }) => ({
+      ok: true,
+      file: 'qq-health-history.jsonl',
+      entries: [{ at: 1_700_000_000_000, verdict: 'healthy', ok: true, checks: { total: 3, passed: 3, failed: 0 }, constraints: null }].slice(0, limit),
+    }),
   },
   ui: '<h1>console</h1>',
   reportUi: '<h1>报告页</h1>',
@@ -252,6 +262,12 @@ check('接口带 ok 字段且与报告一致', body.ok === true)
 check('默认不强制刷新体检缓存', seen.length === 1 && seen[0].force === false, JSON.stringify(seen[0]))
 await fetch(`${base}/api/report?fresh=1&token=${token}`)
 check('fresh=1 透传成 force=true', seen[1].force === true, JSON.stringify(seen[1]))
+const historyResponse = await fetch(`${base}/api/health/history?limit=5&token=${token}`)
+const historyBody = await historyResponse.json()
+check('GET /api/health/history 返回体检趋势点',
+  historyResponse.status === 200 && historyBody.ok === true && Array.isArray(historyBody.entries)
+  && historyBody.entries.length === 1 && historyBody.entries[0].checks.passed === 3,
+  JSON.stringify(historyBody.entries?.[0] ?? {}))
 check('报告接口需要 token', (await fetch(`${base}/api/report`)).status === 401)
 check('报告接口拒绝跨站 Origin',
   (await fetch(`${base}/api/report?token=${token}`, { headers: { Origin: 'https://evil.example' } })).status === 403)

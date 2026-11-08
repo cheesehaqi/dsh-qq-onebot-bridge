@@ -1,5 +1,67 @@
 # 更新日志 / Changelog
 ## v0.8 系列 —— 本地账号中心 / Local Account Center
+### v0.8.7（2026-11-09）— Ctrl+K 命令面板 / 语音页 / 体检趋势 / 隐私加固
+
+卡片涨到 15 张、分六组之后，翻侧栏和滚动还是费劲。加一个全局命令面板（交互与账号中心的 Ctrl+K 一致）：
+
+- **`Ctrl+K`（macOS `⌘K`）打开/关闭**，`Esc` 关闭；输入即过滤，`↑`/`↓` 选择，回车执行；
+- **侧栏顶部有可见入口**「🔍 搜索 / 跳转 `Ctrl K`」：不靠键盘也能发现，点一下就能打开面板；侧栏脚注也写着 `Ctrl+K 搜索 / 跳转`；
+- **侧栏选中块会跟着当前分组滑动**：按真实 `offsetTop`/`offsetHeight` 计算（文字换行也不会错位），窄屏横排时自动隐藏，`prefers-reduced-motion` 时不做动画；
+- 三类条目：
+  · **分组**：切到六个 tab 之一；
+  · **卡片**：跳到指定卡片（复用 `focusCard()`，会自动切到它所在分组再滚动高亮）；
+  · **动作**：刷新状态 / 一键体检 / 导出诊断包 / 打开体检报告 / 打开语音调试；
+- 点击遮罩关闭；没有匹配项时明确显示「没有匹配项」，不会静默。
+- 测试：`test/console-layout-unit.mjs` 增 13 条（面板元素与默认隐藏、五个函数、Ctrl+K/Esc、条目覆盖六组+卡片+动作、上下键/回车、复用 focusCard、侧栏入口与 kbd 提示、脚注说明、选中块对位/随组移动/首屏无动画）。
+
+### 启动语音服务修复
+
+- **不再执行交互式 `TTS控制.bat`**：那个 bat 被存成了 UTF-8 无 BOM，cmd 按 GBK 解析会把中文行拆成
+  「'xxx' 不是内部或外部命令」——菜单根本起不来（2026-11-09 真机截图）；
+- 改为**直接拉起** `GPT-SoVITS\.venv\Scripts\python.exe <dir>\api_v2.py -a 127.0.0.1 -p 9880`（输出进
+  `qq-tts-out.log` / `qq-tts-err.log`），启动后最多等 20 秒确认 9880 是否监听：起来了说“已启动”，
+  没起来说“还在加载模型 / 看 err 日志”，不再盲报成功；找不到 venv/api 才回退到启动脚本；
+- 测试：`test/control-unit.mjs`（183 条）新增「启动语音服务直接拉 api_v2.py」。
+- **改用 `pythonw.exe` 启动**：`python.exe` 在控制台窗口被隐藏/关闭时会触发 Intel Fortran 运行时的
+  `forrtl: error (200): program aborting due to window-CLOSE event` 并直接中止（真机 03:33 复现）；
+  `pythonw.exe` 没有控制台窗口，实测 65 秒内完成加载并监听 9880。
+- **命名统一**：控制台按钮、配置项与诊断项从「GPT-SoVITS」改为**「语音服务（GPT-SoVITS）」**（按钮简称「启动语音服务 / 停止语音服务」），避免把其中一个 TTS 后端当成整个语音模块；
+- 面板「相关链接」里的「调试台（独立控制台）」改为**「控制台（独立进程）」**（README / DEBUG 同步）。
+
+### 隐私加固
+
+- **控制台启动日志打码**：`qq-control.mjs` 打印的地址统一为 `token=<已隐藏>`；`--open` 仍用内部带 token 的地址打开，token 只留在被忽略的 `qq-control.json`，不再写进 `qq-control-out.log`；
+- **诊断包脱敏覆盖密钥**：`control/lib/redact.mjs` 新增 `maskSecrets()`，对 URL 参数、JSON 的 token/apiKey 字段、YAML 赋值、`Bearer …`、`sk-…` 统一替换为 `<已隐藏>`（原先只掩码数字，字母数字 token 会漏字母）；
+- 文档同步：README / README.en、HANDOFF；`test/privacy-unit.mjs` 42 条（+2）、`test/control-unit.mjs` 183 条（+1）。
+
+### 体检趋势（诊断与报告）
+
+- 每次**真正扫了一轮**体检（`/api/diagnose` 或 `/api/report` 触发的 `diagnose()`）追加一行
+  `qq-health-history.jsonl`（时间 / 结论 / 通过数 / 阻断数；缓存命中不重复记，256 KB 封顶）；
+- **`GET /api/health/history?limit=30`**（token + Origin 同其它接口）；
+- 控制台「诊断与报告」新增**「体检趋势」卡**：最近 30 个点按时间倒序，显示结论、通过 `n/total`、阻断数，
+  以及相对上一次的失败数变化（`+1` / `-1` / 持平）；30 秒自动刷新，并显示历史文件路径；
+- 测试：`test/report-unit.mjs`（87 条，新增历史落盘/倒序读回/HTTP）、`test/console-layout-unit.mjs`（40 条，新增趋势卡与定时刷新断言）。
+
+### 语音调试并入控制台（不再单开一页）
+
+- 侧栏的「🎙️ 语音调试」从**外链**改成控制台里的一个**分组**（`data-tab="voice"`），点它只切 tab，不再开新页面；
+- 分组内容用 iframe **懒加载** `/voice?embed=1`：第一次切过去才发请求，带 token；`embed=1` 时隐藏大标题与「回控制台」，只留状态条/刷新；
+- `/voice` 仍保留（收藏、深链、直接打开都行），页面代码没有被复制进控制台；
+- 状态 pill 文案：TTS/STT 都关 = **未启用**，只关一个 = **部分未启用**（原来写「都没启用」，读起来像在抱怨而不是一个明确状态）；
+- **细调预设**：当前参数可保存为命名预设（存本浏览器 `localStorage`，支持导入/导出 JSON、同名覆盖、删除），一键应用；
+- **上次试听参数自动恢复**：刷新/重开页面后按 provider 匹配恢复（不写配置、不发 QQ）；
+- **试听可带走**：每条记录可下载音频（wav/mp3）、复制参数 JSON，最近记录可一键复制 Markdown 对比表；输入框支持 **Ctrl+Enter** 直接合成；
+- 预设的「导入 / 导出」都是按钮（导入原来只是隐藏 file input 的 label，看着像一行纯文字），顺序改为**先导入后导出**；
+- **卡点全部列出**（不再只显示第一条：开关关着 + 没配 key 会同时/依次消失），**状态每 15 秒自动刷新**，切回页面/聚焦立即刷新——在 DSH 设置里改完开关不用手动点「刷新状态」；
+- **页内新增语音模块开关**「语音回复（TTS）」「语音转文字（STT）」与**后端下拉**：TTS 可切 `azure / openai / local`，STT 可切 `dsh / cloud`；
+  写入 `ttsEnabled / sttEnabled / ttsProvider / sttProvider`（走宿主 `/qqai/panel/set-batch`，校验 + 批量写 + 防抖热重载），改完 2–3 秒自动刷新状态，不用再跳 DSH 设置页；
+- **写入白名单放行后端键**：`ttsProvider` / `sttProvider` 不在 QQ助手面板行里，`panel/set(-batch)` 现在单独放行这两把键并按枚举校验；
+  `lib/panel.js` 的 `upsertPatchValue` 增加 `allowString`（默认关，只对这两把键放行），字符串写成带引号的 YAML；**面板 217–247 行的锚点未受影响**；
+- **页内「服务配置」**：音色（ttsVoice）、TTS 模型、本地服务地址、参考音频路径、参考文本、STT 模型都可直接改（只提交填了值的字段，空 = 不改），走 `values` 写入；**密钥仍只在 DSH 设置页改**；
+- **页内直接启停语音服务**（仅 TTS 后端 = local 时可用）：调控制台 `/api/tts/start|stop`，启动后 5/20/40 秒自动刷新状态（首次加载模型约 60 秒）；
+- 测试：`test/voice-unit.mjs`（152 条）补「语音是控制台分组 / iframe 懒加载带 token / embed 模式 / 状态文案 / 预设与恢复 / 下载与复制 / 导入按钮 / 全部卡点与自动刷新 / 语音开关与后端切换 / 服务配置 / 页内启停」；`test/settings-unit.mjs`（297 条）补「后端键放行 / 非法值拒绝 / 文本配置写入与长度上限」；`test/console-layout-unit.mjs`（40 条）补「七个分组」「语音分组 iframe」「体检趋势」。
+
 
 ### v0.8.6（2026-11-08）— 体检报告 / 设置变更历史 / 语音调试 / 调试台布局
 

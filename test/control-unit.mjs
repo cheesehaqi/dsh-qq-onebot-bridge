@@ -174,6 +174,26 @@ check('缺 napcatBat 时 startNapcat 明确报错', (await noNapcat.startNapcat(
 const missingNapcat = createSupervisor({ ...config, napcatBat: join(dir, 'none.bat') }, { exec: okExec, exists: () => false })
 check('napcatBat 不存在时明确报错', (await missingNapcat.startNapcat()).reason.includes('不存在'))
 
+// GPT-SoVITS：优先直接拉起 api_v2.py（交互 bat 在 UTF-8 下会被 cmd 拆成乱码命令）
+const ttsDir = join(dir, 'GPT-SoVITS')
+mkdirSync(join(ttsDir, '.venv', 'Scripts'), { recursive: true })
+writeFileSync(join(ttsDir, '.venv', 'Scripts', 'python.exe'), '')
+writeFileSync(join(ttsDir, '.venv', 'Scripts', 'pythonw.exe'), '')
+writeFileSync(join(ttsDir, 'api_v2.py'), '')
+let ttsSpawn = null
+const ttsSupervisor = createSupervisor(
+  { ...config, cwd: dir, ttsBat: join(ttsDir, 'TTS控制.bat'), ports: { ...DEFAULT_PORTS, tts: 9880 } },
+  {
+    exec: okExec,
+    ttsWaitMs: 0,
+    spawnImpl: (command, args, options) => { ttsSpawn = { command, args, options }; return { pid: 4242, unref() {} } },
+  },
+)
+const ttsStarted = await ttsSupervisor.startTts()
+check('启动 GPT-SoVITS 直接拉 api_v2.py（不跑交互 bat）',
+  ttsStarted.ok === true && ttsSpawn !== null && ttsSpawn.command.endsWith('pythonw.exe')
+  && ttsSpawn.args.some((arg) => String(arg).endsWith('api_v2.py')) && ttsSpawn.args.includes('9880'), ttsStarted.reason)
+
 // 个人 QQ 在跑但 NapCat 没跑 → 绝不能杀
 const personalQqExec = (command, args, options, callback) => {
   const done = typeof options === 'function' ? options : callback
@@ -698,6 +718,13 @@ check('ui.html 里有二维码卡片与 token 缺失提示',
   readFileSync(join(here0, '..', 'control', 'ui.html'), 'utf8').includes('loadQr')
   && readFileSync(join(here0, '..', 'control', 'ui.html'), 'utf8').includes('地址里没有 token'),
   'ui.html')
+
+// 启动日志打码：token 只留在 qq-control.json，不进 stdout/日志（--open 仍用带 token 的内部 URL）
+const consoleCliSource = readFileSync(join(here0, '..', 'control', 'bin', 'qq-control.mjs'), 'utf8')
+check('控制台启动日志不打印 token（地址统一打码）',
+  consoleCliSource.includes('$1<已隐藏>') && consoleCliSource.includes('masked(url)')
+  && consoleCliSource.includes('masked(accountsUrl)') && consoleCliSource.includes('openPanel(url)'),
+  'qq-control.mjs')
 
 rmSync(dir, { recursive: true, force: true })
 

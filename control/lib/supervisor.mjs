@@ -331,6 +331,18 @@ export function publicConfig(config) {
     ports: { ...config.ports },
   }
 }
+/** 语音页「服务配置」允许写的**非密钥**文本键（长度上限；密钥不在内）。 */
+const VOICE_VALUE_LIMITS = {
+  ttsVoice: 120,
+  ttsBaseUrl: 300,
+  ttsModel: 120,
+  ttsLocalUrl: 300,
+  ttsLocalRefAudio: 400,
+  ttsLocalPromptText: 400,
+  sttModel: 120,
+  sttBaseUrl: 300,
+}
+
 /**
  * The real supervisor: every action re-inspects the machine first, so a stale
  * PID can never be killed and a busy port is reported instead of half-started.
@@ -652,8 +664,60 @@ export function createSupervisor(config, deps = {}) {
     return { ok: done.length > 0, reason: done.length > 0 ? `已结束 NapCat（含其 QQ 子进程）：${done.join('、')}` : '没有可结束的进程' }
   }
 
+  async function waitForTtsPort(port, waitMs) {
+    const deadline = Date.now() + Math.max(0, Number(waitMs) || 0)
+    while (true) {
+      const snapshot = await inspectNow()
+      if (portRow(snapshot, 'tts')?.listening === true) return true
+      if (Date.now() >= deadline) return false
+      await new Promise((resolve) => { const timer = setTimeout(resolve, 1500); timer.unref?.() })
+    }
+  }
+
+  /**
+   * 启动本地 GPT-SoVITS。
+   *
+   * 2026-11-09 真机：`TTS控制.bat` 被存成了 UTF-8 无 BOM，cmd 按 GBK 解析会把中文行拆成
+   * 「'xxx' 不是内部或外部命令」——菜单根本起不来。所以这里**优先直接拉起 api_v2.py**
+   * （venv 里的 python + 绝对路径 api_v2.py，输出进 qq-tts-out/err.log），
+   * 只有找不到 venv/api 时才回退到原来的启动脚本。
+   */
   async function startTts() {
-    if (!config.ttsBat) return { ok: false, reason: '未配置 GPT-SoVITS 启动脚本（ttsBat）' }
+    const port = Number(config.ports?.tts ?? 9880)
+    const bat = config.ttsBat || ''
+    const dir = bat ? dirname(bat) : ''
+    const python = dir ? join(dir, '.venv', 'Scripts', 'python.exe') : ''
+    const pythonw = dir ? join(dir, '.venv', 'Scripts', 'pythonw.exe') : ''
+    const api = dir ? join(dir, 'api_v2.py') : ''
+    // 优先 pythonw：没有控制台窗口，才不会出现 Intel Fortran 运行时的
+    // `forrtl: error (200): program aborting due to window-CLOSE event`（窗口被关/被隐藏时触发）。
+    const launcher = pythonw && fileExists(pythonw, deps) ? pythonw : python
+    if (launcher && api && fileExists(launcher, deps) && fileExists(api, deps)) {
+      const cwd = config.cwd || process.cwd()
+      try {
+        const { pid } = startDetached({
+          command: launcher,
+          args: [api, '-a', '127.0.0.1', '-p', String(port)],
+          cwd: dir,
+          outFile: join(cwd, 'qq-tts-out.log'),
+          errFile: join(cwd, 'qq-tts-err.log'),
+          spawnImpl,
+        })
+        const waitMs = Number(deps.ttsWaitMs ?? 20_000)
+        if (waitMs <= 0) return { ok: true, pid, reason: `已拉起语音服务（GPT-SoVITS，PID ${pid}，127.0.0.1:${port}）` }
+        const ready = await waitForTtsPort(port, waitMs)
+        if (ready) return { ok: true, pid, reason: `已启动语音服务（GPT-SoVITS，PID ${pid}，监听 127.0.0.1:${port}）` }
+        return {
+          ok: true,
+          pid,
+          pending: true,
+          reason: `已拉起语音服务（GPT-SoVITS，PID ${pid}），${port} 还没监听 —— 首次加载模型约 30–60 秒，稍后刷新状态；失败看 qq-tts-err.log`,
+        }
+      } catch (error) {
+        return { ok: false, reason: `启动失败：${error.message}` }
+      }
+    }
+    if (!config.ttsBat) return { ok: false, reason: '未配置语音服务启动脚本（ttsBat），也找不到 venv 里的 api_v2.py' }
     if (!fileExists(config.ttsBat, deps)) return { ok: false, reason: `启动脚本不存在：${config.ttsBat}` }
     try {
       const { pid } = startDetached({
@@ -662,7 +726,7 @@ export function createSupervisor(config, deps = {}) {
         cwd: config.cwd || undefined,
         spawnImpl,
       })
-      return { ok: true, pid, reason: '已请求启动 GPT-SoVITS' }
+      return { ok: true, pid, reason: '已请求启动语音服务（走启动脚本；若窗口里是乱码命令，说明该 .bat 不是 GBK/带 BOM 的 UTF-8）' }
     } catch (error) {
       return { ok: false, reason: `启动失败：${error.message}` }
     }
@@ -671,7 +735,7 @@ export function createSupervisor(config, deps = {}) {
   async function stopTts() {
     const snapshot = await inspectNow()
     const row = portRow(snapshot, 'tts')
-    if (!row?.listening) return { ok: false, reason: 'GPT-SoVITS 未在运行（9880 无监听）' }
+    if (!row?.listening) return { ok: false, reason: '语音服务未在运行（9880 无监听）' }
     // 只杀占用 9880 的那个进程，绝不动其它 python。
     const result = await freePort('tts')
     return result
@@ -679,7 +743,7 @@ export function createSupervisor(config, deps = {}) {
 
   async function stopAll() {
     const results = []
-    for (const [label, action] of [['宿主', stopHost], ['NapCat', stopNapcat], ['GPT-SoVITS', stopTts]]) {
+    for (const [label, action] of [['宿主', stopHost], ['NapCat', stopNapcat], ['语音服务', stopTts]]) {
       try {
         const result = await action()
         results.push(`${label}：${result.ok ? '已停止' : result.reason}`)
@@ -753,6 +817,16 @@ export function createSupervisor(config, deps = {}) {
     })
     const value = { ok: report.summary.blockers === 0, report, text: formatDiagnose(report) }
     diagnoseCache = { at: nowMs, value }
+    // 体检趋势：每次**真正扫了一轮**才记一个点（缓存命中不重复记）
+    try {
+      appendCappedLine(healthHistoryFile(), JSON.stringify({
+        at: value.report.generatedAt ?? nowMs,
+        verdict: value.report.summary?.verdict ?? '',
+        ok: value.ok,
+        checks: value.report.summary ?? null,
+        constraints: null,
+      }), { maxBytes: 256 * 1024, keepBytes: 128 * 1024 })
+    } catch { /* 历史写不进去不影响体检本身 */ }
     return value
   }
 
@@ -855,7 +929,22 @@ export function createSupervisor(config, deps = {}) {
       runtime: runtime(),
       generatedAt: now(),
     })
-    return { ok: report.ok, report, text: formatHealthReport(report) }
+    return { ok: report.ok, report, text: formatHealthReport(report) }  }
+
+  const healthHistoryFile = () => join(config.cwd || process.cwd(), 'qq-health-history.jsonl')
+
+  /** 最近 N 次体检（最新在前）：控制台「体检趋势」卡用。 */
+  function healthHistory({ limit = 30 } = {}) {
+    const max = Math.min(200, Math.max(1, Number(limit) || 30))
+    const lines = tailLines(healthHistoryFile(), max * 2)
+    const entries = []
+    for (const line of lines) {
+      try {
+        const item = JSON.parse(line)
+        if (item && typeof item.at === 'number') entries.push(item)
+      } catch { /* 跳过坏行 */ }
+    }
+    return { ok: true, file: healthHistoryFile(), entries: entries.slice(-max).reverse() }
   }
 
   // ---------------------------------------------------- 设置项变更历史 ----
@@ -1012,6 +1101,48 @@ export function createSupervisor(config, deps = {}) {
   }
 
   async function voiceStatus() { return await voiceCall('/qqai/voice/status') }
+  /**
+   * 开关语音模块（ttsEnabled / sttEnabled）。
+   *
+   * 为什么不直接写本地文件：插件配置的真源是 profile 里的 `cordis.patch.yml`，
+   * 宿主已经有一套**校验 + 批量写入 + 防抖热重载**的 `/qqai/panel/set-batch`（面板开关走的就是它），
+   * 这里只需把两个布尔键丢过去，避免控制台自己拼 YAML 写坏配置。
+   */
+  async function voiceToggle({ tts, stt, ttsProvider, sttProvider, values } = {}) {
+    const entries = []
+    if (typeof tts === 'boolean') entries.push({ key: 'ttsEnabled', value: tts })
+    if (typeof stt === 'boolean') entries.push({ key: 'sttEnabled', value: stt })
+    if (ttsProvider !== undefined) {
+      if (!['azure', 'openai', 'local'].includes(ttsProvider)) {
+        return { ok: false, reason: `不支持的 TTS 后端：${ttsProvider}（只能是 azure / openai / local）` }
+      }
+      entries.push({ key: 'ttsProvider', value: ttsProvider })
+    }
+    if (sttProvider !== undefined) {
+      if (!['dsh', 'cloud'].includes(sttProvider)) {
+        return { ok: false, reason: `不支持的 STT 后端：${sttProvider}（只能是 dsh / cloud）` }
+      }
+      entries.push({ key: 'sttProvider', value: sttProvider })
+    }
+    if (values && typeof values === 'object' && !Array.isArray(values)) {
+      for (const [key, raw] of Object.entries(values)) {
+        const limit = VOICE_VALUE_LIMITS[key]
+        if (limit === undefined) return { ok: false, reason: `不支持的语音配置键：${key}` }
+        const text = String(raw ?? '').trim()
+        if (text.length > limit) return { ok: false, reason: `${key} 太长（最多 ${limit} 字，收到 ${text.length}）` }
+        entries.push({ key, value: text })
+      }
+    }
+    if (entries.length === 0) return { ok: false, reason: '没有要切换的语音设置' }
+    const result = await voiceCall('/qqai/panel/set-batch', { method: 'POST', body: { entries } })
+    if (result.ok !== true) return result
+    return {
+      ok: true,
+      changed: result.changed === true,
+      keys: entries.map((entry) => entry.key),
+      reason: result.changed === true ? '已写入配置，宿主会在 2–3 秒内热重载' : '已经是这个值，无需修改',
+    }
+  }
   async function voiceTts({ text = '', overrides = null, voice = '', textLang = '' } = {}) {
     const clean = overrides && typeof overrides === 'object' && Array.isArray(overrides) === false ? overrides : {}
     return await voiceCall('/qqai/voice/tts', {
@@ -1270,9 +1401,9 @@ export function createSupervisor(config, deps = {}) {
     traceStats,
     // v0.7.11：账号中心（本地网站）。每次调用都重读 webui.json —— 用户可能刚在别处改过 token/端口。
     accounts: createAccountsApi({ napcatBat: config.napcatBat }),
-    traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance, healthReport,
+    traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance, healthReport, healthHistory,
     settingsSnapshot, recordSettingsChange, settingsHistory,
-    voiceStatus, voiceTts, voiceStt,
+    voiceStatus, voiceTts, voiceStt, voiceToggle,
     inboxList, replay, inject, clearQueue, archiveStats, archiveSearch,
     perf, jobsView, groups,
     // 每个调用方（每个 SSE 连接）拿一份独立 tailer：共用模块级单例会让两个面板互相"偷"事件，

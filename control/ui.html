@@ -20,11 +20,20 @@
   .app { display:grid; grid-template-columns:210px minmax(0,1fr); min-height:100vh; }
   aside#nav { position:sticky; top:57px; align-self:start; max-height:calc(100vh - 57px); overflow:auto;
     display:flex; flex-direction:column; gap:2px; padding:12px 10px; background:var(--panel); border-right:1px solid var(--line); }
-  aside#nav .navitem { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px;
+  aside#nav .navitem { position:relative; z-index:1; display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px;
     color:var(--dim); cursor:pointer; font-size:13px; border:1px solid transparent; text-decoration:none; }
   aside#nav .navitem:hover { background:#1d2a38; color:var(--fg); }
-  aside#nav .navitem.active { background:#1d2a38; color:var(--accent); border-color:var(--line); font-weight:600; }
+  aside#nav .navitem.active { background:transparent; color:var(--accent); border-color:transparent; font-weight:600; }
+  /* 动态选中块：跟着当前分组滑动（高度/位移都由 moveNavGlow() 按真实布局算），active 项只负责文字颜色 */
+  #navGlow { position:absolute; left:10px; right:10px; top:0; height:0; border-radius:8px; opacity:0; pointer-events:none;
+    background:#1d2a38; border:1px solid var(--line); box-shadow:0 0 18px rgba(108,192,255,.10);
+    transition:transform .18s cubic-bezier(.2,.7,.3,1), height .18s ease, opacity .18s ease; }
+  @media (prefers-reduced-motion: reduce) { #navGlow { transition:none; } }
   aside#nav .navitem .ico { width:18px; text-align:center; }
+  /* 侧栏的「搜索 / 跳转」是 button，去掉浏览器默认外观、和导航项保持一致 */
+  aside#nav button.navitem { width:100%; background:transparent; font:inherit; text-align:left; }
+  aside#nav kbd { margin-left:auto; font-size:11px; line-height:1.6; border:1px solid var(--line); border-bottom-width:2px;
+    border-radius:4px; padding:0 5px; color:var(--dim); background:#0d1117; }
   aside#nav .foot { margin-top:10px; padding:6px 10px; color:var(--dim); font-size:11.5px; line-height:1.5; }
   /* 单列铺开：卡片高度差太大，两列布局会在行尾留下大块空白（尤其页面上还有整行宽的卡片），
      分组之后每页只剩 2–4 张卡，单列反而更好读；宽度跟窗口走，别在超宽屏右侧空一大条。 */
@@ -96,14 +105,18 @@
 
 <div class="app">
   <aside id="nav">
+    <div id="navGlow"></div>
+    <button id="paletteOpen" class="navitem" type="button" title="搜索分组 / 卡片 / 动作（Ctrl+K）">
+      <span class="ico">🔍</span>搜索 / 跳转 <kbd>Ctrl K</kbd>
+    </button>
     <div class="navitem active" data-tab="overview" onclick="showTab('overview')"><span class="ico">📊</span>总览</div>
     <div class="navitem" data-tab="live" onclick="showTab('live')"><span class="ico">📡</span>实时事件</div>
     <div class="navitem" data-tab="diagnose" onclick="showTab('diagnose')"><span class="ico">🩺</span>诊断与报告</div>
     <div class="navitem" data-tab="replay" onclick="showTab('replay')"><span class="ico">⏯️</span>录制 · 回放 · 注入</div>
     <div class="navitem" data-tab="data" onclick="showTab('data')"><span class="ico">🗂️</span>数据与任务</div>
     <div class="navitem" data-tab="logs" onclick="showTab('logs')"><span class="ico">🪵</span>日志</div>
-    <a class="navitem voiceLink" href="/voice"><span class="ico">🎙️</span>语音调试</a>
-    <div class="foot">右上角：刷新 / 一键体检 / 导出诊断包 / 体检报告<br />只连 127.0.0.1；所有接口都要 token</div>
+    <div class="navitem" data-tab="voice" onclick="showTab('voice')"><span class="ico">🎙️</span>语音调试</div>
+    <div class="foot">右上角：刷新 / 一键体检 / 导出诊断包 / 体检报告<br />Ctrl+K 搜索 / 跳转 · 只连 127.0.0.1，所有接口都要 token</div>
   </aside>
   <main>
   <section class="card" data-tab="overview">
@@ -125,8 +138,8 @@
     <div class="row">
       <button onclick="act('/api/napcat/start')">启动 NapCat</button>
       <button class="danger" id="napcatStopBtn" onclick="act('/api/napcat/stop')">停止 NapCat（含其 QQ 子进程）</button>
-      <button onclick="act('/api/tts/start')">启动 GPT-SoVITS</button>
-      <button class="danger" onclick="act('/api/tts/stop')">停止 GPT-SoVITS</button>
+      <button onclick="act('/api/tts/start')" title="语音服务：GPT-SoVITS api_v2（127.0.0.1:9880）">启动语音服务</button>
+      <button class="danger" onclick="act('/api/tts/stop')" title="停止语音服务（GPT-SoVITS）">停止语音服务</button>
     </div>
     <div class="row">
       <button class="danger" onclick="act('/api/all/stop')">全部停止</button>
@@ -139,7 +152,7 @@
       <label class="meta">宿主工作目录<input id="cfgCwd" /></label>
       <label class="meta">dsh bin.js 路径<input id="cfgDshBin" /></label>
       <label class="meta">NapCat 启动脚本<input id="cfgNapcatBat" placeholder="…\NapCat\bootmain\launcher.bat" /></label>
-      <label class="meta">GPT-SoVITS 启动脚本<input id="cfgTtsBat" /></label>
+      <label class="meta">语音服务启动脚本<input id="cfgTtsBat" /></label>
     </div>
     <!--
       这段提示是 issue #2 的直接产物：用户按报错里的 "shimFile" 去文件夹里翻了五小时。
@@ -216,6 +229,15 @@
       <span class="meta" id="historyCount"></span>
     </div>
     <div id="history" class="meta">（加载中…）</div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1" data-tab="diagnose" id="healthTrendCard">
+    <h2>体检趋势 <span class="meta" id="healthTrendMeta">（最近 30 次体检：结论 / 通过数 / 阻断数，来自 qq-health-history.jsonl）</span></h2>
+    <div class="row">
+      <button onclick="loadHealthHistory(true)">刷新</button>
+      <span class="meta" id="healthTrendState"></span>
+    </div>
+    <div id="healthTrend" class="meta">（加载中…）</div>
   </section>
 
   <section class="card" data-tab="overview">
@@ -345,11 +367,25 @@
 
   <section class="card badbox" id="pageErrors" style="grid-column:1/-1; display:none"></section>
 
+  <!-- 语音调试：不再单开一个浏览器页，收进控制台「语音」分组；内容仍由 /voice 提供（?embed=1 只留状态条），
+       避免把 500 多行页面脚本复制进控制台，也保住 /voice 的收藏/深链。 -->
+  <section class="card" data-tab="voice" id="voicePane" style="grid-column:1/-1; padding:0; overflow:hidden">
+    <iframe id="voiceFrame" title="语音调试" src="about:blank" style="width:100%;height:calc(100vh - 150px);min-height:620px;border:0;display:block;background:transparent"></iframe>
+  </section>
+
   <section class="card warnbox" id="warnCard" data-tab="overview" style="grid-column:1/-1; display:none">
     <h2>配置提醒</h2>
     <div id="warns"></div>
   </section>
 </main>
+</div>
+
+<!-- 命令面板：Ctrl+K 跳分组 / 卡片或执行动作（卡片太多时比翻侧栏快） -->
+<div id="palette" style="position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:flex-start;justify-content:center;padding-top:12vh;z-index:9999;display:none">
+  <div class="card" style="width:min(560px,92vw);padding:0;overflow:hidden">
+    <input id="paletteInput" placeholder="跳转到分组 / 卡片，或执行动作…（Ctrl+K）" style="width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:14px 16px;font-size:15px" />
+    <div id="paletteList" style="max-height:44vh;overflow:auto"></div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -360,12 +396,9 @@ const token = new URLSearchParams(location.search).get('token') || '';
 {
   const link = document.getElementById('accountsLink');
   if (link && token) link.href = '/accounts?token=' + encodeURIComponent(token);
-  // 体检报告页（/report）与语音调试页（/voice）同理：入口不止一个，凡带 .reportLink / .voiceLink 的都补上 token。
+  // 体检报告页（/report）同理：入口不止一个，凡带 .reportLink 的都补上 token。
   for (const reportLink of document.querySelectorAll('.reportLink')) {
     if (token) reportLink.href = '/report?token=' + encodeURIComponent(token);
-  }
-  for (const voiceLink of document.querySelectorAll('.voiceLink')) {
-    if (token) voiceLink.href = '/voice?token=' + encodeURIComponent(token);
   }
 }
 // 地址里没有 token 时，直接告诉用户为什么满屏都是「token 无效」，而不是让他自己猜：
@@ -409,7 +442,7 @@ function toast(text) {
   clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 4500);
 }
 async function act(path) {
-  const labels = { '/api/host/stop': '停止宿主', '/api/napcat/stop': '停止 NapCat/QQ', '/api/tts/stop': '停止 GPT-SoVITS', '/api/all/stop': '全部停止' };
+  const labels = { '/api/host/stop': '停止宿主', '/api/napcat/stop': '停止 NapCat/QQ', '/api/tts/stop': '停止语音服务', '/api/all/stop': '全部停止' };
   if (labels[path] && !confirm(labels[path] + '？')) return;
   /**
    * 启动 NapCat 现在会**等服务端确认垫片心跳**（最多 8 秒），所以按钮要禁一下并说在等什么——
@@ -453,6 +486,7 @@ async function runDiagnose() {
   const result = await api('/api/diagnose');
   diagReport = result.report;
   renderDiagnose();
+  loadHealthHistory();
 }
 function renderDiagnose() {
   if (!diagReport) return;
@@ -764,8 +798,39 @@ function renderAcceptance() {
   }).join('');
 }
 // ---------------------------------------------------------------- 布局 ----
-/** 控制台的六个分组（左侧导航）；卡片按 data-tab 归属，切 tab 只切可见性，DOM 与轮询都不动。 */
-const TAB_NAMES = ['overview', 'live', 'diagnose', 'replay', 'data', 'logs'];
+/** 控制台的七个分组（左侧导航）；卡片按 data-tab 归属，切 tab 只切可见性，DOM 与轮询都不动。 */
+const TAB_NAMES = ['overview', 'live', 'diagnose', 'replay', 'data', 'logs', 'voice'];
+const TAB_LABELS = {
+  overview: '总览', live: '实时事件', diagnose: '诊断与报告',
+  replay: '录制 · 回放 · 注入', data: '数据与任务', logs: '日志', voice: '语音调试',
+};
+
+/** 语音分组用 iframe 装 /voice 页；第一次切过去才加载（不拖慢首屏，也不重复请求语音接口）。 */
+function loadVoiceFrame() {
+  const frame = document.getElementById('voiceFrame');
+  if (!frame || frame.dataset.loaded === '1') return;
+  frame.dataset.loaded = '1';
+  frame.src = '/voice?embed=1' + (token ? '&token=' + encodeURIComponent(token) : '');
+}
+/**
+ * 让侧栏的选中块滑到当前项。
+ * 不用 CSS :has()/固定高度：侧栏项是文字 + 图标、可能换行，高度和位置得按真实布局算；
+ * 窄屏侧栏变成横排时直接隐藏（横向滑动块反而碍事）。
+ */
+function moveNavGlow(animate = true) {
+  const glow = document.getElementById('navGlow');
+  const active = document.querySelector('#nav .navitem.active');
+  if (!glow) return;
+  if (!active || window.matchMedia('(max-width: 900px)').matches) {
+    glow.style.opacity = '0';
+    return;
+  }
+  if (!animate) glow.style.transition = 'none';
+  glow.style.opacity = '1';
+  glow.style.height = active.offsetHeight + 'px';
+  glow.style.transform = `translateY(${active.offsetTop}px)`;
+  if (!animate) requestAnimationFrame(() => { glow.style.transition = ''; });
+}
 function showTab(name, push = true) {
   const target = TAB_NAMES.includes(name) ? name : 'overview';
   for (const section of document.querySelectorAll('main > section[data-tab]')) {
@@ -774,6 +839,8 @@ function showTab(name, push = true) {
   for (const item of document.querySelectorAll('#nav .navitem[data-tab]')) {
     item.classList.toggle('active', item.dataset.tab === target);
   }
+  moveNavGlow();
+  if (target === 'voice') loadVoiceFrame();
   if (push) {
     const url = new URL(location.href);
     if (target === 'overview') url.searchParams.delete('tab');
@@ -799,6 +866,134 @@ function focusCard(id, smooth = true) {
   card.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
   card.style.outline = '2px solid #6cf';
   setTimeout(() => { card.style.outline = 'none'; }, 1600);
+}
+
+// ---------------------------------------------------------------- 命令面板 ----
+// Ctrl+K：卡片已有 15 张、分六组，翻侧栏和滚动都不如直接搜。
+const palette = document.getElementById('palette');
+const paletteInput = document.getElementById('paletteInput');
+const paletteList = document.getElementById('paletteList');
+let paletteItems = [];
+let paletteIndex = 0;
+
+/** 卡片 → 卡片里的一个稳定元素 id（focusCard 会自己找最近的 section）。 */
+const PALETTE_CARDS = [
+  ['端口 / 进程', 'ports'], ['操作', 'accountsLink'], ['硬约束验收台', 'acceptance'],
+  ['实时事件流', 'streamBox'], ['决策链', 'chain'], ['一键体检', 'diag'],
+  ['设置项变更历史', 'history'], ['运行快照', 'runtime'], ['录制 · 回放 · 注入', 'inbox'],
+  ['群资产 · 历史检索', 'archOut'], ['性能面板', 'perfOut'], ['定时任务 · 无人值守', 'jobsOut'],
+  ['群配置', 'groupsOut'], ['登录二维码', 'qrImg'], ['日志文件', 'log'],
+];
+
+function buildPaletteItems() {
+  const tabs = TAB_NAMES.map((name) => ({ label: '分组：' + TAB_LABELS[name], run: () => showTab(name) }));
+  const cards = PALETTE_CARDS.map(([label, target]) => ({ label: '卡片：' + label, run: () => focusCard(target) }));
+  const actions = [
+    { label: '动作：刷新状态', run: () => refresh() },
+    { label: '动作：一键体检', run: () => runDiagnose() },
+    { label: '动作：导出诊断包', run: () => exportBundle() },
+    { label: '动作：打开体检报告', run: () => window.open('/report?token=' + encodeURIComponent(token), '_blank', 'noopener') },
+    { label: '动作：打开语音调试', run: () => window.open('/voice?token=' + encodeURIComponent(token), '_blank', 'noopener') },
+  ];
+  return [...tabs, ...cards, ...actions];
+}
+
+function renderPalette() {
+  const query = paletteInput.value.trim().toLowerCase();
+  const all = buildPaletteItems();
+  paletteItems = query === '' ? all : all.filter((item) => item.label.toLowerCase().includes(query));
+  if (paletteIndex >= paletteItems.length) paletteIndex = Math.max(0, paletteItems.length - 1);
+  paletteList.innerHTML = paletteItems.length === 0
+    ? '<div class="meta" style="padding:16px">没有匹配项</div>'
+    : paletteItems.map((item, index) =>
+      '<div data-palette="' + index + '" style="padding:9px 16px;cursor:pointer;' +
+      (index === paletteIndex ? 'background:#1d2a38;color:var(--accent)' : '') + '">' +
+      escapeHtml(item.label) + '</div>').join('');
+  for (const row of paletteList.querySelectorAll('[data-palette]')) {
+    row.onclick = () => runPalette(Number(row.dataset.palette));
+  }
+}
+
+function runPalette(index) {
+  const item = paletteItems[index];
+  closePalette();
+  if (item) item.run();
+}
+
+function openPalette() {
+  palette.style.display = 'flex';
+  paletteInput.value = '';
+  paletteIndex = 0;
+  renderPalette();
+  setTimeout(() => paletteInput.focus(), 0);
+}
+
+function closePalette() {
+  palette.style.display = 'none';
+}
+
+// 侧栏的「搜索 / 跳转 Ctrl K」按钮：不按键盘也能发现这个功能
+document.getElementById('paletteOpen').onclick = () => openPalette();
+
+paletteInput.oninput = () => { paletteIndex = 0; renderPalette(); };
+palette.onclick = (event) => { if (event.target === palette) closePalette(); };
+paletteInput.onkeydown = (event) => {
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    paletteIndex = Math.min(paletteIndex + 1, paletteItems.length - 1);
+    renderPalette();
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    paletteIndex = Math.max(paletteIndex - 1, 0);
+    renderPalette();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    runPalette(paletteIndex);
+  } else if (event.key === 'Escape') {
+    closePalette();
+  }
+};
+document.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault();
+    if (palette.style.display === 'none') openPalette();
+    else closePalette();
+  } else if (event.key === 'Escape' && palette.style.display !== 'none') {
+    closePalette();
+  }
+});
+
+// ---------------------------------------------- 体检趋势 ----
+const HEALTH_VERDICT_TEXT = { ok: '全绿', warnings: '告警', blocked: '阻断', unknown: '证据不足' };
+async function loadHealthHistory(force = false) {
+  const box = document.getElementById('healthTrend');
+  const state = document.getElementById('healthTrendState');
+  if (!box) return;
+  try {
+    const result = await api('/api/health/history?limit=30');
+    if (result.ok === false) { box.textContent = '⚠️ ' + (result.reason || '读取失败'); return; }
+    const entries = Array.isArray(result.entries) ? result.entries : [];
+    if (state) state.textContent = entries.length === 0 ? '还没有记录（点「一键体检」或打开体检报告后出现）'
+      : `共 ${entries.length} 个点 · ${result.file || ''}`;
+    if (entries.length === 0) { box.textContent = '（还没有记录）'; return; }
+    box.innerHTML = entries.map((entry, index) => {
+      const checks = entry.checks || {};
+      const total = Number(checks.total) || 0;
+      const passed = Number(checks.passed) || 0;
+      const failed = Number(checks.failed) || 0;
+      const blocked = Number(checks.blockers) || failed;
+      const prev = entries[index + 1];
+      const delta = prev ? failed - (Number(prev.checks?.failed) || 0) : null;
+      const icon = entry.verdict === 'ok' ? '✅' : (entry.verdict === 'warnings' ? '⚠️' : (entry.verdict === 'blocked' ? '❌' : '❔'));
+      const time = new Date(entry.at).toLocaleString('zh-CN', { hour12: false });
+      const trend = delta === null ? '' : (delta > 0 ? ` · 失败 +${delta}` : (delta < 0 ? ` · 失败 ${delta}` : ' · 持平'));
+      return `<div class="check"><span>${icon}</span><div><b>${escapeHtml(time)}</b> — ${HEALTH_VERDICT_TEXT[entry.verdict] || escapeHtml(entry.verdict || '?')}`
+        + ` · 通过 ${passed}/${total} · 阻断 ${blocked}${trend}</div></div>`;
+    }).join('');
+    if (force) toast(`已刷新：最近 ${entries.length} 次体检`);
+  } catch (error) {
+    box.textContent = '读取体检趋势失败：' + error.message;
+  }
 }
 
 // ---------------------------------------------- 设置项变更历史 ----
@@ -1192,6 +1387,9 @@ async function searchArchive() {
 const focusTarget = new URLSearchParams(location.search).get('focus');
 // 先按 ?tab= 选中分组（深链带 focus 时下面 focusCard 会自己切到目标卡片所在 tab）
 showTab(new URLSearchParams(location.search).get('tab') || 'overview', false);
+// 首屏不播滑动动画；窗口尺寸变了（侧栏横排/换行）重新对位
+moveNavGlow(false);
+window.addEventListener('resize', () => moveNavGlow(false));
 if (focusTarget) {
   setTimeout(() => focusCard(focusTarget, false), 1200);
   setTimeout(() => focusCard(focusTarget, false), 3200);
@@ -1215,6 +1413,7 @@ if (streamMode !== 'off') {
   setInterval(runDiagnose, 30000);
   setInterval(loadAcceptance, 30000);
   setInterval(() => { if (!document.hidden) loadChangeHistory(false); }, 30000);
+setInterval(() => { if (!document.hidden) loadHealthHistory(false); }, 30000);
   setInterval(() => { if (!document.hidden) loadInbox(false); }, 15000);
   // 定时任务/群配置变化慢，自动刷新频率低一些（也不在页面不可见时空转）
   setInterval(() => { if (!document.hidden) loadJobs(); }, 20000);

@@ -30,7 +30,7 @@ function check(name, ok, extra = '') {
 check('密钥键识别：token/secret/password', ['token', 'accessToken', 'clientSecret', 'password', 'apiKey'].every(isSecretKey))
 check('密钥键识别：普通键不误伤', ['url', 'cwd', 'port', 'host', 'enable'].every((key) => isSecretKey(key) === false))
 check('密钥值展示为 ***', displayValue('webui.token', 'super-secret-token') === '***' && displayValue('network.websocketClients[0].token', 'x') === '***')
-check('普通值原样展示', displayValue('cwd', 'D:\\Deepseek') === 'D:\\Deepseek' && displayValue('port', 6099) === '6099')
+check('普通值原样展示', displayValue('cwd', 'X:\\work') === 'X:\\work' && displayValue('port', 6099) === '6099')
 check('超长值截断并带省略号', displayValue('cwd', 'x'.repeat(MAX_VALUE_CHARS + 50)).length === MAX_VALUE_CHARS + 1)
 check('对象值压成 JSON', displayValue('x', { a: 1 }) === '{"a":1}')
 
