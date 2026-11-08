@@ -86,5 +86,38 @@ for (const [file, minLines] of invariants) {
   else out(`⑤ ${file}：${lines} 行（≥ ${minLines}）`)
 }
 
+// ---------- ⑥ 打包形态 ----------
+/**
+ * 安装形态是按 package.json 的 files 铺出来的。脚本里引用的路径如果不在 files 覆盖范围内，
+ * 用户装完再跑这条命令就会撞「文件不存在」——2026-11-07 由 551123 的铺装读数发现：
+ * tools/audit.mjs 当时没进 files，npm run audit 在线上树里跑不起来。
+ */
+{
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+  const roots = Array.isArray(pkg.files) ? pkg.files : []
+  const scripts = pkg.scripts ?? {}
+  const covered = (relPath) => roots.some((root) => {
+    const clean = String(root).replace(/^\/+|\/+$/g, '')
+    if (clean === '') return false
+    // 目录式条目：files 里写 "tools" 覆盖 "tools/audit.mjs"
+    return relPath === clean || relPath.startsWith(clean + '/')
+  })
+  const scriptTargets = []
+  for (const [name, command] of Object.entries(scripts)) {
+    for (const match of String(command).matchAll(/(?:node|npx)\s+([\w./-]+\.(?:m?js|cjs))\b/g)) {
+      scriptTargets.push({ name, file: match[1].replace(/^\.\//, '') })
+    }
+  }
+  const missing = scriptTargets.filter((item) => {
+    try { statSync(join(ROOT, item.file)); return false } catch { return true }
+  })
+  const unpacked = scriptTargets.filter((item) => !covered(item.file))
+  if (missing.length > 0) fail('打包形态：这些脚本指向的文件不存在 → ' + missing.map((item) => item.name + ':' + item.file).join(', '))
+  if (unpacked.length > 0) fail('打包形态：这些脚本引用的文件不在 package.json files 里 → ' + unpacked.map((item) => item.name + ':' + item.file).join(', '))
+  if (missing.length === 0 && unpacked.length === 0) {
+    out(`⑥ 打包形态：${scriptTargets.length} 个脚本引用都在 files 覆盖范围内（files 共 ${roots.length} 项）`)
+  }
+}
+
 console.log(problems === 0 ? '\n  全部通过' : `\n  有 ${problems} 个问题`)
 process.exit(problems === 0 ? 0 : 1)
