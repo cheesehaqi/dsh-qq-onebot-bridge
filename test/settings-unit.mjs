@@ -472,13 +472,14 @@ const fakeRequest = (method, body, headers = {}) => ({
   async *[Symbol.asyncIterator]() { if (body !== undefined) yield Buffer.from(JSON.stringify(body)) },
 })
 
-check('挂载了九条路由（读面板 + 写开关 + 批量写 + 调试台 + 账号 + 二维码 + 启动 NapCat + 重启登录 + 账号中心）',
-  registered.length === 9 && registered.some((r) => r.path === '/qqai/panel')
+check('挂载了十二条路由（读面板 + 写开关 + 批量写 + 调试台 + 账号 + 二维码 + 启动 NapCat + 重启登录 + 账号中心 + 语音调试×3）',
+  registered.length === 12 && registered.some((r) => r.path === '/qqai/panel')
   && registered.some((r) => r.path === '/qqai/panel/set-batch')
   && registered.some((r) => r.path === '/qqai/panel/set') && registered.some((r) => r.path === '/qqai/console')
   && registered.some((r) => r.path === '/qqai/account') && registered.some((r) => r.path === '/qqai/napcat/start')
   && registered.some((r) => r.path === '/qqai/napcat/relogin') && registered.some((r) => r.path === '/qqai/napcat/qr')
-  && registered.some((r) => r.path === '/qqai/accounts'),
+  && registered.some((r) => r.path === '/qqai/accounts')
+  && ['/qqai/voice/status', '/qqai/voice/tts', '/qqai/voice/stt'].every((path) => registered.some((r) => r.path === path)),
   registered.map((r) => r.path).join(','))
 
 const getHandler = registered.find((r) => r.path === '/qqai/panel').handler
@@ -1844,11 +1845,11 @@ check('★管理员分支走 WMI Win32_Process.Create，且 if/else 之间没有
 
 dispose()
 check('dispose 注销了全部路由（配置热重载后能重新挂载，不会撞 duplicate route）',
-  registered.length === 0 && disposed.length === 9, `left=${registered.length}`)
+  registered.length === 0 && disposed.length === 12, `left=${registered.length}`)
 mountQqAiPanel(fakeHost, {
   profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
 })
-check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 9, String(registered.length))
+check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 12, String(registered.length))
 
 // ------------------------------------------------- 3. 客户端 bundle 冒烟 ---- ----
 const clientText = readFileSync(join(import.meta.dirname, '..', 'client', 'client.js'), 'utf8')

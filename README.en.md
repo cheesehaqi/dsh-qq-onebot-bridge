@@ -2,7 +2,7 @@
 
 A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ messages drive DSH agent sessions directly, and agent replies are sent back to QQ automatically.
 
-Current version **v0.8.5** · [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [Changelog](CHANGELOG.md)
+Current version **v0.8.6** · [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [Changelog](CHANGELOG.md)
 
 ## Architecture
 
@@ -467,6 +467,9 @@ npm run control            # or: node control/bin/qq-control.mjs --open
 
 ```
 
+The console's left sidebar groups cards by purpose (**overview / live events / diagnostics & reports / record · replay · inject / data & jobs / logs**); the top-right keeps only four global actions
+(refresh / one-shot diagnosis / export bundle / health report), and the voice lab lives in the sidebar (standalone page `/voice`). Switching groups only toggles visibility — hidden cards keep polling and receiving SSE.
+
 | Capability | Detail |
 |---|---|
 | Port overview | listening state, owning PID and process name for console 8799 / host 3080 / OneBot 6700 / NapCat 6099 / GPT-SoVITS 9880; the connection count on 6700 *is* the "bot online" signal |
@@ -478,6 +481,9 @@ npm run control            # or: node control/bin/qq-control.mjs --open
 | Config | `qq-control.json` is the single source of truth for ports and paths (node, `dsh bin.js`, NapCat, TTS script auto-detected; paths editable in the UI); **6700 is pinned by the NapCat config, do not change it** |
 | Debugging | "录制 · 回放 · 注入": lists every recorded inbound event from `qq-inbox.jsonl`, replays any of them offline (sandbox + dry-run) or injects a synthetic event; the injection queue state (lines / consumed this run / dry-run) is shown inline |
 | Acceptance | "硬约束验收台" at the top: live evidence for all 6 hard constraints (no silent branch / trace id / replay / diagnosis / export / injection), with "where to click" for anything not met; `GET /api/acceptance` |
+| Health report | **`/report`**: merges the per-check diagnosis and the 6 hard constraints into one page — one-line verdict, "fix these first" (ordered by consequence), grouped details, evidence per constraint with "go look →" deep links; read-only, printable to PDF, one-click copy of the whole text (handy when asking someone else to look); `GET /api/report` |
+| Change history | "设置项变更历史" card: every setting the console wrote (path config / WebUI / network config) keeps its **old → new**; token-like keys are recorded as "value hidden"; stored in `<working dir>\qq-settings-history.jsonl`, served by `GET /api/history`, read-only with keyword filtering and copy |
+| Voice lab | **`/voice`** (standalone page, entry in the left sidebar): first shows where the voice module is stuck (switch / local reference audio / cloud key / host `speechToText`), then lets you hear a one-line TTS sample, or record / pick an audio file and see the transcript; **fine-tuning**: voice / speed / **±12 semitone pitch** / style (Azure, OpenAI) and reference audio / sampling knobs for GPT-SoVITS (`temperature` / `top_k` / `top_p` / `seed`…), STT language (auto/Chinese/English/Japanese) / cloud model — all **per-attempt** (never written back, out-of-range fails loudly); the last 5 samples stay around for A/B; it finds the host itself (including a desktop-started host on a random port); **local only, never sends to QQ** |
 | Security | binds `127.0.0.1` only, every API needs the token, and any request carrying a cross-site `Origin` is rejected |
 
 > A future tray/desktop build can simply wrap this HTTP API in Electron/Tauri — no logic rewrite needed.
@@ -595,17 +601,17 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 
 ## Changelog
 
-> **Every released version has a Releases page** (all 27 tags covered: what changed in that version plus a `compare` link against the previous one):
+> **Every released version has a Releases page** (what changed in that version plus a `compare` link against the previous one):
 > <https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases> — fastest way to decide "should I upgrade";
 > `CHANGELOG.md` is the full history (defect lists, test counts).
 
 The five most recent versions (always kept rolling):
 
+- **v0.8.6** — debuggability trio for the console: a standalone health-report page `/report`, settings change history, and a standalone voice lab `/voice` (TTS/STT trials plus per-attempt voice / speed / ±12 semitone pitch / sampling overrides); console rebuilt with a six-group sidebar and single-column cards; `lib/` only gains voice routes and TTS parameters — **the patch-surface files `bridge.js` / `index.js` / `panel.js` are untouched**
 - **v0.8.5** — guard rails first: contract tests for 8 new and 13 old endpoints (route coverage 21/41 → 41/41, which immediately caught a missing `unlinkSync` import that made "delete backup" and "restore from trash" return 500), drill-down for files and plugins, a port panorama, batch trash cleanup, traceId chains from the log page, `docs/ACCESS.md` access matrix, and `tools/audit.mjs`; **`lib/` untouched**
 - **v0.8.4** — TCP reachability check for every endpoint, a "connections" column on the accounts page, collapsible long lists loaded on demand, filtered log exports with a header, a re-check button for API availability, file search in the palette; plus the **whitelist split** (`allowUsersPrivateOnly`, off by default) and the renamed QQ 用户 / QQ 群聊 lists
 - **v0.8.3** — "the console checks itself": release check, port-usage display, read-only `napcat.json` preview (redacted), plugin-dir markers, file stats, a config trash (restore / send to Windows Recycle Bin, never hard-delete), copyable diagnostic summary, unsaved-changes hint, and fail-only/event filters in live testing; fixes scenario injection dropping group/user ids
 - **v0.8.2** — "fewer clicks": file/account search, log time-range filter and filtered download, operation-log export/clear, a "last error" card, a **Ctrl+K command palette** (including per-account jumps), persisted log filters, and copyable plugin-directory paths; tests gained a DOM-timing assertion and a runtime smoke run with negative controls
-- **v0.8.1** — "make the console prove itself": config backup management (restore keeps a `.pre-restore-*` copy, delete moves to `config/_trash`), persistent operation log, log keyword highlighting + Info-only filter, one-click redacted diagnostic export, and **editable WS/HTTP server sections** in network config
 
 **Older versions (the v0.4 line and earlier) are in [CHANGELOG.md](CHANGELOG.md)** — the full history, including every release's defect list and test counts.
 You can also filter by version on the [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) page (each entry carries a `compare/v<previous>...v<this>` diff link).

@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>一键体检报告 · 小鲸鱼控制台</title>
+<!--
+  一键体检报告（v0.8.5 之后，2026-11-08）。
+
+  为什么单独一页：控制台总览里那张「一键体检」卡只够瞄一眼 —— 它把 18 项检查平铺成
+  一行行的 ✅/❌，但"先修哪个""六条硬约束和这次体检是什么关系""这份东西能不能直接
+  发给别人"都没有答案。这一页把两件既有产物（逐项体检 + 6 条硬约束）合成一份
+  **可打印、可复制、可深链回控制台**的报告。
+
+  设计口径：
+    · 只读：页面不发任何 POST，也没有写操作按钮（改配置请回控制台）；
+    · 零依赖：不引 CDN / 外部字体，断网可用；token 只从 ?token= 读（和账号中心一致）；
+    · 打印友好：@media print 去掉深色底色与按钮，A4 直接"另存为 PDF"；
+    · 判定与文案都在 control/lib/report.mjs（纯函数、有单测），页面只负责画。
+-->
+<style>
+  :root{
+    --bg:#0f1720; --panel:#17222e; --line:#243447; --fg:#e6edf3; --dim:#8aa0b4;
+    --ok:#3fb950; --warn:#d29922; --bad:#f85149; --unknown:#8b949e; --accent:#4a9eff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.6 "Microsoft YaHei",system-ui,-apple-system,"Segoe UI",sans-serif}
+  header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 20px;
+    border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:18px;
+    background:linear-gradient(135deg,#ff7ab6,#7c5cff)}
+  .brand b{font-size:15px} .brand small{display:block;color:var(--dim);font-size:11px;font-weight:400}
+  .grow{flex:1}
+  .pill{padding:3px 12px;border-radius:999px;font-size:12.5px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+  .pill.ok{color:#0d1117;background:var(--ok);border-color:var(--ok)}
+  .pill.warn{color:#0d1117;background:var(--warn);border-color:var(--warn)}
+  .pill.bad{color:#0d1117;background:var(--bad);border-color:var(--bad)}
+  .pill.unknown{color:#0d1117;background:var(--unknown);border-color:var(--unknown)}
+  button,select,input{background:#22303f;color:var(--fg);border:1px solid var(--line);border-radius:7px;
+    padding:6px 12px;cursor:pointer;font-size:13px;font-family:inherit}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#06121f;font-weight:600}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  main{max-width:1180px;margin:0 auto;padding:18px 20px 70px;display:grid;gap:14px}
+  .hero{border-radius:14px;padding:18px 22px;border:1px solid var(--line);background:var(--panel)}
+  .hero h1{margin:0 0 6px;font-size:20px}
+  .hero p{margin:0;color:var(--dim)}
+  .hero.ok{border-color:#21543a;background:#0f241a}
+  .hero.warn{border-color:#5a4620;background:#241d0f}
+  .hero.bad{border-color:#5c2b2b;background:#241010}
+  .hero.unknown{border-color:#2a3644;background:#161e28}
+  .hero.ok h1{color:var(--ok)} .hero.warn h1{color:var(--warn)} .hero.bad h1{color:var(--bad)}
+  .hero.unknown h1{color:var(--unknown)}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .stat b{display:block;font-size:20px;line-height:1.2}
+  .stat span{color:var(--dim);font-size:12px}
+  .stat.bad b{color:var(--bad)} .stat.warn b{color:var(--warn)} .stat.ok b{color:var(--ok)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px}
+  .card h2{font-size:13px;margin:0 0 10px;color:var(--dim);font-weight:600;letter-spacing:.5px}
+  .meta{color:var(--dim);font-size:12px}
+  .actions{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+  .action{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#131d27}
+  .action.sev-warn{background:#1d1a10;border-color:#4a3c1c}
+  .actionHead{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .actionHead b{font-size:13.5px}
+  .actionHead .goto{margin-left:auto;font-size:12px}
+  .action .detail{margin-top:4px;font-size:13px}
+  .action .hint{color:var(--dim);font-size:12.5px;margin-top:3px}
+  .empty{color:var(--dim);font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:500;font-size:12px}
+  .status{white-space:nowrap}
+  .group{margin-bottom:14px}
+  .group:last-child{margin-bottom:0}
+  .group h3{font-size:12.5px;color:var(--dim);font-weight:600;margin:0 0 6px;display:flex;gap:8px;align-items:baseline}
+  .check{display:flex;gap:9px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #1c2836}
+  .check:last-child{border-bottom:none}
+  .check .body{flex:1;min-width:0}
+  .check .detail{color:var(--fg)}
+  .check .hint{color:var(--dim);font-size:12.5px;margin-top:2px;word-break:break-word}
+  .check .goto{font-size:12px;white-space:nowrap;margin-top:1px}
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px 16px;font-size:13px}
+  .facts div b{color:var(--dim);font-weight:500;margin-right:8px}
+  .warnbox{border-color:#5a4620;background:#241d0f;color:#f0d08a}
+  .badbox{border-color:#5c2b2b;background:#241010;color:#ffb4ae}
+  .toast{position:fixed;right:18px;bottom:18px;background:#1d2a38;border:1px solid var(--line);
+    padding:10px 14px;border-radius:8px;max-width:60ch;opacity:0;transition:.2s;z-index:20;pointer-events:none}
+  .toast.show{opacity:1}
+  footer{padding:4px 2px;line-height:1.7}
+  code{background:#0b131b;padding:0 5px;border-radius:4px;font-size:12.5px}
+  /* 打印：白底黑字、去掉按钮与深色块，直接"A4 另存 PDF"就能发给别人 */
+  @media print{
+    :root{--bg:#fff;--panel:#fff;--line:#ccc;--fg:#111;--dim:#555}
+    body{background:#fff;color:#111}
+    header{position:static;background:#fff;border-bottom:1px solid #ccc}
+    header button,header a,#consoleTop,.goto,.toast{display:none !important}
+    .hero,.card,.stat,.action{background:#fff !important;border-color:#ccc !important}
+    .hero h1,.hero.ok h1,.hero.warn h1,.hero.bad h1,.hero.unknown h1{color:#111 !important}
+    main{max-width:none;padding:0}
+    .action{break-inside:avoid}
+    .check{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="logo">🐋</span>
+    <div><b>一键体检报告</b><small>只读 · 本机 127.0.0.1 · 可打印</small></div>
+  </div>
+  <span id="verdictPill" class="pill">读取中…</span>
+  <span class="grow"></span>
+  <span id="stamp" class="meta"></span>
+  <button id="btnReload" class="primary" onclick="loadReport(true)">重新体检</button>
+  <button id="btnCopy" onclick="copyReport()">复制报告</button>
+  <button onclick="window.print()">打印 / 存 PDF</button>
+  <a id="consoleTop" href="/">回控制台</a>
+</header>
+
+<main>
+  <section class="card warnbox" id="tokenHint" style="display:none">
+    <b>地址里没有 token</b>
+    <div class="meta" style="margin-top:4px">
+      这个页面和 API 一样要求 token。请从控制台点「体检报告」，或用启动时打印的
+      <code>/report?token=&lt;控制台 token&gt;</code> 打开。
+    </div>
+  </section>
+
+  <section class="hero unknown" id="verdict">
+    <h1 id="verdictTitle">正在体检…</h1>
+    <p id="verdictDetail">读取逐项体检、6 条硬约束与运行快照。</p>
+  </section>
+
+  <section class="stats" id="summary"></section>
+
+  <section class="card">
+    <h2>先修这些 <span class="meta">（顺序 = 后果：阻断 → 不达标的硬约束 → 告警；最多 6 项）</span></h2>
+    <ol class="actions" id="actions"><li class="empty">读取中…</li></ol>
+  </section>
+
+  <section class="card">
+    <h2>六条硬约束 <span class="meta">（v0.4「一切皆可调试」，每条都算在机器现有的产物上）</span></h2>
+    <div id="constraints" class="meta">读取中…</div>
+  </section>
+
+  <section class="card">
+    <h2>体检明细 <span class="meta">（失败项排在各组最前；「去看 →」跳回控制台对应卡片）</span></h2>
+    <div id="checks" class="meta">读取中…</div>
+  </section>
+
+  <section class="card" id="factsCard" style="display:none">
+    <h2>关键事实 <span class="meta">（来自桥写出的运行快照）</span></h2>
+    <div id="facts" class="facts"></div>
+  </section>
+
+  <section class="card badbox" id="pageErrors" style="display:none"></section>
+
+  <footer class="meta">
+    这份报告只读：不会改动机器上的任何状态。要动手请点「去看 →」回到控制台对应卡片。
+    报告文本点「复制报告」即可拿到（可贴到 issue 或发给别人排查）。
+  </footer>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const token = new URLSearchParams(location.search).get('token') || '';
+const ICONS = { pass: '✅', warn: '⚠️', fail: '❌', unknown: '❔', ok: '✅' };
+const STATUS_TEXT = { pass: '达标', warn: '有提示', fail: '不达标', unknown: '证据不足', ok: '通过' };
+const VERDICT_TEXT = { healthy: '全部通过', warnings: '有告警', blocked: '有阻断项', unknown: '证据不足' };
+let lastReport = null;
+let lastText = '';
+
+// 页面自己也要可调试：脚本错误直接显示，别让人对着半张页面猜
+const pageErrors = [];
+function reportPageError(text) {
+  pageErrors.push(new Date().toLocaleTimeString('zh-CN', { hour12: false }) + ' ' + text);
+  const el = document.getElementById('pageErrors');
+  if (!el) return;
+  el.style.display = '';
+  el.innerHTML = '<h2>页面脚本错误（请连同截图反馈）</h2>' + pageErrors.map((line) => '<div>❌ ' + escapeHtml(line) + '</div>').join('');
+}
+window.addEventListener('error', (event) => reportPageError((event.message || '脚本错误') + ' @ ' + (event.filename || '') + ':' + (event.lineno || 0)));
+window.addEventListener('unhandledrejection', (event) => reportPageError('Promise 失败：' + ((event.reason && event.reason.message) || event.reason)));
+
+function api(path) {
+  const url = path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+  return fetch(url, { headers: { 'X-Control-Token': token } }).then((response) => response.json());
+}
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function icon(status) { return ICONS[status] || '·'; }
+function statusLabel(status) { return STATUS_TEXT[status] || status || '未知'; }
+function consoleHref(target) {
+  return '/?token=' + encodeURIComponent(token) + (target ? '&focus=' + encodeURIComponent(target) : '');
+}
+function stampText(ts) {
+  const date = new Date(ts);
+  if (isNaN(date.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return '生成于 ' + date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+    + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+}
+function toast(text) {
+  const el = document.getElementById('toast');
+  el.textContent = text; el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 4200);
+}
+
+function render(report) {
+  lastReport = report;
+  // 结论
+  const hero = document.getElementById('verdict');
+  hero.className = 'hero ' + (report.tone || 'unknown');
+  document.getElementById('verdictTitle').textContent = report.headline ? report.headline.title : report.verdict;
+  document.getElementById('verdictDetail').textContent = report.headline ? report.headline.detail : '';
+  const pill = document.getElementById('verdictPill');
+  pill.className = 'pill ' + (report.tone || 'unknown');
+  pill.textContent = VERDICT_TEXT[report.verdict] || report.verdict;
+  document.getElementById('stamp').textContent = stampText(report.generatedAt);
+  renderSummary(report);
+  renderActions(report);
+  renderConstraints(report);
+  renderGroups(report);
+  renderFacts(report);
+}
+
+function renderSummary(report) {
+  const checks = (report.counters && report.counters.checks) || {};
+  const constraints = (report.counters && report.counters.constraints) || {};
+  const cells = [
+    { value: (checks.passed || 0) + '/' + (checks.total || 0), label: '体检通过', tone: (checks.failed || 0) > 0 ? 'warn' : 'ok' },
+    { value: String(checks.blockers || 0), label: '阻断项', tone: (checks.blockers || 0) > 0 ? 'bad' : 'ok' },
+    { value: (constraints.pass || 0) + '/' + (constraints.total || 0), label: '硬约束达标', tone: (constraints.fail || 0) > 0 ? 'bad' : 'ok' },
+    { value: String(constraints.fail || 0), label: '约束不达标', tone: (constraints.fail || 0) > 0 ? 'bad' : 'ok' },
+    { value: String(constraints.unknown || 0), label: '证据不足', tone: (constraints.unknown || 0) > 0 ? 'warn' : 'ok' },
+  ];
+  document.getElementById('summary').innerHTML = cells.map((cell) =>
+    '<div class="stat ' + cell.tone + '"><b>' + cell.value + '</b><span>' + cell.label + '</span></div>'
+  ).join('');
+}
+
+function renderActions(report) {
+  const actions = report.actions || [];
+  const el = document.getElementById('actions');
+  if (actions.length === 0) {
+    el.innerHTML = '<li class="empty">没有需要先修的项：体检全部通过，6 条硬约束也没有不达标。</li>';
+    return;
+  }
+  el.innerHTML = actions.map((action) => {
+    const severity = action.severity === 'warn' ? 'warn' : 'error';
+    return '<li class="action sev-' + severity + '">'
+      + '<div class="actionHead"><span>' + icon(severity === 'warn' ? 'warn' : 'fail') + '</span><b>' + escapeHtml(action.title) + '</b>'
+      + '<a class="goto" href="' + consoleHref(action.target) + '">去处理 →</a></div>'
+      + '<div class="detail">' + escapeHtml(action.detail) + '</div>'
+      + (action.hint ? '<div class="hint">↳ ' + escapeHtml(action.hint) + '</div>' : '')
+      + '</li>';
+  }).join('');
+}
+
+function renderConstraints(report) {
+  const el = document.getElementById('constraints');
+  const constraints = report.constraints || [];
+  if (constraints.length === 0) {
+    el.textContent = '还没有验收结果：点上面的「重新体检」会一起重算。';
+    return;
+  }
+  const rows = constraints.map((entry) =>
+    '<tr>'
+    + '<td class="status">' + icon(entry.status) + ' ' + escapeHtml(entry.title) + '</td>'
+    + '<td class="status">' + escapeHtml(statusLabel(entry.status)) + '</td>'
+    + '<td>' + escapeHtml(entry.evidence)
+    + (entry.hint ? '<div class="hint">↳ ' + escapeHtml(entry.hint) + '</div>' : '')
+    + (entry.target ? ' <a class="goto" href="' + consoleHref(entry.target) + '">去看 →</a>' : '')
+    + '</td></tr>'
+  ).join('');
+  el.className = '';
+  el.innerHTML = '<table><thead><tr><th style="width:230px">约束</th><th style="width:90px">状态</th><th>证据 / 下一步</th></tr></thead><tbody>'
+    + rows + '</tbody></table>';
+}
+
+function renderGroups(report) {
+  const el = document.getElementById('checks');
+  const groups = report.groups || [];
+  if (groups.length === 0) {
+    el.textContent = '还没有体检结果：先把宿主与桥跑起来，再点「重新体检」。';
+    return;
+  }
+  el.className = '';
+  el.innerHTML = groups.map((group) => {
+    const rows = group.items.map((item) => {
+      const status = item.ok ? 'pass' : (item.severity === 'warn' ? 'warn' : 'fail');
+      return '<div class="check">'
+        + '<span>' + icon(status) + '</span>'
+        + '<div class="body"><b>' + escapeHtml(item.title) + '</b>'
+        + '<div class="detail">' + escapeHtml(item.detail) + '</div>'
+        + (item.hint ? '<div class="hint">↳ ' + escapeHtml(item.hint) + '</div>' : '')
+        + '</div>'
+        + '<a class="goto" href="' + consoleHref(item.target) + '">去看 →</a>'
+        + '</div>';
+    }).join('');
+    return '<div class="group"><h3>' + escapeHtml(group.title)
+      + ' <span class="meta">' + (group.total - group.failed) + '/' + group.total + ' 通过</span></h3>'
+      + rows + '</div>';
+  }).join('');
+}
+
+function renderFacts(report) {
+  const facts = report.facts || [];
+  const card = document.getElementById('factsCard');
+  if (facts.length === 0) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  document.getElementById('facts').innerHTML = facts.map((fact) =>
+    '<div><b>' + escapeHtml(fact.label) + '</b>' + escapeHtml(fact.value) + '</div>'
+  ).join('');
+}
+
+function showFailure(message) {
+  const hero = document.getElementById('verdict');
+  hero.className = 'hero unknown';
+  document.getElementById('verdictTitle').textContent = '读不到体检报告';
+  document.getElementById('verdictDetail').textContent = message;
+  document.getElementById('verdictPill').className = 'pill unknown';
+  document.getElementById('verdictPill').textContent = '未完成';
+  document.getElementById('summary').innerHTML = '';
+  document.getElementById('actions').innerHTML = '<li class="empty">' + escapeHtml(message) + '</li>';
+  document.getElementById('constraints').textContent = '—';
+  document.getElementById('checks').textContent = '—';
+  document.getElementById('factsCard').style.display = 'none';
+}
+
+async function loadReport(force, silent) {
+  const button = document.getElementById('btnReload');
+  // 每分钟的自动重算不闪按钮，只有用户点「重新体检」时才显示"体检中…"
+  if (button && !silent) { button.disabled = true; button.textContent = '体检中…'; }
+  try {
+    const result = await api('/api/report' + (force ? '?fresh=1' : ''));
+    if (!result || !result.report) {
+      showFailure((result && result.reason) || '接口没有返回报告');
+      return;
+    }
+    lastText = result.text || '';
+    render(result.report);
+  } catch (error) {
+    showFailure('读取失败：' + (error && error.message ? error.message : error));
+  } finally {
+    if (button && !silent) { button.disabled = false; button.textContent = '重新体检'; }
+  }
+}
+
+async function copyReport() {
+  if (!lastText) { toast('还没有报告内容可复制'); return; }
+  try {
+    await navigator.clipboard.writeText(lastText);
+    toast('已复制完整报告文本（可贴到 issue 或发给别人）');
+  } catch (error) {
+    // 非 https / 旧浏览器没有 navigator.clipboard：退回到隐藏 textarea
+    const area = document.createElement('textarea');
+    area.value = lastText;
+    area.style.position = 'fixed'; area.style.opacity = '0';
+    document.body.appendChild(area); area.select();
+    let copied = false;
+    try { copied = document.execCommand('copy'); } catch (ignored) { copied = false; }
+    area.remove();
+    toast(copied ? '已复制完整报告文本' : '复制失败：请手动全选复制');
+  }
+}
+
+if (!token) {
+  document.getElementById('tokenHint').style.display = '';
+}
+const topLink = document.getElementById('consoleTop');
+if (topLink && token) topLink.href = consoleHref('');
+loadReport(false);
+// 报告是"此刻"的快照：看得见的时候每分钟自动重算（后台标签页不空转；不闪「体检中…」按钮）
+setInterval(() => { if (!document.hidden) loadReport(false, true); }, 60000);
+</script>
+</body>
+</html>

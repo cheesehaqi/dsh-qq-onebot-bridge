@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>语音调试 · 小鲸鱼控制台</title>
+<!--
+  语音调试（v0.8.5 之后，2026-11-08）。
+
+  为什么单独一页：语音是要"细调"的东西 —— 一句话要反复换音色/语言听几遍，
+  录一段话要反复看转写结果。放在控制台总览里，周围全是端口/事件流，试听记录也会被
+  每 30 秒的自动刷新冲掉。这一页只管语音：状态、试听（保留最近 5 条以便 A/B）、
+  录音/选文件转写；参数只在**本次试听**里覆盖，不改任何配置（改配置去 DSH 设置页）。
+
+  口径：
+    · 只读 + 试跑：不发 QQ、不写配置、不落盘录音（转写完就丢）；
+    · 零外部依赖；token 从 ?token= 读（和 /report、/accounts 一致）；
+    · 真正的服务与密钥在宿主里：本页只经控制台代理调宿主的 /qqai/voice/*。
+-->
+<style>
+  :root{
+    --bg:#0f1720; --panel:#17222e; --line:#243447; --fg:#e6edf3; --dim:#8aa0b4;
+    --ok:#3fb950; --warn:#d29922; --bad:#f85149; --unknown:#8b949e; --accent:#4a9eff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.6 "Microsoft YaHei",system-ui,-apple-system,"Segoe UI",sans-serif}
+  header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 20px;
+    border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:18px;
+    background:linear-gradient(135deg,#ff7ab6,#7c5cff)}
+  .brand b{font-size:15px} .brand small{display:block;color:var(--dim);font-size:11px;font-weight:400}
+  .grow{flex:1}
+  .pill{padding:3px 12px;border-radius:999px;font-size:12.5px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+  .pill.ok{color:#0d1117;background:var(--ok);border-color:var(--ok)}
+  .pill.warn{color:#0d1117;background:var(--warn);border-color:var(--warn)}
+  .pill.bad{color:#0d1117;background:var(--bad);border-color:var(--bad)}
+  .pill.unknown{color:#0d1117;background:var(--unknown);border-color:var(--unknown)}
+  button,select,input{background:#22303f;color:var(--fg);border:1px solid var(--line);border-radius:7px;
+    padding:6px 12px;cursor:pointer;font-size:13px;font-family:inherit}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#06121f;font-weight:600}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  main{max-width:1180px;margin:0 auto;padding:18px 20px 70px;display:grid;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px}
+  .card h2{font-size:13px;margin:0 0 10px;color:var(--dim);font-weight:600;letter-spacing:.5px}
+  .meta{color:var(--dim);font-size:12px}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+  .row:last-child{margin-bottom:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width: 900px){ .grid2{grid-template-columns:1fr} }
+  .hint{color:var(--dim);font-size:12.5px;margin-top:3px;word-break:break-word}
+  .check{display:flex;gap:9px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #1c2836}
+  .check:last-child{border-bottom:none}
+  .check .body{flex:1;min-width:0}
+  .attempt{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:8px;background:#131d27}
+  .attempt b{font-size:13px}
+  .toast{position:fixed;right:18px;bottom:18px;background:#1d2a38;border:1px solid var(--line);
+    padding:10px 14px;border-radius:8px;max-width:60ch;opacity:0;transition:.2s;z-index:20;pointer-events:none}
+  .toast.show{opacity:1}
+  .warnbox{border-color:#5a4620;background:#241d0f;color:#f0d08a}
+  .badbox{border-color:#5c2b2b;background:#241010;color:#ffb4ae}
+  footer{padding:4px 2px;line-height:1.7}
+  code{background:#0b131b;padding:0 5px;border-radius:4px;font-size:12.5px}
+  textarea{background:#0b131b;color:var(--fg);border:1px solid var(--line);border-radius:8px;
+    padding:8px 10px;font:inherit;width:100%;resize:vertical}
+  /* 细调参数：折叠块 + 两列小输入框 */
+  details.tune{border:1px solid var(--line);border-radius:10px;padding:6px 10px;margin:8px 0}
+  details.tune > summary{cursor:pointer;font-size:12.5px;color:var(--dim);list-style:none}
+  details.tune > summary::-webkit-details-marker{display:none}
+  details.tune > summary::before{content:'▸ ';color:var(--dim)}
+  details.tune[open] > summary::before{content:'▾ '}
+  .field-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:8px}
+  .field-grid label{display:flex;flex-direction:column;gap:2px;font-size:12px}
+  .field-grid input,.field-grid select{padding:4px 8px;font-size:12.5px;width:100%}
+  @media (max-width:600px){ .field-grid{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="logo">🎙️</span>
+    <div><b>语音调试</b><small>TTS 试听 / STT 试转写 · 只在本机</small></div>
+  </div>
+  <span id="verdictPill" class="pill">读取中…</span>
+  <span class="grow"></span>
+  <span id="stamp" class="meta"></span>
+  <button class="primary" onclick="loadVoiceStatus(true)">刷新状态</button>
+  <a id="consoleTop" href="/">回控制台</a>
+</header>
+
+<main>
+  <section class="card warnbox" id="tokenHint" style="display:none">
+    <b>地址里没有 token</b>
+    <div class="meta" style="margin-top:4px">
+      这个页面和 API 一样要求 token。请从控制台点「语音调试」，或用启动时打印的
+      <code>/voice?token=&lt;控制台 token&gt;</code> 打开。
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>语音模块状态 <span class="meta">（卡在哪、下一步点哪里）</span></h2>
+    <div id="voiceStatus" class="meta">（读取中…）</div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>TTS 试听 <span class="meta">（合成一段话，只在页面里播放，不发 QQ）</span></h2>
+      <textarea id="voiceText" rows="2" placeholder="输入要合成的话（最多 500 字）"></textarea>
+      <div class="row" style="margin-top:8px">
+        <input type="text" id="voiceVoice" placeholder="音色覆盖（可留空 = 用配置）" style="flex:1;min-width:200px" />
+        <input type="number" step="0.5" id="pitch" placeholder="音调（半音，-12…12）" style="max-width:190px" />
+        <select id="voiceTextLang" title="文本语言（自动 / 中 / 英 / 日）">
+          <option value="auto">语言：自动</option>
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+        </select>
+      </div>
+      <div class="hint">音调：Azure 走 SSML 原生 prosody；本地 GPT-SoVITS / OpenAI 用内置变调（只变调、时长基本不变，±12 半音）。
+        本地 wav 不需要 ffmpeg；云端 mp3 需要 ffmpeg 解码（精简版 ffmpeg 也能用）。
+        文本语言只对本地 GPT-SoVITS 生效（<b>自动</b> = 让模型自己判，v1/v2 都支持；中英日混说也稳）。</div>
+      <details class="tune" id="ttsTune">
+        <summary>细调参数 <span class="meta" id="ttsProviderHint">（按 provider 显示；只影响这次试听，不写回配置）</span></summary>
+        <div class="field-grid">
+          <label class="meta" id="azureStyleWrap">风格（Azure）
+            <input type="text" id="azureStyle" placeholder="如 chat / cheerful（空 = 用配置）" />
+          </label>
+          <label class="meta" id="azureRateWrap">语速 %（Azure，-50…100）
+            <input type="number" id="azureRate" placeholder="如 10" />
+          </label>
+          <label class="meta" id="azureVolumeWrap">音量 %（Azure，-50…50）
+            <input type="number" id="azureVolume" placeholder="如 -10" />
+          </label>
+          <label class="meta" id="openaiSpeedWrap">语速倍率（OpenAI，0.25…4）
+            <input type="number" step="0.05" id="openaiSpeed" placeholder="如 1.2" />
+          </label>
+          <label class="meta" id="refAudioWrap">参考音频（GPT-SoVITS 绝对路径）
+            <input type="text" id="refAudio" placeholder="留空 = 用配置" />
+          </label>
+          <label class="meta" id="refTextWrap">参考文本（参考音频里说了什么）
+            <input type="text" id="refText" placeholder="留空 = 用配置" />
+          </label>
+          <label class="meta" id="refLangWrap">参考语言
+            <select id="refLang">
+              <option value="">用配置</option>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+            </select>
+          </label>
+          <label class="meta" id="localSpeedWrap">语速（GPT-SoVITS，0.5…2）
+            <input type="number" step="0.05" id="localSpeed" placeholder="如 1.1" />
+          </label>
+          <label class="meta" id="temperatureWrap">temperature（0.01…2）
+            <input type="number" step="0.05" id="temperature" placeholder="如 1.0" />
+          </label>
+          <label class="meta" id="topKWrap">top_k（1…100）
+            <input type="number" id="topK" placeholder="如 15" />
+          </label>
+          <label class="meta" id="topPWrap">top_p（0…1）
+            <input type="number" step="0.05" id="topP" placeholder="如 1" />
+          </label>
+          <label class="meta" id="repetitionWrap">重复惩罚（0.5…2）
+            <input type="number" step="0.05" id="repetitionPenalty" placeholder="如 1.35" />
+          </label>
+          <label class="meta" id="seedWrap">种子（-1 = 随机）
+            <input type="number" id="seed" placeholder="如 42" />
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px"><button onclick="resetTtsTune()">恢复默认</button></div>
+      </details>
+      <div class="row">
+        <button class="primary" onclick="testTts()">合成并试听</button>
+        <span class="meta" id="voiceTtsState"></span>
+      </div>
+      <div id="voiceTtsOut" class="meta"></div>
+      <div id="voiceAttempts"></div>
+      <div class="hint">细调参数只覆盖<b>这一次</b>试听，不会写回配置；要长期生效请去 DSH 设置页改。</div>
+    </section>
+
+    <section class="card">
+      <h2>STT 试转写 <span class="meta">（录一段或选音频文件 → 本地识别转 16kHz WAV / 云端原样上传 → 识别）</span></h2>
+      <div class="row">
+        <button id="voiceRecBtn" onclick="toggleRecord()">开始录音</button>
+        <button onclick="document.getElementById('voiceFile').click()">选音频文件</button>
+        <input type="file" id="voiceFile" accept="audio/*" style="display:none" onchange="sendFile(this)" />
+        <select id="voiceLang" title="识别语言（自动 / 中 / 英 / 日）">
+          <option value="auto">语言：自动</option>
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+        </select>
+        <span id="sttModelWrap" style="display:none">
+          <input type="text" id="sttModel" placeholder="模型覆盖（云端，如 glm-asr-2512）" style="max-width:220px" />
+        </span>
+      </div>
+      <div class="row"><span class="meta" id="voiceSttState"></span></div>
+      <div id="voiceSttOut" class="meta"></div>
+      <div class="hint">录音只在内存里转一圈：转写完成后就丢弃，不保存、不发 QQ。识别走宿主里的本地 SenseVoice（或云端 provider）。</div>
+      <div class="hint">为什么是 <b>16kHz</b>：宿主里的本地识别服务<b>只接受</b> 16kHz 单声道 16 位 WAV（平台会校验，别的采样率直接拒），
+        16k 也是 SenseVoice 这类识别模型的训练采样率——更高的采样率（44.1/48k）在识别前也会被降采样，不会更准。
+        走云端 provider 时<b>不转码</b>（原样上传，采样率由云端决定）。TTS 试听那条链路也不受这个限制：
+        音频按服务商原样返回（本地 GPT-SoVITS 常见 32/44.1kHz），上面的格式会标出实际采样率。</div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>为什么这样测 <span class="meta">（出问题时先看这几条）</span></h2>
+    <div class="hint">
+      1. 状态里写着"宿主 speechToText：不可用"时，STT 走 dsh 一定失败 —— 先在 profile 里启用实验性的「语音输入」bundle 并重启宿主；<br />
+      2. 宿主刚更新过插件时，<code>/qqai/voice/*</code> 是插件新注册的路由，<b>要重启一次宿主</b>才会挂上；<br />
+      3. 控制台会自己找宿主：先看 <code>qq-host-out.log</code> 里带 token 的地址，找不到就从监听端口里认出 DSH 宿主
+      （桌面端自己起的宿主端口随机也能认）；两条都失败时状态里会写清楚卡在哪；<br />
+      4. 转码要 ffmpeg 在 PATH（或插件里的 <code>ffmpegPath</code> 指对），失败原因会原样显示；<br />
+      5. 这里<b>不发 QQ、不改配置</b>：真正的语音回复行为要看桥的「语音回复」开关与 TTS 配置。
+    </div>
+  </section>
+
+  <section class="card badbox" id="pageErrors" style="display:none"></section>
+
+  <footer class="meta">
+    参数只在本次试听里覆盖；试听记录只保存在这个页面（刷新即清空）。
+  </footer>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const token = new URLSearchParams(location.search).get('token') || '';
+const VERDICT_TEXT = { ok: '就绪', partial: '有卡点', off: '未启用' };
+const ATTEMPT_LIMIT = 5;
+let attempts = [];
+let recorder = null;
+let chunks = [];
+let stream = null;
+let voiceProvider = '';
+
+const pageErrors = [];
+function reportPageError(text) {
+  pageErrors.push(new Date().toLocaleTimeString('zh-CN', { hour12: false }) + ' ' + text);
+  const el = document.getElementById('pageErrors');
+  if (!el) return;
+  el.style.display = '';
+  el.innerHTML = '<h2>页面脚本错误（请连同截图反馈）</h2>'
+    + pageErrors.map((line) => '<div>❌ ' + escapeHtml(line) + '</div>').join('');
+}
+window.addEventListener('error', (event) => reportPageError((event.message || '脚本错误') + ' @ ' + (event.filename || '') + ':' + (event.lineno || 0)));
+window.addEventListener('unhandledrejection', (event) => reportPageError('Promise 失败：' + ((event.reason && event.reason.message) || event.reason)));
+
+function api(path, options) {
+  const url = path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+  return fetch(url, Object.assign({ headers: { 'X-Control-Token': token } }, options || {}))
+    .then((response) => response.json());
+}
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function toast(text) {
+  const el = document.getElementById('toast');
+  el.textContent = text; el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 4200);
+}
+function stampNow() {
+  return new Date().toLocaleTimeString('zh-CN', { hour12: false });
+}
+function sizeText(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return value + ' B';
+  if (value < 1024 * 1024) return Math.round(value / 1024) + ' KB';
+  return (value / 1024 / 1024).toFixed(1) + ' MB';
+}
+/** 从 base64 WAV 头里读规格（采样率/声道/位深）——TTS 输出到底是多少 kHz，别靠猜。 */
+function wavSpec(base64) {
+  try {
+    const head = atob(String(base64 || '').slice(0, 96));
+    if (head.slice(0, 4) !== 'RIFF' || head.slice(8, 12) !== 'WAVE') return '';
+    const u16 = (offset) => (head.charCodeAt(offset) | (head.charCodeAt(offset + 1) << 8)) & 0xffff;
+    const u32 = (offset) => (head.charCodeAt(offset) | (head.charCodeAt(offset + 1) << 8)
+      | (head.charCodeAt(offset + 2) << 16) | (head.charCodeAt(offset + 3) << 24)) >>> 0;
+    const rate = u32(24);
+    const channels = u16(22);
+    const bits = u16(34);
+    if (rate === 0) return '';
+    return 'WAV ' + Math.round(rate / 1000) + 'kHz · ' + (channels === 1 ? '单声道' : channels + ' 声道') + ' · ' + bits + 'bit';
+  } catch { return ''; }
+}
+function blockerTextOf(part) {
+  const first = ((part && part.blockers) || [])[0];
+  return first ? first.reason + '　↳ ' + first.hint : '';
+}
+
+function shortPath(path) {
+  const text = String(path || '');
+  const parts = text.split(/[\\/]/).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : text;
+}
+
+/** 把一次试听用到的参数压成一行（A/B 时一眼看出差别）。 */
+function paramsSummary(params) {
+  const p = params || {};
+  const parts = [];
+  if (p.voice) parts.push('音色 ' + p.voice);
+  if (p.textLang) parts.push('语言 ' + p.textLang);
+  if (p.azureStyle) parts.push('风格 ' + p.azureStyle);
+  if (p.azureRate !== undefined) parts.push('语速 ' + p.azureRate + '%');
+  if (p.azurePitch !== undefined) parts.push('音调 ' + p.azurePitch + 'st');
+  if (p.pitch !== undefined) parts.push('音调 ' + p.pitch + ' 半音');
+  if (p.azureVolume !== undefined) parts.push('音量 ' + p.azureVolume + '%');
+  if (p.speed !== undefined) parts.push('语速 ×' + p.speed);
+  if (p.localSpeed !== undefined) parts.push('语速 ×' + p.localSpeed);
+  if (p.temperature !== undefined) parts.push('temp ' + p.temperature);
+  if (p.topK !== undefined) parts.push('top_k ' + p.topK);
+  if (p.topP !== undefined) parts.push('top_p ' + p.topP);
+  if (p.repetitionPenalty !== undefined) parts.push('重复 ' + p.repetitionPenalty);
+  if (p.seed !== undefined) parts.push('seed ' + p.seed);
+  if (p.refAudio) parts.push('参考 ' + shortPath(p.refAudio));
+  if (p.refText) parts.push('参考文本 ' + String(p.refText).slice(0, 12));
+  if (p.refLang) parts.push('参考语言 ' + p.refLang);
+  return parts.join(' · ');
+}
+
+/** 只收集**当前 provider 用得上**的细调字段（其它 provider 的输入框是隐藏的，别误发）。 */
+function collectTtsOverrides() {
+  const overrides = {};
+  const readText = (id, key) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const value = String(el.value || '').trim();
+    if (value !== '') overrides[key] = value;
+  };
+  const readNumber = (id, key) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const raw = String(el.value || '').trim();
+    if (raw !== '') overrides[key] = raw; // 交给宿主侧校验：越界会明确报错，不悄悄夹紧
+  };
+  readText('voiceVoice', 'voice');
+  readText('voiceTextLang', 'textLang');
+  // 音调：Azure 有原生 prosody，其它 provider 走 ffmpeg 移调
+  readNumber('pitch', voiceProvider === 'azure' ? 'azurePitch' : 'pitch');
+  if (voiceProvider === 'azure') {
+    readText('azureStyle', 'azureStyle');
+    readNumber('azureRate', 'azureRate');
+    readNumber('azurePitch', 'azurePitch');
+    readNumber('azureVolume', 'azureVolume');
+  } else if (voiceProvider === 'openai') {
+    readNumber('openaiSpeed', 'speed');
+  } else if (voiceProvider === 'local') {
+    readText('refAudio', 'refAudio');
+    readText('refText', 'refText');
+    readText('refLang', 'refLang');
+    readNumber('localSpeed', 'localSpeed');
+    readNumber('temperature', 'temperature');
+    readNumber('topK', 'topK');
+    readNumber('topP', 'topP');
+    readNumber('repetitionPenalty', 'repetitionPenalty');
+    readNumber('seed', 'seed');
+  }
+  return overrides;
+}
+
+function resetTtsTune() {
+  for (const id of ['azureStyle', 'azureRate', 'azureVolume', 'openaiSpeed', 'pitch',
+    'refAudio', 'refText', 'refLang', 'localSpeed', 'temperature', 'topK', 'topP', 'repetitionPenalty', 'seed']) {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  }
+  toast('细调参数已清空（回到配置默认）');
+}
+
+/** 按 provider 显示/隐藏细调字段，并把配置里的当前值写进 placeholder。 */
+function applyTtsFields(tts, stt) {
+  voiceProvider = String(tts.provider || '');
+  const show = (ids, visible) => ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = visible ? '' : 'none';
+  });
+  show(['azureStyleWrap', 'azureRateWrap', 'azureVolumeWrap'], voiceProvider === 'azure');
+  show(['openaiSpeedWrap'], voiceProvider === 'openai');
+  show(['refAudioWrap', 'refTextWrap', 'refLangWrap', 'localSpeedWrap', 'temperatureWrap', 'topKWrap', 'topPWrap', 'repetitionWrap', 'seedWrap'],
+    voiceProvider === 'local');
+  document.getElementById('ttsProviderHint').textContent =
+    '（当前 provider：' + (voiceProvider || '未知') + '；只影响这次试听，不写回配置）';
+  const voiceEl = document.getElementById('voiceVoice');
+  if (voiceEl && String(voiceEl.value).trim() === '' && tts.voice) voiceEl.placeholder = '配置里的音色：' + tts.voice;
+  const refEl = document.getElementById('refAudio');
+  if (refEl && String(refEl.value).trim() === '' && tts.refAudioName) refEl.placeholder = '配置里的参考：' + tts.refAudioName;
+  const modelWrap = document.getElementById('sttModelWrap');
+  if (modelWrap) modelWrap.style.display = String((stt || {}).provider || '') === 'cloud' ? '' : 'none';
+  const modelEl = document.getElementById('sttModel');
+  if (modelEl && String(modelEl.value).trim() === '' && stt.model && stt.provider === 'cloud') {
+    modelEl.placeholder = '配置里的模型：' + stt.model;
+  }
+}
+
+function renderStatus(data) {
+  const tts = data.tts || {};
+  const stt = data.stt || {};
+  const stateOf = (part) => (part.enabled === false ? '关着' : (part.ready === true ? '就绪' : '未就绪'));
+  const ttsDetail = tts.provider === 'local'
+    ? (tts.localUrl || '?') + (tts.refAudioName ? ' · 参考 ' + tts.refAudioName : '（缺参考音频）')
+    : '音色 ' + (tts.voice || '-');
+  const sttDetail = (stt.model || '?') + (stt.language ? ' · 语言 ' + stt.language : '');
+  applyTtsFields(tts, stt);
+  document.getElementById('voiceStatus').innerHTML =
+    '<div class="check"><span>' + (tts.ready === true ? '✅' : '⚠️') + '</span><div class="body">'
+    + '<b>TTS</b>：' + escapeHtml(stateOf(tts)) + ' · ' + escapeHtml(tts.provider || '?') + ' · ' + escapeHtml(ttsDetail)
+    + (tts.ready === true ? '' : '<div class="hint">↳ ' + escapeHtml(blockerTextOf(tts)) + '</div>') + '</div></div>'
+    + '<div class="check"><span>' + (stt.ready === true ? '✅' : '⚠️') + '</span><div class="body">'
+    + '<b>STT</b>：' + escapeHtml(stateOf(stt)) + ' · ' + escapeHtml(stt.provider || '?') + ' · ' + escapeHtml(sttDetail)
+    + (stt.ready === true ? '' : '<div class="hint">↳ ' + escapeHtml(blockerTextOf(stt)) + '</div>') + '</div></div>'
+    + '<div class="hint">宿主 speechToText：' + (data.hostService === true ? '可用' : '不可用（走 dsh 时必须先启用「语音输入」bundle）')
+    + (data.host ? ' · 宿主地址 ' + escapeHtml(data.host) : '') + '</div>';
+  const pill = document.getElementById('verdictPill');
+  const ready = tts.ready === true && stt.ready === true;
+  const anyOff = tts.enabled === false && stt.enabled === false;
+  pill.className = 'pill ' + (anyOff ? 'unknown' : (ready ? 'ok' : 'warn'));
+  pill.textContent = anyOff ? '都没启用' : (ready ? '都就绪' : '有卡点');
+  document.getElementById('stamp').textContent = '状态更新于 ' + stampNow();
+}
+
+async function loadVoiceStatus(force) {
+  try {
+    const result = await api('/api/voice/status');
+    if (result.ok === false && !result.tts) {
+      document.getElementById('voiceStatus').textContent = '⚠️ ' + (result.reason || '读取失败');
+      document.getElementById('verdictPill').className = 'pill bad';
+      document.getElementById('verdictPill').textContent = '不可用';
+      return;
+    }
+    renderStatus(result);
+    if (force) toast('语音模块状态已刷新');
+  } catch (error) {
+    document.getElementById('voiceStatus').textContent = '⚠️ 读取失败：' + error.message;
+  }
+}
+
+function base64ToBlob(base64, mime) {
+  const binary = atob(String(base64 || ''));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mime });
+}
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || '').replace(/^data:[^,]*,/, ''));
+    reader.onerror = () => reject(new Error('读取音频失败'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function renderAttempts() {
+  const box = document.getElementById('voiceAttempts');
+  if (attempts.length === 0) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="meta" style="margin-top:10px">最近试听（最多 ' + ATTEMPT_LIMIT + ' 条，方便 A/B）</div>'
+    + attempts.map((item, index) => {
+      const summary = paramsSummary(item.params);
+      return '<div class="attempt"><b>#' + (attempts.length - index) + ' ' + escapeHtml(item.text.slice(0, 60)) + '</b>'
+        + '<div class="hint">' + escapeHtml(item.provider || '') + ' · ' + sizeText(item.bytes) + ' · ' + item.ms + ' ms'
+        + (item.spec ? ' · ' + escapeHtml(item.spec) : '')
+        + (summary ? ' · ' + escapeHtml(summary) : '') + '</div>'
+        + '<audio controls src="' + item.url + '" style="width:100%;margin-top:6px"></audio></div>';
+    }).join('');
+}
+
+async function testTts() {
+  const text = document.getElementById('voiceText').value.trim();
+  const overrides = collectTtsOverrides();
+  const state = document.getElementById('voiceTtsState');
+  const out = document.getElementById('voiceTtsOut');
+  if (text === '') { state.textContent = '⚠️ 先写一句要合成的话'; return; }
+  state.textContent = '合成中…（本地 GPT-SoVITS 可能要几秒）';
+  out.innerHTML = '';
+  try {
+    const result = await api('/api/voice/tts', {
+      method: 'POST',
+      body: JSON.stringify({ text, overrides }),
+    });
+    if (result.ok !== true) { state.textContent = ''; out.textContent = '⚠️ ' + (result.reason || '合成失败'); return; }
+    const url = URL.createObjectURL(base64ToBlob(result.audio, result.format === 'wav' ? 'audio/wav' : 'audio/mpeg'));
+    const summary = paramsSummary(result.params);
+    const spec = result.format === 'wav' ? wavSpec(result.audio) : String(result.format || '').toUpperCase();
+    out.innerHTML = '<audio controls autoplay src="' + url + '" style="width:100%;margin-top:6px"></audio>'
+      + '<div class="hint">' + escapeHtml(result.provider || '') + ' · ' + sizeText(result.bytes)
+      + ' · ' + (result.ms || 0) + ' ms' + (spec ? ' · ' + escapeHtml(spec) : '')
+      + ' · 只是试听，没有发到 QQ' + (summary ? ' · ' + escapeHtml(summary) : '') + '</div>';
+    attempts.unshift({
+      text, provider: result.provider || '', params: result.params || overrides, spec,
+      bytes: result.bytes || 0, ms: result.ms || 0, url,
+    });
+    while (attempts.length > ATTEMPT_LIMIT) {
+      const dropped = attempts.pop();
+      try { URL.revokeObjectURL(dropped.url) } catch { /* 已释放 */ }
+    }
+    renderAttempts();
+    state.textContent = '✅ 合成好了';
+  } catch (error) {
+    state.textContent = '';
+    out.textContent = '⚠️ ' + error.message;
+  }
+}
+
+async function transcribeBase64(base64, ext, bytes, language) {
+  const state = document.getElementById('voiceSttState');
+  const out = document.getElementById('voiceSttOut');
+  state.textContent = '转写中…（首次会下载本地模型，可能要等）';
+  out.innerHTML = '';
+  try {
+    const result = await api('/api/voice/stt', {
+      method: 'POST',
+      body: JSON.stringify({ audioBase64: base64, ext, language, model: (document.getElementById('sttModel') || {}).value || '' }),
+    });
+    if (result.ok !== true) { state.textContent = ''; out.textContent = '⚠️ ' + (result.reason || '转写失败'); return; }
+    state.textContent = '✅ ' + (result.provider || '') + ' · ' + sizeText(bytes || result.bytes || 0) + ' · ' + (result.ms || 0) + ' ms';
+    out.innerHTML = '<div style="margin-top:6px"><b>转写结果：</b>' + escapeHtml(result.text || '') + '</div>'
+      + (result.language ? '<div class="hint">语言：' + escapeHtml(result.language) + '</div>' : '')
+      + (result.model ? '<div class="hint">模型：' + escapeHtml(result.model) + '</div>' : '')
+      + (result.wavBytes ? '<div class="hint">先转成 16kHz 单声道 WAV（' + sizeText(result.wavBytes) + '）再识别</div>' : '');
+  } catch (error) {
+    state.textContent = '';
+    out.textContent = '⚠️ ' + error.message;
+  }
+}
+
+async function toggleRecord() {
+  const button = document.getElementById('voiceRecBtn');
+  const state = document.getElementById('voiceSttState');
+  if (recorder && recorder.state === 'recording') { recorder.stop(); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+    state.textContent = '这个浏览器不支持录音：改用「选音频文件」';
+    return;
+  }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (event) => { if (event.data && event.data.size > 0) chunks.push(event.data) };
+    recorder.onstop = async () => {
+      button.textContent = '开始录音';
+      try { stream.getTracks().forEach((track) => track.stop()) } catch { /* 已关闭 */ }
+      recorder = null;
+      const blob = new Blob(chunks, { type: (chunks[0] && chunks[0].type) || 'audio/webm' });
+      if (blob.size === 0) { state.textContent = '没录到声音'; return; }
+      if (blob.size > 6 * 1024 * 1024) { state.textContent = '录音太大（>6 MB）：短一点再试'; return; }
+      const ext = String(blob.type || '').includes('ogg') ? 'ogg' : 'webm';
+      await transcribeBase64(await blobToBase64(blob), ext, blob.size, document.getElementById('voiceLang').value);
+    };
+    recorder.start();
+    button.textContent = '停止录音（录着…）';
+    state.textContent = '正在录音…说完点「停止录音」';
+  } catch (error) {
+    state.textContent = '麦克风不可用：' + error.message;
+  }
+}
+
+async function sendFile(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  if (file.size > 6 * 1024 * 1024) { document.getElementById('voiceSttState').textContent = '文件太大（>6 MB）'; return; }
+  const ext = (String(file.name || '').split('.').pop() || 'wav').toLowerCase();
+  await transcribeBase64(await blobToBase64(file), ext, file.size, document.getElementById('voiceLang').value);
+}
+
+if (!token) document.getElementById('tokenHint').style.display = '';
+const consoleTop = document.getElementById('consoleTop');
+if (consoleTop && token) consoleTop.href = '/?token=' + encodeURIComponent(token);
+loadVoiceStatus(false);
+</script>
+</body>
+</html>

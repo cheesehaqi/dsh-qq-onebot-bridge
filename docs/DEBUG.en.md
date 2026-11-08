@@ -59,3 +59,70 @@ The two features above answer "what is happening" and "why did this message go t
 | ⑥ Injectable | channel switch, dry-run switch (off ⇒ not met, because it would send to QQ), lines consumed, and how many **asynchronous agent-turn replies have been intercepted** |
 
 Every row has a "去看 →" link that jumps to the matching card; the verdict is one of `all-green / partial / unknown / broken`. The evaluator is a pure function (`control/lib/acceptance.mjs`) with every branch asserted in tests, refreshed every 30s and immediately after a replay finishes.
+
+### One-click health report (standalone page `/report`)
+
+The acceptance page is for **yourself**: 18 diagnostic checks and 6 constraints spread over a few cards are hard to send to someone else, archive, or paste into an issue.
+
+`/report` merges the two existing artefacts (per-check diagnosis + the 6 hard constraints) into one report:
+
+- a one-line verdict (`blocked / warnings / unknown / all-green`) plus the key counters;
+- **fix these first**: ordered by consequence — blocking checks → failed constraints → warnings, each with a concrete next step, at most 6 rows;
+- **the 6 hard constraints** with their evidence and a "去看 →" link back to the matching console card (deep link via `?focus=`);
+- **check details** grouped as dependencies / ports & processes / link / runtime snapshot / events / audit & files, failures first in each group;
+- **key facts**: bridge version, uptime, sessions, write-gate denials, event count, snapshot age.
+
+The page is **read-only** (it never issues a POST), has zero external dependencies, and turns into black-on-white print output (`Ctrl+P` → save as PDF). "Copy report" uses the server-side `formatHealthReport()` text, so the whole report can be pasted into an issue. Verdict and wording live in `control/lib/report.mjs` (pure functions) and are asserted in `test/report-unit.mjs`.
+
+Endpoint: `GET /api/report[?fresh=1]` (same token + Origin gating as every other endpoint; `fresh=1` bypasses the 5-second diagnosis cache — that is what the page's "re-run" button uses).
+
+### Settings change history (console card)
+
+"Changed it and forgot" is harder to debug than "changed it wrong": path settings, the WebUI port and the WS client URLs live in three different files, and each edit only gives feedback for that one moment.
+The console's "设置项变更历史" card keeps the **old → new** of those settings files:
+
+- watched files: `qq-control.json` (console paths/ports), NapCat's `webui.json` and `onebot11_<uin>.json`;
+- trigger: only the **settings-writing endpoints** (`POST /api/config`, `/api/accounts/config`, `/api/accounts/network*`) take a snapshot before and after and diff it mechanically; start/stop/replay/inject are *operations* and stay in the event stream / `qq-actions.log` instead;
+- storage: `<console working dir at startup>/qq-settings-history.jsonl`, one line per change; over 256 KB it keeps the last 64 KB;
+- redaction: `token / secret / password / apiKey` style keys are **never written**, a value change is recorded as `token：*** → ***` (marked as hidden);
+- read: `GET /api/history?limit=200&q=keyword` (same token + Origin gating); the page filters instantly by keyword and "copy text" hands over the full text;
+- read-only: there is no "restore" button on purpose. To roll back, use the account center's config backups (they copy `.bak` first).
+
+One rule: **snapshots watch files, not endpoint arguments** — endpoints grow and change, files do not, so anything written to the files above is guaranteed to be captured.
+
+### Voice lab (standalone page `/voice`)
+
+A revisit of an older feature: the voice stack (`lib/stt.js` / `lib/tts.js`) used to be verifiable only by sending the bot a voice message, and a failure showed up as nothing but "no transcript / no sound". The console now has a **dedicated page** (`/voice`, entry in the left sidebar) — voice work means trying several voices/languages in a row and re-checking transcripts, which a 30-second auto-refreshing overview would throw away.
+
+| What you want to know | How to try | Notes |
+|---|---|---|
+| Where the voice module is stuck | status block at the top | switch off / local TTS missing reference audio / cloud key missing / host has no `speechToText` — each blocker carries "where to turn it on" |
+| Does TTS actually speak, and with which voice | type a sentence → "合成并试听" | audio plays in the page only, **never sent to QQ**; shows provider / bytes / ms |
+| Does STT transcribe, and how well | "开始录音" (say a sentence) or pick an audio file | browser recording (webm/ogg) or any audio file → host ffmpeg converts to 16 kHz mono WAV → local SenseVoice (or cloud); shows transcript, ms, converted size |
+
+**Fine-tuning** (every value is a **per-attempt override**, never written back to config; the page shows only the fields that match the provider):
+
+| provider | knobs |
+|---|---|
+| Azure | voice, style (`mstts:express-as`), rate % (-50…100), pitch st (-12…12), volume % (-50…50) |
+| OpenAI-compatible | voice, `speed` (0.25…4) |
+| GPT-SoVITS | reference audio path, reference text, reference language, `speed_factor` (0.5…2), `temperature` (0.01…2), `top_k` (1…100), `top_p` (0…1), `repetition_penalty` (0.5…2), `seed` (-1 = random) |
+| STT | recognition language (auto / Chinese / English / Japanese), cloud model id |
+
+**Pitch**: Azure uses native SSML `prosody pitch`; local GPT-SoVITS / OpenAI use the **built-in shifter** (resample + WSOLA,
+pitch changes while duration stays roughly the same, ±12 semitones) — a local wav needs no ffmpeg, cloud mp3 only uses ffmpeg
+for decoding (a minimal build is enough). Languages in the UI are **auto / Chinese / English / Japanese** (auto by default;
+GPT-SoVITS accepts `text_lang=auto` in both v1 and v2 language tables, and it copes with mixed Chinese/English/Japanese).
+
+Out-of-range values **fail loudly with the allowed range** (no silent clamping — "set 3× but got 2×" is far harder to debug); fields left empty are not sent at all, so an older GPT-SoVITS build never chokes on unknown keys. The last 5 samples (player + parameter summary) stay around for A/B. Change values in DSH settings when you want them to persist.
+
+Path: console page → `POST /api/voice/tts|stt` (token + Origin) → supervisor locates the host (① the tokenised URL in `qq-host-out.log`; ② otherwise it recognises the DSH host from local listening ports — a desktop-started host may use a different port each time, and the plugin routes themselves need no token) → host `POST /qqai/voice/{tts,stt}` (same-origin + JSON + size limits) → `lib/voice.js` → `lib/tts.js` / `lib/stt.js`.
+
+Troubleshooting:
+
+- **"找不到宿主" (host not found)**: no tokenised URL in the log (the host was never started by the console) and no DSH host recognised among listening ports — start (or restart) the host once; the status block shows which host address was actually found;
+- **"宿主在 …，但没有 /qqai/voice 接口（插件还是更新前的版本）"**: the host is running old plugin code. Plugin hot reload reuses the ESM module cache, so it does not re-evaluate; **restart the host once** (on desktop: restart DSH);
+- recording uses the browser's `MediaRecorder` and needs microphone permission; without it, pick an audio file instead;
+- ffmpeg must be on PATH (or `ffmpegPath` must point at it) — the same prerequisite as the bot's real voice transcription, and the page reports the actual failure reason;
+- **why 16 kHz**: the host's local recognition service (`speechToText`) **only accepts** 16 kHz mono 16-bit WAV (the platform validates it; anything else throws Invalid speech WAV). 16 kHz is also the training sample rate of SenseVoice-class models — 44.1/48 kHz gets downsampled before recognition anyway, so it would not be more accurate. **TTS is not constrained by this**: the page plays the provider's original audio (local GPT-SoVITS is usually 32/44.1 kHz, Azure returns 24 kHz mp3) and shows the real WAV sample rate. When the bridge sends voice to QQ it converts local wav to mp3 (`ttsLocalConvertToMp3`) without lowering the sample rate;
+- the page is a local trial only: **it does not go through the QQ send path** and does not change any setting.

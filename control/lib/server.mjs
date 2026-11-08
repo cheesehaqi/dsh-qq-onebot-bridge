@@ -25,6 +25,20 @@ const MAX_BODY_BYTES = 64 * 1024
 const LOG_NAMES = ['hostOut', 'hostErr', 'bridge', 'trace', 'audit', 'runtime']
 const CONFIG_KEYS = ['cwd', 'dshBin', 'nodeExe', 'napcatBat', 'ttsBat']
 
+/**
+ * 会写"设置文件"的入口 → 人话来源。
+ * 这些接口成功执行前后各拍一次快照，supervisor 负责 diff 并追加到设置变更历史；
+ * 其它 POST（启动/停止/回放/注入/清理）属于"操作"，不进设置历史。
+ */
+const SETTINGS_SOURCES = {
+  '/api/config': '控制台路径配置',
+  '/api/accounts/config': 'NapCat WebUI 配置',
+  '/api/accounts/network': '账号网络配置',
+  '/api/accounts/network/save': '账号网络配置（WS 客户端）',
+  '/api/accounts/network/http': '账号网络配置（HTTP 服务器）',
+  '/api/accounts/network/servers': '账号网络配置（WS 服务器）',
+}
+
 export function createToken() {
   return randomBytes(18).toString('base64url')
 }
@@ -35,14 +49,14 @@ function json(response, status, payload) {
   response.end(body)
 }
 
-function readBody(request) {
+function readBody(request, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve) => {
     let size = 0
     const chunks = []
     let tooLarge = false
     request.on('data', (chunk) => {
       size += chunk.length
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         // 之前直接 request.destroy()，客户端只会看到连接被重置；改成读完余量后回 413
         tooLarge = true
         chunks.length = 0
@@ -78,7 +92,7 @@ export function originAllowed(origin, port) {
  * @param api     supervisor (createSupervisor(...)) or a stub in tests
  * @param ui      HTML served at "/"
  */
-export function createControlServer({ config, token, api, ui = '', uiFile = '', accountsUi = '', accountsUiFile = '', saveConfig = null, logger = console }) {
+export function createControlServer({ config, token, api, ui = '', uiFile = '', accountsUi = '', accountsUiFile = '', reportUi = '', reportUiFile = '', voiceUi = '', voiceUiFile = '', saveConfig = null, logger = console }) {
   const port = config.ports?.control ?? 8799
 
   /**
@@ -119,6 +133,28 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
       }
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
       response.end(freshPage(accountsUiFile, accountsUi))
+      return
+    }
+
+    // 一键体检报告（独立页面，同源；只读，所有数据来自 /api/report）
+    if (request.method === 'GET' && (path === '/report' || path === '/report.html')) {
+      if (reportUi === '') {
+        json(response, 404, { ok: false, reason: '这个版本没有体检报告页' })
+        return
+      }
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      response.end(freshPage(reportUiFile, reportUi))
+      return
+    }
+
+    // 语音调试（独立页面，同源；只读 + 试跑，数据来自 /api/voice/*）
+    if (request.method === 'GET' && (path === '/voice' || path === '/voice.html')) {
+      if (voiceUi === '') {
+        json(response, 404, { ok: false, reason: '这个版本没有语音调试页' })
+        return
+      }
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      response.end(freshPage(voiceUiFile, voiceUi))
       return
     }
 
@@ -476,6 +512,47 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         json(response, 200, { ok: result.ok, report: result.report, text: result.text, verdict: result.verdict, totals: result.totals })
         return
       }
+      /**
+       * 一键体检报告（页面 /report 的数据源）。
+       * `fresh=1` → 绕过体检的 5 秒缓存：页面上的「重新体检」要真的重新扫端口/进程。
+       */
+      if (request.method === 'GET' && path === '/api/report') {
+        if (typeof api.healthReport !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持体检报告页' })
+          return
+        }
+        const fresh = ['1', 'true', 'yes'].includes(String(url.searchParams.get('fresh') ?? '').toLowerCase())
+        const result = await api.healthReport({ force: fresh })
+        json(response, 200, { ok: result.ok, report: result.report, text: result.text, verdict: result.report?.verdict })
+        return
+      }
+      /**
+       * 语音调试：状态直接透传宿主 `/qqai/voice/status`（TTS/STT 是否就绪、卡在哪）。
+       */
+      if (request.method === 'GET' && path === '/api/voice/status') {
+        if (typeof api.voiceStatus !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持语音调试' })
+          return
+        }
+        const result = await api.voiceStatus()
+        json(response, 200, { ...result })
+        return
+      }
+      /**
+       * 设置项变更历史（控制台「设置项变更历史」卡片）。
+       * `q` 对来源/路由/文件名/键名/旧值/新值做一次包含匹配；`limit` 上限 500。
+       */
+      if (request.method === 'GET' && path === '/api/history') {
+        if (typeof api.settingsHistory !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持设置变更历史', entries: [], text: '' })
+          return
+        }
+        const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 100))
+        const q = (url.searchParams.get('q') ?? '').trim().slice(0, 200)
+        const result = await api.settingsHistory({ limit, q })
+        json(response, 200, { ok: true, ...result })
+        return
+      }
       if (request.method === 'GET' && path === '/api/export') {
         // redact=1 → 分享安全通路：QQ 号掩码、消息原文只留长度（诊断包的使用场景就是发给别人）
         const redact = ['1', 'true', 'yes'].includes(String(url.searchParams.get('redact') ?? '').toLowerCase())
@@ -517,7 +594,9 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         return
       }
       if (request.method === 'POST') {
-        const body = await readBody(request)
+        // 语音转写要带一段 base64 录音：单独放宽到 9 MB（base64 后约 6 MB 原始音频），
+        // 其它接口保持 64 KB —— 放大的是"这一个接口"，不是整台控制台。
+        const body = await readBody(request, path === '/api/voice/stt' ? 9 * 1024 * 1024 : MAX_BODY_BYTES)
         if (body?.__tooLarge === true) {
           json(response, 413, { ok: false, reason: `请求体过大（上限 ${Math.round(MAX_BODY_BYTES / 1024)} KiB）` })
           return
@@ -702,6 +781,33 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
             if (typeof api.clearQueue !== 'function') return { ok: false, reason: '当前控制台不支持清空队列' }
             return api.clearQueue()
           },
+          // 语音调试：TTS 试听 / STT 试转写都转给宿主（服务与密钥都在那边）。
+          '/api/voice/tts': () => {
+            if (typeof api.voiceTts !== 'function') return { ok: false, reason: '当前控制台不支持语音调试' }
+            const text = String(body.text ?? '').slice(0, 500)
+            if (text.trim() === '') return { ok: false, reason: '要合成的文字是空的' }
+            const overrides = body.overrides && typeof body.overrides === 'object' && Array.isArray(body.overrides) === false
+              ? body.overrides
+              : {}
+            return api.voiceTts({
+              text,
+              // 细调参数（音色/语速/音调/采样/参考音频…）由宿主侧 voice.js 统一校验
+              overrides,
+              voice: String(body.voice ?? '').slice(0, 80),
+              textLang: String(body.textLang ?? '').slice(0, 8),
+            })
+          },
+          '/api/voice/stt': () => {
+            if (typeof api.voiceStt !== 'function') return { ok: false, reason: '当前控制台不支持语音调试' }
+            const audioBase64 = String(body.audioBase64 ?? '')
+            if (audioBase64 === '') return { ok: false, reason: '音频是空的（先录一段或选一个文件）' }
+            return api.voiceStt({
+              audioBase64,
+              ext: String(body.ext ?? 'webm'),
+              language: String(body.language ?? '').slice(0, 16),
+              model: String(body.model ?? '').slice(0, 80),
+            })
+          },
           '/api/config': () => {
             if (typeof saveConfig !== 'function') return { ok: false, reason: '配置保存不可用' }
             const patch = {}
@@ -723,7 +829,27 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
           json(response, 404, { ok: false, reason: '未知接口' })
           return
         }
+        // 设置类写接口：动作前后各拍一份设置文件快照，由 supervisor 做 diff 并落盘。
+        // 拍快照失败（没配 configFile / NapCat 目录不存在）不影响动作本身。
+        const settingsSource = SETTINGS_SOURCES[path] ?? ''
+        const watching = settingsSource !== '' && typeof api.settingsSnapshot === 'function'
+        const before = watching ? await api.settingsSnapshot() : null
         const result = await action()
+        if (watching && typeof api.recordSettingsChange === 'function') {
+          try {
+            const after = await api.settingsSnapshot()
+            await api.recordSettingsChange({
+              source: settingsSource,
+              route: path,
+              ok: result?.ok !== false,
+              reason: result?.reason ?? result?.message ?? '',
+              before,
+              after,
+            })
+          } catch (error) {
+            logger?.warn?.(`settings history failed: ${error.message}`)
+          }
+        }
         json(response, 200, { ok: result?.ok !== false, ...result })
         return
       }

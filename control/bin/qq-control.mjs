@@ -25,6 +25,8 @@ const repoRoot = resolve(here, '..', '..')
 const configFile = resolve(argOf('config', process.env.QQ_CONTROL_CONFIG || join(repoRoot, 'qq-control.json')))
 const uiFile = join(here, '..', 'ui.html')
 const accountsUiFile = join(here, '..', 'accounts.html')
+const reportUiFile = join(here, '..', 'report.html')
+const voiceUiFile = join(here, '..', 'voice.html')
 
 function argOf(name, fallback = '') {
   const index = process.argv.indexOf(`--${name}`)
@@ -89,7 +91,13 @@ if (wantsPrint) {
   process.exit(0)
 }
 
-const api = createSupervisor(config)
+// 落盘时用的"真实"控制台端口：`--port` 只对本次生效，保存别的设置时不能把它写回配置文件。
+// （踩过：用 --port 18899 打开界面、随便保存一次路径配置，配置文件就被改成 18899，之后双击 bat 直接端口冲突。）
+const persistedControlPort = loadControlConfig(configFile).config.ports.control
+
+// configFile 也交给 supervisor：控制台每次写「路径配置」时，它要靠这个路径拍前后快照，
+// 才能把"哪个键从什么改成了什么"记进设置变更历史（qq-settings-history.jsonl）。
+const api = createSupervisor(config, { configFile })
 const server = createControlServer({
   config,
   token: config.token,
@@ -100,10 +108,21 @@ const server = createControlServer({
   // 登录这件事常常发生在宿主还没起来的时候。
   accountsUi: readUi(accountsUiFile),
   accountsUiFile,
+  // v0.8.5+：「一键体检报告」同样是独立本地页（可打印/复制/深链回控制台），只读。
+  reportUi: readUi(reportUiFile),
+  reportUiFile,
+  // 语音调试单独一页：要反复换音色/语言试听、录一段看转写，塞在总览里会被自动刷新冲掉。
+  voiceUi: readUi(voiceUiFile),
+  voiceUiFile,
   saveConfig: (patch) => {
     Object.assign(config, patch)
     if (patch.ports) config.ports = { ...config.ports, ...patch.ports }
-    return saveControlConfig(configFile, config)
+    // `--port` 是本次运行的临时覆盖：除非这次保存明确改了控制台端口，否则写盘时用启动时文件里的值
+    const toSave = { ...config }
+    if (portOverride > 0 && !(patch.ports && patch.ports.control !== undefined)) {
+      toSave.ports = { ...config.ports, control: persistedControlPort }
+    }
+    return saveControlConfig(configFile, toSave)
   },
 })
 
@@ -120,10 +139,14 @@ server.listen(config.ports.control, '127.0.0.1', () => {
   const rootUrl = `http://127.0.0.1:${config.ports.control}/?token=${config.token}`
   // v0.7.11：`--accounts` 直接落在「账号中心」这一页（登录/扫码都不必先经过总览页）。
   const accountsUrl = `http://127.0.0.1:${config.ports.control}/accounts?token=${config.token}`
+  const reportUrl = `http://127.0.0.1:${config.ports.control}/report?token=${config.token}`
+  const voiceUrl = `http://127.0.0.1:${config.ports.control}/voice?token=${config.token}`
   const url = wantsAccounts ? accountsUrl : rootUrl
   console.log('🐋 小鲸鱼控制台已启动')
   console.log(`   ${wantsAccounts ? '账号中心' : '控制台'}：${url}`)
   if (!wantsAccounts) console.log(`   账号中心：${accountsUrl}`)
+  console.log(`   体检报告：${reportUrl}`)
+  console.log(`   语音调试：${voiceUrl}`)
   console.log(`   配置文件：${configFile}`)
   console.log(`   受管端口：${Object.entries(config.ports).map(([name, port]) => `${PORT_LABELS[name] ?? name}=${port}`).join('  ')}`)
   console.log(`   宿主命令：${config.nodeExe} ${config.dshBin} web --no-open`)

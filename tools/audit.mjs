@@ -57,6 +57,26 @@ const tooLate = [...ids].filter((id) => {
 if (tooLate.length > 0) fail('页面时序：这些 id 在脚本执行时还不存在 → ' + tooLate.join(', '))
 else out(`② 页面时序：${ids.size} 个 id（+${DYNAMIC.size} 个动态）全部就位`)
 
+/**
+ * ②b 同名函数重复声明：同一个 <script> 里写两个 `function foo()` 不会报错，**后者静默覆盖前者**。
+ * 2026-11-08 真踩过：新加的 `loadHistory`（设置变更历史）把事件流历史的加载器顶掉了，
+ * 页面照常打开、单测也照常绿，只是事件流从此不再加载。
+ */
+{
+  const duplicates = []
+  for (const file of ['control/accounts.html', 'control/ui.html', 'control/report.html', 'control/voice.html']) {
+    let source = ''
+    try { source = /<script>([\s\S]*?)<\/script>/.exec(readFileSync(join(ROOT, file), 'utf8'))?.[1] ?? '' } catch { continue }
+    const counts = new Map()
+    for (const match of source.matchAll(/(?:async )?function ([A-Za-z_$][\w$]*)\(/g)) {
+      counts.set(match[1], (counts.get(match[1]) ?? 0) + 1)
+    }
+    for (const [name, count] of counts) if (count > 1) duplicates.push(`${file}: ${name} ×${count}`)
+  }
+  if (duplicates.length > 0) fail('同名函数重复声明（后者会静默覆盖前者）→ ' + duplicates.join(', '))
+  else out('②b 页面脚本：四个页面都没有同名函数重复声明')
+}
+
 // ---------- ③ 路由一致性 ----------
 const server = readFileSync(join(ROOT, 'control/lib/server.mjs'), 'utf8')
 const called = new Set([...script.matchAll(/['"`](\/api\/[A-Za-z0-9_/?=&.-]*)['"`]/g)].map((m) => m[1].split('?')[0]))

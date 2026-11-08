@@ -15,8 +15,31 @@
   .pill.on { color:#0d1117; background:var(--ok); border-color:var(--ok); }
   .pill.off { color:var(--bad); border-color:var(--bad); }
   .pill.warn { color:#0d1117; background:var(--warn); border-color:var(--warn); cursor:pointer; }
-  main { padding:14px 18px 60px; display:grid; gap:14px; grid-template-columns: minmax(320px,1fr) minmax(380px,1.15fr); align-items:start; }
-  @media (max-width: 1000px) { main { grid-template-columns:1fr; } }
+  /* 左侧导航 + 右侧内容：卡片按用途分组（总览/实时/诊断/回放/数据/日志），
+     不再是一根长长的滚动条；右上角只留四个全局动作。 */
+  .app { display:grid; grid-template-columns:210px minmax(0,1fr); min-height:100vh; }
+  aside#nav { position:sticky; top:57px; align-self:start; max-height:calc(100vh - 57px); overflow:auto;
+    display:flex; flex-direction:column; gap:2px; padding:12px 10px; background:var(--panel); border-right:1px solid var(--line); }
+  aside#nav .navitem { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px;
+    color:var(--dim); cursor:pointer; font-size:13px; border:1px solid transparent; text-decoration:none; }
+  aside#nav .navitem:hover { background:#1d2a38; color:var(--fg); }
+  aside#nav .navitem.active { background:#1d2a38; color:var(--accent); border-color:var(--line); font-weight:600; }
+  aside#nav .navitem .ico { width:18px; text-align:center; }
+  aside#nav .foot { margin-top:10px; padding:6px 10px; color:var(--dim); font-size:11.5px; line-height:1.5; }
+  /* 单列铺开：卡片高度差太大，两列布局会在行尾留下大块空白（尤其页面上还有整行宽的卡片），
+     分组之后每页只剩 2–4 张卡，单列反而更好读；宽度跟窗口走，别在超宽屏右侧空一大条。 */
+  main { padding:14px 18px 60px; display:grid; gap:12px; grid-template-columns:minmax(0,1fr);
+    align-items:start; align-content:start; }
+  /* tab 切换：默认全隐藏，由脚本给当前 tab 的卡片加 .tab-active（脚本挂了会在页面顶部报错） */
+  main > section[data-tab] { display:none; }
+  main > section[data-tab].tab-active { display:block; }
+  /* 深链/「去看 →」滚动时给吸顶标题留出高度，别把卡片的标题压在 header 底下 */
+  main > section { scroll-margin-top: 100px; }
+  @media (max-width: 900px) {
+    .app { grid-template-columns:1fr; }
+    aside#nav { position:static; max-height:none; flex-direction:row; flex-wrap:wrap; border-right:none; border-bottom:1px solid var(--line); }
+    aside#nav .foot { display:none; }
+  }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; min-width:0; }
   .card h2 { font-size:13px; margin:0 0 10px; color:var(--dim); font-weight:600; letter-spacing:.5px; display:flex; align-items:center; gap:8px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -66,11 +89,24 @@
   <button onclick="refresh()">刷新</button>
   <button onclick="runDiagnose()">一键体检</button>
   <button onclick="exportBundle()">导出诊断包</button>
+  <!-- v0.8.5+：只读的「一键体检报告」独立页（可打印/复制/分享），入口与账号中心同一套 token 透传 -->
+  <a class="reportLink" href="/report"><button>体检报告</button></a>
   <label class="meta" title="QQ 号按位掩码、消息原文只留长度；要发给别人排查请保持勾选"><input type="checkbox" id="exportRedact" checked /> 脱敏</label>
 </header>
 
-<main>
-  <section class="card">
+<div class="app">
+  <aside id="nav">
+    <div class="navitem active" data-tab="overview" onclick="showTab('overview')"><span class="ico">📊</span>总览</div>
+    <div class="navitem" data-tab="live" onclick="showTab('live')"><span class="ico">📡</span>实时事件</div>
+    <div class="navitem" data-tab="diagnose" onclick="showTab('diagnose')"><span class="ico">🩺</span>诊断与报告</div>
+    <div class="navitem" data-tab="replay" onclick="showTab('replay')"><span class="ico">⏯️</span>录制 · 回放 · 注入</div>
+    <div class="navitem" data-tab="data" onclick="showTab('data')"><span class="ico">🗂️</span>数据与任务</div>
+    <div class="navitem" data-tab="logs" onclick="showTab('logs')"><span class="ico">🪵</span>日志</div>
+    <a class="navitem voiceLink" href="/voice"><span class="ico">🎙️</span>语音调试</a>
+    <div class="foot">右上角：刷新 / 一键体检 / 导出诊断包 / 体检报告<br />只连 127.0.0.1；所有接口都要 token</div>
+  </aside>
+  <main>
+  <section class="card" data-tab="overview">
     <h2>端口 / 进程</h2>
     <table>
       <thead><tr><th>端口</th><th>用途</th><th>状态</th><th>PID / 进程</th><th></th></tr></thead>
@@ -79,7 +115,7 @@
     <div class="meta" id="procMeta" style="margin-top:10px"></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-tab="overview">
     <h2>操作</h2>
     <div class="row">
       <button class="primary" onclick="act('/api/host/start')">启动宿主</button>
@@ -121,7 +157,7 @@
     </div>
   </section>
 
-  <section class="card" style="grid-column:1/-1">
+  <section class="card" style="grid-column:1/-1" data-tab="diagnose">
     <h2>硬约束验收台 <span class="meta" id="acceptMeta">（v0.4「一切皆可调试」6 条硬约束的实时证据）</span></h2>
     <div class="row">
       <button onclick="loadAcceptance()">重新验收</button>
@@ -130,7 +166,7 @@
     <div id="acceptance" class="meta">（加载中…）</div>
   </section>
 
-  <section class="card" style="grid-column:1/-1">
+  <section class="card" style="grid-column:1/-1" data-tab="live">
     <h2>实时事件流 <span class="meta" id="streamMeta">（桥的每个决策都在这里，含静默丢弃）</span></h2>
     <div class="row">
       <select id="fLevel" onchange="renderStream()">
@@ -158,22 +194,36 @@
     </div>
   </section>
 
-  <section class="card">
+  <section class="card" data-tab="live">
     <h2>决策链 <span class="meta" id="chainId">（点事件流里的任意一行）</span></h2>
     <pre id="chain">（尚未选择 trace）</pre>
   </section>
 
-  <section class="card">
+  <section class="card" data-tab="diagnose">
     <h2>一键体检 <span class="meta" id="diagMeta"></span></h2>
     <div id="diag" class="meta">点右上角「一键体检」运行。</div>
+    <div class="row" style="margin-top:6px">
+      <a class="reportLink meta" href="/report">完整报告（可打印 / 复制 / 分享）→</a>
+    </div>
   </section>
 
-  <section class="card">
+  <section class="card" style="grid-column:1/-1" data-tab="diagnose">
+    <h2>设置项变更历史 <span class="meta" id="historyMeta">（控制台写过的设置：哪个键、从什么、改成什么）</span></h2>
+    <div class="row">
+      <input type="text" id="historyQ" placeholder="关键词（来源 / 文件名 / 键名 / 旧值 / 新值）" style="max-width:340px" oninput="renderChangeHistory()" />
+      <button onclick="loadChangeHistory(true)">刷新</button>
+      <button onclick="copyChangeHistory()">复制文本</button>
+      <span class="meta" id="historyCount"></span>
+    </div>
+    <div id="history" class="meta">（加载中…）</div>
+  </section>
+
+  <section class="card" data-tab="overview">
     <h2>运行快照 <span class="meta" id="runtimeMeta"></span></h2>
     <div id="runtime" class="meta">宿主/桥未运行时没有快照。</div>
   </section>
 
-  <section class="card" style="grid-column:1/-1">
+  <section class="card" style="grid-column:1/-1" data-tab="replay">
     <h2>录制 · 回放 · 注入 <span class="meta" id="inboxMeta">（桥收到的每条消息都被录下来，可离线重跑）</span></h2>
     <div class="row">
       <button onclick="loadInbox(true)">刷新录制列表</button>
@@ -219,7 +269,7 @@
     <pre id="diffOut">（点「回放 diff」：同一批录到的消息跑两次回放——基线 vs 你写的配置覆盖——机械地比出差异）</pre>
   </section>
 
-  <section class="card" style="grid-column:1/-1">
+  <section class="card" style="grid-column:1/-1" data-tab="data">
     <h2>群资产 · 历史检索 <span class="meta" id="archiveMeta">（本机归档 <code>qq-history/</code>，群里 <code>/找</code> 用的就是它；控制台直接读文件，不打扰宿主）</span></h2>
     <div class="row">
       <button onclick="loadArchive()">刷新概览</button>
@@ -232,7 +282,7 @@
     <pre id="archOut">（点「刷新概览」看归档体积与时间范围）</pre>
   </section>
 
-  <section class="card" style="grid-column:1/-1">
+  <section class="card" style="grid-column:1/-1" data-tab="data">
     <h2>性能面板 <span class="meta" id="perfMeta">（按「一条消息的 trace 链」算端到端延迟；P50/P95 直接来自真实事件）</span></h2>
     <div class="row">
       <button onclick="loadPerf()">刷新</button>
@@ -250,7 +300,7 @@
     <pre id="perfOut">（点「刷新」看延迟分位数、阶段耗时与失败画像）</pre>
   </section>
 
-  <section class="card" style="grid-column:1/-1">
+  <section class="card" style="grid-column:1/-1" data-tab="data">
     <h2>定时任务 · 无人值守 <span class="meta" id="jobsMeta">（播报任务 / 入站 webhook / 掉线自愈 / 注入队列，全部来自桥写的运行快照）</span></h2>
     <div class="row">
       <button onclick="loadJobs()">刷新</button>
@@ -259,7 +309,7 @@
     <pre id="jobsOut">（点「刷新」看任务清单与下次触发时间）</pre>
   </section>
 
-  <section class="card" style="grid-column:1/-1">
+  <section class="card" style="grid-column:1/-1" data-tab="data">
     <h2>群配置 <span class="meta" id="groupsMeta">（每个群的生效开关 + 白名单 + 最近回合）</span></h2>
     <div class="row">
       <button onclick="loadGroups()">刷新</button>
@@ -269,7 +319,7 @@
     <pre id="groupsOut">（点「刷新」看每个群的生效状态）</pre>
   </section>
 
-  <section class="card" style="grid-column:1/-1">
+  <section class="card" style="grid-column:1/-1" data-tab="overview">
     <h2>登录二维码 <span class="meta" id="qrMeta">（NapCat 只在 QQ 侧产出新码时刷新一次；过期后文件就不再变化，看时间比看"文件在不在"可靠）</span></h2>
     <div class="row">
       <button onclick="loadQr()">刷新二维码</button>
@@ -280,7 +330,7 @@
     <pre id="qrHint">（点「刷新二维码」）</pre>
   </section>
 
-  <section class="card" style="grid-column:1/-1">
+  <section class="card" style="grid-column:1/-1" data-tab="logs">
     <h2>日志文件</h2>
     <div class="row">
       <button onclick="setLog('hostOut')">宿主 stdout</button>
@@ -295,11 +345,12 @@
 
   <section class="card badbox" id="pageErrors" style="grid-column:1/-1; display:none"></section>
 
-  <section class="card warnbox" id="warnCard" style="grid-column:1/-1; display:none">
+  <section class="card warnbox" id="warnCard" data-tab="overview" style="grid-column:1/-1; display:none">
     <h2>配置提醒</h2>
     <div id="warns"></div>
   </section>
 </main>
+</div>
 
 <div class="toast" id="toast"></div>
 
@@ -309,6 +360,13 @@ const token = new URLSearchParams(location.search).get('token') || '';
 {
   const link = document.getElementById('accountsLink');
   if (link && token) link.href = '/accounts?token=' + encodeURIComponent(token);
+  // 体检报告页（/report）与语音调试页（/voice）同理：入口不止一个，凡带 .reportLink / .voiceLink 的都补上 token。
+  for (const reportLink of document.querySelectorAll('.reportLink')) {
+    if (token) reportLink.href = '/report?token=' + encodeURIComponent(token);
+  }
+  for (const voiceLink of document.querySelectorAll('.voiceLink')) {
+    if (token) voiceLink.href = '/voice?token=' + encodeURIComponent(token);
+  }
 }
 // 地址里没有 token 时，直接告诉用户为什么满屏都是「token 无效」，而不是让他自己猜：
 // 控制台与宿主 3080 是**两套** token，宿主每次重启还会换新的。
@@ -609,6 +667,8 @@ async function saveConfig() {
     ttsBat: document.getElementById('cfgTtsBat').value,
   }) });
   toast((result.ok ? '✅ ' : '⚠️ ') + result.reason);
+  // 保存设置之后立刻刷新变更历史，让"这次改了什么"当场可见
+  if (result.ok) loadChangeHistory(false);
 }
 function updateErrPill() {
   const errors = streamEvents.filter((e) => e.level === 'error').length;
@@ -703,13 +763,108 @@ function renderAcceptance() {
       '</div></div>';
   }).join('');
 }
-function focusCard(id) {
+// ---------------------------------------------------------------- 布局 ----
+/** 控制台的六个分组（左侧导航）；卡片按 data-tab 归属，切 tab 只切可见性，DOM 与轮询都不动。 */
+const TAB_NAMES = ['overview', 'live', 'diagnose', 'replay', 'data', 'logs'];
+function showTab(name, push = true) {
+  const target = TAB_NAMES.includes(name) ? name : 'overview';
+  for (const section of document.querySelectorAll('main > section[data-tab]')) {
+    section.classList.toggle('tab-active', section.dataset.tab === target);
+  }
+  for (const item of document.querySelectorAll('#nav .navitem[data-tab]')) {
+    item.classList.toggle('active', item.dataset.tab === target);
+  }
+  if (push) {
+    const url = new URL(location.href);
+    if (target === 'overview') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', target);
+    history.replaceState(null, '', url);
+  }
+}
+
+/**
+ * 滚到某张卡片并高亮。
+ * `smooth=false` 用于**从别的页面深链回来**：这时页面刚打开，平滑滚动在部分环境
+ * （无头浏览器/后台标签页）里不会真的滚过去，用户会以为链接没反应。
+ */
+function focusCard(id, smooth = true) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // 卡片可能在别的 tab 里：先切过去再滚，否则 scrollIntoView 对隐藏元素没反应
+  const section = el.closest('section[data-tab]');
+  if (section) showTab(section.dataset.tab, false);
+  // 滚的是**整张卡片**而不是卡片里的元素：#diag / streamBox 这类元素本身很高，
+  // 居中后标题会被吸顶 header 挡住，用户只看到半屏明细，不知道到了哪一张卡。
   const card = el.closest('section') || el;
+  card.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
   card.style.outline = '2px solid #6cf';
   setTimeout(() => { card.style.outline = 'none'; }, 1600);
+}
+
+// ---------------------------------------------- 设置项变更历史 ----
+// 命名特意避开 loadHistory：上面那个 loadHistory() 是**事件流历史**的加载器（/api/trace），
+// 同名函数在同一个 <script> 里会互相覆盖（第二个声明赢），之前差点把事件流历史顶掉。
+let historyEntries = [];
+let historyText = '';
+async function loadChangeHistory(force = false) {
+  const box = document.getElementById('history');
+  try {
+    const result = await api('/api/history?limit=200');
+    if (result.ok === false && Array.isArray(result.entries) === false) {
+      box.textContent = '⚠️ ' + (result.reason || '读取失败');
+      return;
+    }
+    historyEntries = result.entries || [];
+    historyText = result.text || '';
+    if (force) toast(historyEntries.length ? `已刷新：最近 ${historyEntries.length} 条设置变更` : '还没有设置变更记录');
+    renderChangeHistory();
+  } catch (error) {
+    box.textContent = '读取设置变更历史失败：' + error.message;
+  }
+}
+function describeHistoryChange(change) {
+  const key = change.key || '';
+  if (change.kind === 'added') return key + '：新增 ' + (change.after || '');
+  if (change.kind === 'removed') return key + '：删除 ' + (change.before || '');
+  return key + '：' + (change.before || '') + ' → ' + (change.after || '');
+}
+function renderChangeHistory() {
+  const box = document.getElementById('history');
+  const q = (document.getElementById('historyQ')?.value || '').trim().toLowerCase();
+  const rows = historyEntries.filter((entry) => {
+    if (!q) return true;
+    const haystack = [entry.source, entry.route, entry.reason,
+      ...(entry.changes || []).flatMap((change) => [change.file, change.key, change.before, change.after])].join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+  document.getElementById('historyCount').textContent =
+    `${rows.length}/${historyEntries.length} 条 · 文件 qq-settings-history.jsonl`;
+  if (rows.length === 0) {
+    box.textContent = historyEntries.length === 0
+      ? '（还没有记录：保存「宿主工作目录」等路径配置，或在账号中心保存 WebUI / 网络配置后，这里会出现 old → new）'
+      : '没有匹配的记录';
+    return;
+  }
+  box.innerHTML = rows.map((entry) => {
+    const time = new Date(entry.at).toLocaleString('zh-CN', { hour12: false });
+    const result = entry.ok === false ? '❌ ' + (entry.reason || '失败') : '✅ 成功';
+    const changes = (entry.changes || []).map((change) =>
+      '<div class="hint">' + escapeHtml(change.file) + ' · ' + escapeHtml(describeHistoryChange(change))
+      + (change.secret ? '（值已隐藏）' : '') + '</div>').join('');
+    const more = entry.truncated > 0 ? '<div class="hint">…另有 ' + entry.truncated + ' 处未记录</div>' : '';
+    return '<div class="check"><span>' + (entry.ok === false ? '❌' : '🕘') + '</span>'
+      + '<div><b>' + escapeHtml(time) + '</b> · ' + escapeHtml(entry.source || entry.route || '')
+      + ' · ' + escapeHtml(result) + changes + more + '</div></div>';
+  }).join('');
+}
+function copyChangeHistory() {
+  if (!historyText) { toast('还没有可复制的历史'); return; }
+  const done = () => toast('已复制完整历史文本（不受上面的关键词过滤影响）');
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(historyText).then(done).catch(() => toast('复制失败：浏览器不允许写剪贴板'));
+    return;
+  }
+  toast('复制失败：当前浏览器不支持剪贴板');
 }
 
 // ---------------------------------------------------- 录制 / 回放 / 注入 ----
@@ -1031,6 +1186,16 @@ async function searchArchive() {
 
 // 静态模式（stream=0）只做一次性加载，不建立长连接也不再轮询：
 // 弱网/远程查看更省流量，也让自动化截图能拿到完整渲染结果。
+// 从「体检报告」点「去看 →」回来时带 ?focus=<元素 id>：滚到对应卡片并高亮一下。
+// 为什么要校两次：事件流/体检结果是异步加载的，晚到的内容会把下面的卡片整体推下去，
+// 只滚一次会停在"刚才"的位置（实测 #diag 会跑到吸顶标题底下）。
+const focusTarget = new URLSearchParams(location.search).get('focus');
+// 先按 ?tab= 选中分组（深链带 focus 时下面 focusCard 会自己切到目标卡片所在 tab）
+showTab(new URLSearchParams(location.search).get('tab') || 'overview', false);
+if (focusTarget) {
+  setTimeout(() => focusCard(focusTarget, false), 1200);
+  setTimeout(() => focusCard(focusTarget, false), 3200);
+}
 refresh();
 loadHistory().then(() => startStream());
 loadLog(true);
@@ -1043,11 +1208,13 @@ loadJobs();
 loadGroups();
 runDiagnose();
 loadAcceptance();
+loadChangeHistory();
 if (streamMode !== 'off') {
   setInterval(refresh, 4000);
   setInterval(() => loadLog(false), 3000);
   setInterval(runDiagnose, 30000);
   setInterval(loadAcceptance, 30000);
+  setInterval(() => { if (!document.hidden) loadChangeHistory(false); }, 30000);
   setInterval(() => { if (!document.hidden) loadInbox(false); }, 15000);
   // 定时任务/群配置变化慢，自动刷新频率低一些（也不在页面不可见时空转）
   setInterval(() => { if (!document.hidden) loadJobs(); }, 20000);

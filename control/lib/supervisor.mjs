@@ -14,9 +14,11 @@ import { PORT_LABELS, configWarnings } from './config.mjs'
 import { createTraceTailer, filterEvents, formatChain, groupChains, readRuntime, readTraceFile, summarizeEvents } from './trace.mjs'
 import { formatDiagnose, runDiagnose } from './diagnose.mjs'
 import { buildZip, fileEntry } from './zip.mjs'
-import { createAccountsApi } from './accounts.mjs'
+import { createAccountsApi, napcatConfigDir } from './accounts.mjs'
 import { createReplayer } from './replay.mjs'
 import { buildAcceptance, formatAcceptance } from './acceptance.mjs'
+import { buildHealthReport, formatHealthReport } from './report.mjs'
+import { buildHistoryEntry, filterHistory, formatHistory, parseHistory } from './history.mjs'
 import { groupsView as groupsReport, jobsView as jobsReport, perfReport } from './perf.mjs'
 import { redactByKind, redactionNote } from './redact.mjs'
 import { appendCappedLine, moveToTrash } from '../../lib/store.js'
@@ -821,19 +823,217 @@ export function createSupervisor(config, deps = {}) {
    * v0.4「一切皆可调试」6 条硬约束的实时验收：每条都用**现有产物**算证据，
    * 不达标时直接说明该点哪里。
    */
-  async function acceptance() {
+  async function acceptance({ diagnosis = null } = {}) {
     const report = buildAcceptance({
       events: traceEvents({ limit: 500 }),
       runtime: runtime(),
       inbox: inboxList({ limit: 1 }),
       lastReplay: lastReplaySummary,
       lastExport: lastExportSummary,
-      diagnosis: await diagnose(),
+      // 调用方已经跑过体检时直接复用（体检要扫 netstat/tasklist，重复跑纯属浪费）；
+      // 注意这里要的是 diagnose() 的**整包**（{ ok, report, text }），evaluateDiagnose 读的是 .report
+      diagnosis: diagnosis ?? await diagnose(),
       exportSources: exportSources(),
       sandboxCount: sandboxCount(),
       now: now(),
     })
     return { ok: report.ok, report, text: formatAcceptance(report), verdict: report.verdict, totals: report.totals }
+  }
+
+  /**
+   * 一键体检报告（独立页面 `/report` 的数据源）：一次体检 + 一次验收 → 一份报告。
+   *
+   * `force` 会绕过 5 秒体检缓存（页面上的「重新体检」按钮就该真的重新扫一遍端口与进程，
+   * 否则用户点完看到的还是旧读数，会以为按钮坏了）。
+   */
+  async function healthReport({ force = false } = {}) {
+    const diagnosis = await diagnose(force)
+    const accepted = await acceptance({ diagnosis })
+    const report = buildHealthReport({
+      diagnosis: diagnosis.report,
+      acceptance: accepted.report,
+      runtime: runtime(),
+      generatedAt: now(),
+    })
+    return { ok: report.ok, report, text: formatHealthReport(report) }
+  }
+
+  // ---------------------------------------------------- 设置项变更历史 ----
+  /**
+   * 会写"设置文件"的入口只有一个包装（在 server 的 POST 分发里）：动作前后各拍一份快照，
+   * 这里负责 diff + 落盘。为什么盯文件而不是盯接口参数：接口会加/改，文件不会 ——
+   * 只要写到了 `qq-control.json` / `webui.json` / `onebot11_<uin>.json`，历史就一定能记到。
+   */
+  // 历史文件的位置**在启动时就钉死**：不然"把工作目录改到 D 盘"这条记录会被写进新目录，
+  // 旧目录里的历史看起来凭空消失（而它恰恰是说明"目录为什么变了"的那一条）。
+  const settingsHistoryRoot = config.cwd || process.cwd()
+  const settingsHistoryFile = () => join(settingsHistoryRoot, 'qq-settings-history.jsonl')
+
+  /** 允许进历史的设置文件（control 配置 + NapCat 的账号/网络/WebUI 配置）。 */
+  function watchedSettingsFiles() {
+    const files = []
+    if (typeof deps.configFile === 'string' && deps.configFile.trim() !== '') {
+      files.push({ name: 'qq-control.json', file: deps.configFile })
+    }
+    const dir = napcatConfigDir({ napcatBat: config.napcatBat ?? '' })
+    if (dir !== '' && existsSync(dir)) {
+      let names = []
+      try { names = readdirSync(dir).filter((name) => /^(webui|onebot11_\d+|napcat_\d+)\.json$/.test(name)).sort() } catch { names = [] }
+      for (const name of names) files.push({ name, file: join(dir, name) })
+    }
+    return files
+  }
+
+  function readSettingsJson(file) {
+    if (existsSync(file) !== true) return { exists: false, data: null, unreadable: false }
+    try {
+      return { exists: true, data: JSON.parse((deps.readFile ?? readFileSync)(file, 'utf8')), unreadable: false }
+    } catch {
+      return { exists: true, data: null, unreadable: true }
+    }
+  }
+
+  /** 拍一份设置文件快照（键名/大小都受控，webui.json 里的 token 只在内存里，落盘前会脱敏）。 */
+  function settingsSnapshot() {
+    return {
+      at: now(),
+      files: watchedSettingsFiles().map(({ name, file }) => ({ name, file, ...readSettingsJson(file) })),
+    }
+  }
+
+  /** 动作后调用：有变化才写一行；没有变化返回 recorded:false（不写空行）。 */
+  function recordSettingsChange({ source = '', route = '', ok = true, reason = '', before = null, after = null } = {}) {
+    const entry = buildHistoryEntry({ at: now(), source, route, ok, reason, before, after })
+    if (!entry) return { ok: true, recorded: false }
+    const written = appendCappedLine(settingsHistoryFile(), JSON.stringify(entry), { maxBytes: 256 * 1024, keepBytes: 64 * 1024 })
+    return { ok: written, recorded: written, entry }
+  }
+
+  /** 页面用：最近 N 条（新的在前），可按关键词过滤。 */
+  function settingsHistory({ limit = 100, q = '', source = '' } = {}) {
+    const file = settingsHistoryFile()
+    let text = ''
+    try { text = readFileSync(file, 'utf8') } catch { text = '' }
+    const all = parseHistory(text)
+    const entries = filterHistory(all, { q, source, limit: Math.min(500, Math.max(1, Number(limit) || 100)) })
+    return { ok: true, file, total: all.length, entries, text: formatHistory(entries) }
+  }
+
+  // -------------------------------------------------------- 语音调试代理 ----
+  /**
+   * 语音调试必须走宿主：`speechToText` 服务与 TTS 密钥都只存在于宿主进程里。
+   *
+   * 宿主地址有两条来源，按顺序试：
+   *   ① `qq-host-out.log` 里带 token 的地址 —— 控制台启动的宿主；
+   *   ② 从本机监听端口里认出 DSH 宿主 —— 桌面端自己起的宿主（端口每次可能不同），
+   *      插件路由本身不要 token，所以猜到的地址也能用。
+   * 两条都失败时把"到底卡在哪"说清楚（找不到宿主 / 宿主是旧版没这个接口 / 连不上）。
+   */
+  function hostConsoleUrl() {
+    let text = ''
+    try { text = (deps.readFile ?? readFileSync)(config.logs?.hostOut ?? '', 'utf8') } catch { text = '' }
+    return extractHostUrl(text)
+  }
+
+  /** 宿主进程的候选端口（缓存 20 秒）：按高位优先，排除控制台自己盯的那些端口。 */
+  let hostPortCache = { at: 0, ports: [] }
+  async function guessHostPorts() {
+    if (now() - hostPortCache.at < 20_000) return hostPortCache.ports
+    let ports = []
+    try {
+      const [netstat, tasklist] = await Promise.all([
+        run('netstat', ['-ano'], { exec: deps.exec }),
+        run('tasklist', ['/FO', 'CSV', '/NH'], { exec: deps.exec }),
+      ])
+      const watched = new Set(Object.values(config.ports ?? {}).map((port) => Number(port)))
+      const tasks = parseTasklist(tasklist.stdout)
+      ports = [...new Set(parseNetstat(netstat.stdout)
+        .filter((row) => row.state === 'LISTENING')
+        .filter((row) => HOST_PROCESS_HINT.test(tasks.get(row.pid) ?? ''))
+        .filter((row) => row.localPort >= 1024 && !watched.has(Number(row.localPort)))
+        .map((row) => Number(row.localPort)))]
+        .sort((a, b) => b - a)
+        .slice(0, 6)
+    } catch { ports = [] }
+    hostPortCache = { at: now(), ports }
+    return ports
+  }
+
+  /** 候选宿主：带 token 的日志地址优先，然后是按端口猜到的（新起的在前）。 */
+  async function hostCandidates() {
+    const list = []
+    const base = hostConsoleUrl()
+    if (base !== '') {
+      try {
+        const parsed = new URL(base)
+        list.push({ origin: `http://${parsed.host}`, token: parsed.searchParams.get('token') ?? '' })
+      } catch { /* 坏地址就当没有 */ }
+    }
+    for (const port of await guessHostPorts()) {
+      const origin = `http://127.0.0.1:${port}`
+      if (!list.some((item) => item.origin === origin)) list.push({ origin, token: '' })
+    }
+    return list
+  }
+
+  async function voiceCall(path, { method = 'GET', body = null } = {}) {
+    const candidates = await hostCandidates()
+    if (candidates.length === 0) {
+      return {
+        ok: false,
+        reason: '找不到宿主：日志里没有带 token 的地址（控制台没启动过宿主），也没从监听端口里认出 DSH 宿主；'
+          + '先启动（或重启）一次宿主，再回来点「刷新状态」',
+      }
+    }
+    const fetchImpl = deps.fetchImpl ?? fetch
+    let last = ''
+    for (const candidate of candidates) {
+      const query = candidate.token === '' ? '' : `?token=${encodeURIComponent(candidate.token)}`
+      const target = `${candidate.origin}${path}${query}`
+      try {
+        const response = await fetchImpl(target, {
+          method,
+          headers: body === null ? undefined : { 'content-type': 'application/json' },
+          body: body === null ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(180_000),
+        })
+        if (response.status === 404) {
+          last = `宿主在 ${candidate.origin}，但没有 ${path} 接口（插件还是更新前的版本）——重启一次宿主后再试`
+          continue
+        }
+        const data = await response.json().catch(() => null)
+        if (data === null) { last = `宿主（${candidate.origin}）返回了非 JSON（HTTP ${response.status}）`; continue }
+        return { ...data, host: candidate.origin }
+      } catch (error) {
+        last = `连不上 ${candidate.origin}：${error?.message ?? error}`
+      }
+    }
+    return { ok: false, reason: last || '调用宿主语音接口失败' }
+  }
+
+  async function voiceStatus() { return await voiceCall('/qqai/voice/status') }
+  async function voiceTts({ text = '', overrides = null, voice = '', textLang = '' } = {}) {
+    const clean = overrides && typeof overrides === 'object' && Array.isArray(overrides) === false ? overrides : {}
+    return await voiceCall('/qqai/voice/tts', {
+      method: 'POST',
+      body: {
+        text: String(text ?? '').slice(0, 500),
+        overrides: clean,
+        ...(String(voice ?? '').trim() === '' ? {} : { voice: String(voice).slice(0, 80) }),
+        ...(String(textLang ?? '').trim() === '' ? {} : { textLang: String(textLang).slice(0, 8) }),
+      },
+    })
+  }
+  async function voiceStt({ audioBase64 = '', ext = 'webm', language = '', model = '' } = {}) {
+    return await voiceCall('/qqai/voice/stt', {
+      method: 'POST',
+      body: {
+        audioBase64: String(audioBase64 ?? ''),
+        ext: String(ext ?? 'webm'),
+        language: String(language ?? '').slice(0, 16),
+        model: String(model ?? '').slice(0, 80),
+      },
+    })
   }
 
   // -------------------------------------------------- 录制 / 回放 / 注入 ----
@@ -1070,7 +1270,9 @@ export function createSupervisor(config, deps = {}) {
     traceStats,
     // v0.7.11：账号中心（本地网站）。每次调用都重读 webui.json —— 用户可能刚在别处改过 token/端口。
     accounts: createAccountsApi({ napcatBat: config.napcatBat }),
-    traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance,
+    traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance, healthReport,
+    settingsSnapshot, recordSettingsChange, settingsHistory,
+    voiceStatus, voiceTts, voiceStt,
     inboxList, replay, inject, clearQueue, archiveStats, archiveSearch,
     perf, jobsView, groups,
     // 每个调用方（每个 SSE 连接）拿一份独立 tailer：共用模块级单例会让两个面板互相"偷"事件，

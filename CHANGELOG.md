@@ -1,5 +1,86 @@
 # 更新日志 / Changelog
 ## v0.8 系列 —— 本地账号中心 / Local Account Center
+
+### v0.8.6（2026-11-08）— 体检报告 / 设置变更历史 / 语音调试 / 调试台布局
+
+`lib/` 只多了语音调试相关的新文件与两小段挂载（`settings-routes.js`、`tts.js`）——**`bridge.js` / `index.js` / `panel.js` 这三个补丁面文件仍未动**。新增控制台只读页 `/report` 与 `GET /api/report`、`/voice` 与 `/api/voice/*`，以及「设置项变更历史」卡片与 `GET /api/history`。
+
+#### 一、一键体检报告
+
+- **新增 `control/lib/report.mjs`**（纯函数）：把逐项体检与 6 条硬约束合成一份报告 ——
+  结论优先级（阻断 > 告警 > 证据不足 > 全绿）、按后果排序的「先修这些」、分组明细、关键事实，
+  以及 `formatHealthReport()` 文本视图（页面「复制报告」与 CLI 共用同一份口径）；
+- **新增 `control/report.html`（`/report`）**：只读、零外部依赖、可打印成 PDF、可一键复制整段文本；
+  「去看 →」用 `?focus=<id>` 深链回控制台对应卡片并高亮（`scroll-margin-top` 避开吸顶标题）；
+- **新增 `GET /api/report[?fresh=1]`**：token + Origin 与其它接口相同；`fresh=1` 绕过体检的 5 秒缓存；
+  supervisor 的 `healthReport()` **复用同一次体检**去算验收，不再重复扫 netstat/tasklist；
+- **控制台入口**：右上角「体检报告」与一键体检卡里的「完整报告 →」，token 自动透传；
+- **新增 `test/report-unit.mjs`（85 条）**：纯函数分支、真实 supervisor 合成、HTTP 往返与门禁、页面静态校验。
+
+#### 二、设置项变更历史
+
+- **新增 `control/lib/history.mjs`**（纯函数）：设置对象扁平化、old→new diff（新增/删除/修改三种）、
+  `token/secret/password/apiKey` 类键永不落盘（只记 `***` 并标 secret）、超长值截断、关键词过滤与文本视图；
+- **新增 `GET /api/history?limit&q`** + 控制台「设置项变更历史」卡：只在**写设置的接口**
+  （`/api/config`、`/api/accounts/config`、`/api/accounts/network*`）前后各拍一次快照再 diff，
+  启动/停止/回放/注入等"操作"不记；存储 `<启动时工作目录>/qq-settings-history.jsonl`（256 KB 封顶留尾部 64 KB）；
+- **顺手修掉一个真问题**：`--port` 只该对本次运行生效，但以前在界面上随便保存一次设置，临时端口就会被写进
+  `qq-control.json`（之后双击 bat 直接端口冲突）。现在保存设置写盘时用的是启动时文件里的端口；
+- **新增 `test/settings-history-unit.mjs`（68 条）**：纯函数分支、真实 supervisor 的"拍快照→改文件→记历史→读回"、
+  HTTP 自动记录与门禁、页面静态校验；并钉死历史文件里不出现任何明文 token。
+- **`tools/audit.mjs` ②b：同名函数重复声明检查**。同一个 `<script>` 里两个 `function foo()` 不报错、后者静默覆盖前者
+  ——这轮真踩到（新加的 `loadHistory` 顶掉了事件流历史的加载器，页面照常打开、单测照常绿，只是事件流不再加载）。
+  现在审计会直接点名「文件: 函数 ×次数」。
+
+#### 三、语音调试（TTS / STT）
+
+老功能回访：语音模块（`stt.js` / `tts.js`）以前只能靠"给机器人发语音 / 打开语音回复"间接验证，出错时面板上只有
+"没转写 / 没声音"。现在控制台多了一个**独立的「语音调试」页**（`/voice`，从控制台左侧导航进入）——语音是要反复细调的东西，
+塞在总览里会被 30 秒自动刷新冲掉：
+
+- **宿主侧新增路由**（`lib/voice-routes.js`）：`GET /qqai/voice/status`、`POST /qqai/voice/tts`、
+  `POST /qqai/voice/stt`。用**运行中的插件配置**与宿主 `speechToText` 服务试合成/试转写，**不发 QQ**；
+  同源 + `application/json` + 体积门禁（TTS 64 KB、STT 10 MB）。
+- **细调参数**（都是**本次试听的临时覆盖**，不写回配置）：
+  · Azure：音色、风格（`mstts:express-as`）、语速 %、音调 st、音量 %（走 SSML `prosody`）；
+  · OpenAI 兼容：音色、语速倍率（`speed`，0.25–4）；
+  · GPT-SoVITS：参考音频 / 参考文本 / 参考语言、语速（`speed_factor`）、`temperature`、`top_k`、`top_p`、
+    `repetition_penalty`、`seed`（不给的字段一律不发送，老版本后端也不会被多余字段打挂）；
+  · **通用音调**（±12 半音）：Azure 用原生 prosody；本地/OpenAI 用**内置变调**（重采样 + WSOLA，只变调、时长基本不变，
+    本地 wav 不依赖 ffmpeg，云端 mp3 只用 ffmpeg 解码）；
+  · STT：识别语言（**自动 / 中 / 英 / 日**）、云端模型。默认**自动**（GPT-SoVITS v1/v2 的 `text_lang` 都支持 `auto`）；
+    越界参数**直接报错**（不悄悄夹紧），试听保留**最近 5 条**（带播放器与参数摘要）方便 A/B。
+- **判定抽成纯函数**（`lib/voice.js`）：`checkVoiceReadiness()` 把每个卡点（开关关着 / 本地缺参考音频 /
+  云端缺 key / 宿主没有 `speechToText`）翻成一句人话 + 一句"去哪儿开"；`synthesizeForTest()` /
+  `transcribeForTest()` 的成功与失败分支都可注入（不联网、不跑 ffmpeg 也能测）。
+- **控制台代理**（`control/lib/{supervisor,server}.mjs`）：新增 `GET /api/voice/status`、`POST /api/voice/tts`、
+  `POST /api/voice/stt`，其中**音频请求体单独放宽到 9 MB**（其它接口仍是 64 KB）。
+- **宿主自动发现**：不再假设宿主一定在 3080 —— 先在 `qq-host-out.log` 里找带 token 的地址（控制台启动的宿主），
+  找不到就从本机监听端口里认出 DSH 宿主（桌面端自己起的宿主端口每次可能不同；插件路由本身不要 token）。
+  找到的是旧版宿主（没有 `/qqai/voice/*`）时明确提示"重启一次宿主"，不会糊成"连不上"。
+- **独立页面**：`control/voice.html`（`/voice`，同源本地页，token 从 `?token=` 读）——状态与卡点、
+  一句话试听、录音（MediaRecorder）或选音频文件（ffmpeg 转 16kHz WAV）后看转写结果；控制台左侧导航有「语音调试」入口。
+- **新增 `test/voice-unit.mjs`（128 条）**：判定/成功与失败分支（含细调覆盖）/宿主路由门禁/控制台代理（含自动发现与旧版宿主）/
+  独立页接线。
+- **`synthesizeTts()` 增加可注入的 `fetchImpl`**（只为调试与单测；桥里的调用不变）。
+- 注意：宿主路由要**重启宿主**才会挂上（插件热重载会复用 ESM 缓存，不会重新求值）；插件热重载时已正确处理注销与重注册。
+
+
+#### 四、调试台布局重构
+
+卡片越加越多，一根长滚动条已经找不到东西了。控制台改成**左侧导航 + 分组卡片**：
+
+- 左侧六个分组：**总览**（端口/操作/运行快照/登录二维码）、**实时事件**（事件流/决策链）、
+  **诊断与报告**（验收台/一键体检/设置变更历史）、**录制 · 回放 · 注入**、**数据与任务**（群资产/性能/定时任务/群配置）、**日志**；
+- 右上角只保留四个全局动作：**刷新 / 一键体检 / 导出诊断包 / 体检报告**（脱敏勾选仍在导出按钮旁）；
+- **语音调试**从右上角移到左侧导航（它本来就是 `/voice` 独立页）；
+- 内容区改成**单列**：两列时高度差会在行尾留下大块空白（尤其页面里还有整行宽的卡片），单列最稳；宽度跟窗口走；lign-content:start 让卡片按内容高度排列（.app 的 min-height 会把 grid 行轨道拉长，之前卡片之间的大块空白就是这么来的）。
+- 分组只是**可见性**切换：所有卡片仍在 DOM 里，轮询/SSE/现有函数不变；`?tab=` 可深链，
+  报告页的「去看 →」会先切到目标分组再滚动；
+- 新增 `test/console-layout-unit.mjs`（25 条）：分组齐全、卡片不丢、右上角动作不被挤走、深链与「去看 →」的切组逻辑。
+
+- 验证：**78 套 / 4695 断言全绿**，`node tools/audit.mjs` 全过（45 路由全部有测试提到）。
+
 ### v0.8.5（2026-11-06）— 补护栏、补下钻、补文档
 
 这版**没有动 `lib/`**（`git diff v0.8.4..HEAD -- lib/` 为空），改动全在 `control/` + `test/` + `docs/` + `tools/`。
