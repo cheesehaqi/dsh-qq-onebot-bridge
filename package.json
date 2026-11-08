@@ -38,6 +38,7 @@
     "client",
     "control",
     "test",
+    "tools",
     "docs",
     "cordis.patch.yml",
     "README.md",

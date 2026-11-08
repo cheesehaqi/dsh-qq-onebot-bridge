@@ -232,5 +232,19 @@ check('客户端 bundle 存在且被 __ModuleLoader__.load 包裹', clientOk, cl
 check('插件入口把面板挂到宿主 webServer 上（否则设置里没有那一页）',
   /ctx\.inject\(\['webServer'\]/.test(readFileSync(join(libDir, 'index.js'), 'utf8')))
 
+// ---------------------------------------------------------------- 打包清单 --
+/**
+ * `npm run audit` 指向 tools/audit.mjs，所以 `tools` 必须进 package.json 的 files，
+ * 否则安装形态（npm pack 出来）里没有这个脚本，命令会直接报文件不存在。
+ * 2026-11-07 由 551123 的铺装读数发现：他的「fork 树 == 线上树」门禁里 tools 缺失。
+ */
+{
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  check('package.json files 包含 tools（npm run audit 在安装形态可用）',
+    Array.isArray(pkg.files) && pkg.files.includes('tools'))
+  check('package.json 的 audit 脚本指向 tools/audit.mjs',
+    String(pkg.scripts?.audit ?? '').includes('tools/audit.mjs'), pkg.scripts?.audit ?? '（没有）')
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)
