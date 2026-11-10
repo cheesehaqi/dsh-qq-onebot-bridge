@@ -18,6 +18,7 @@ import { createAccountsApi, napcatConfigDir } from './accounts.mjs'
 import { createReplayer } from './replay.mjs'
 import { buildAcceptance, formatAcceptance } from './acceptance.mjs'
 import { buildHealthReport, formatHealthReport } from './report.mjs'
+import { readActivity } from './activity.mjs'
 import { buildHistoryEntry, filterHistory, formatHistory, parseHistory } from './history.mjs'
 import { groupsView as groupsReport, jobsView as jobsReport, perfReport } from './perf.mjs'
 import { redactByKind, redactionNote } from './redact.mjs'
@@ -947,6 +948,22 @@ export function createSupervisor(config, deps = {}) {
     return { ok: true, file: healthHistoryFile(), entries: entries.slice(-max).reverse() }
   }
 
+  let activityCache = { at: 0, days: 0, value: null }
+  /**
+   * 群活跃：只读 `<cwd>/qq-history/*.jsonl` 的聚合计数（不返回消息原文）。
+   * 30 秒缓存，避免页面轮询时反复扫整份归档。
+   */
+  function activity({ days = 7, force = false } = {}) {
+    const span = Math.min(30, Math.max(1, Math.floor(Number(days) || 7)))
+    const at = now()
+    if (!force && activityCache.value !== null && activityCache.days === span && at - activityCache.at < 30_000) {
+      return activityCache.value
+    }
+    const value = readActivity(join(config.cwd || process.cwd(), 'qq-history'), { days: span, now: at })
+    activityCache = { at, days: span, value }
+    return value
+  }
+
   // ---------------------------------------------------- 设置项变更历史 ----
   /**
    * 会写"设置文件"的入口只有一个包装（在 server 的 POST 分发里）：动作前后各拍一份快照，
@@ -1401,7 +1418,7 @@ export function createSupervisor(config, deps = {}) {
     traceStats,
     // v0.7.11：账号中心（本地网站）。每次调用都重读 webui.json —— 用户可能刚在别处改过 token/端口。
     accounts: createAccountsApi({ napcatBat: config.napcatBat }),
-    traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance, healthReport, healthHistory,
+    traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance, healthReport, healthHistory, activity,
     settingsSnapshot, recordSettingsChange, settingsHistory,
     voiceStatus, voiceTts, voiceStt, voiceToggle,
     inboxList, replay, inject, clearQueue, archiveStats, archiveSearch,

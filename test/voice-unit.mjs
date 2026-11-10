@@ -636,7 +636,17 @@ check('语音页可直接启停本机语音服务（仅 local 后端）',
   voicePageHtml.includes('id="voiceServiceStart"') && voicePageHtml.includes('id="voiceServiceStop"')
   && pageScript.includes('function startVoiceService(') && pageScript.includes('function stopVoiceService(')
   && pageScript.includes("api('/api/tts/start'") && pageScript.includes("api('/api/tts/stop'")
-  && pageScript.includes('button.disabled = !local'))
+  && pageScript.includes('start.disabled = !serviceProviderLocal || serviceListening'))
+check('语音页显示服务监听状态（读控制台 /api/status 的 tts 端口）',
+  voicePageHtml.includes('id="voiceServicePill"')
+  && pageScript.includes('function loadServiceStatus(')
+  && pageScript.includes("api('/api/status')")
+  && pageScript.includes("port.name === 'tts'")
+  && pageScript.includes('serviceListening = row?.listening === true'))
+check('试听记录可把音色存为默认配置（仅非 local）',
+  pageScript.includes('function saveAttemptVoice(')
+  && pageScript.includes("values: { ttsVoice: item.voice }")
+  && pageScript.includes("item.provider !== 'local'"))
 check('语音页脚本可解析', (() => { try { new Function(pageScript); return true } catch { return false } })())
 check('页面请求三个语音接口',
   pageScript.includes("api('/api/voice/status')") && pageScript.includes("api('/api/voice/tts'") && pageScript.includes("api('/api/voice/stt'"))

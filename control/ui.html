@@ -199,6 +199,8 @@
       <label class="meta"><input type="checkbox" id="pauseStream" /> 暂停</label>
       <label class="meta"><input type="checkbox" id="autoScroll" checked /> 自动滚动</label>
       <button onclick="clearStream()">清屏</button>
+      <button onclick="downloadStream()">导出当前筛选</button>
+      <button onclick="copyStream()">复制当前筛选</button>
       <span class="meta" id="streamCount"></span>
     </div>
     <div class="stream" id="streamBox">
@@ -341,6 +343,21 @@
     <pre id="groupsOut">（点「刷新」看每个群的生效状态）</pre>
   </section>
 
+  <section class="card" style="grid-column:1/-1" data-tab="data">
+    <h2>群活跃 <span class="meta" id="activityMeta">（最近 7 天归档消息：每个群的消息量与最活跃成员，不含原文）</span></h2>
+    <div class="row">
+      <button onclick="loadActivity()">刷新</button>
+      <button onclick="downloadActivityCsv()">导出 CSV</button>
+      <label class="meta">时间窗 <select id="activityDays" onchange="loadActivity()">
+        <option value="7">7 天</option>
+        <option value="14">14 天</option>
+        <option value="30">30 天</option>
+      </select></label>
+      <span class="meta" id="activityState"></span>
+    </div>
+    <div id="activityOut" class="meta">（点「刷新」看最近 7 天的群活跃）</div>
+  </section>
+
   <section class="card" style="grid-column:1/-1" data-tab="overview">
     <h2>登录二维码 <span class="meta" id="qrMeta">（NapCat 只在 QQ 侧产出新码时刷新一次；过期后文件就不再变化，看时间比看"文件在不在"可靠）</span></h2>
     <div class="row">
@@ -361,6 +378,13 @@
       <button onclick="setLog('trace')">事件文件</button>
       <button onclick="setLog('audit')">写操作审计</button>
       <label class="meta"><input type="checkbox" id="follow" checked /> 自动跟随</label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="logQ" placeholder="关键词过滤（不区分大小写）" style="max-width:300px" oninput="renderLog()" />
+      <label class="meta"><input type="checkbox" id="logErrors" onchange="renderLog()" /> 只看错误/告警</label>
+      <button onclick="downloadLog()">下载当前视图</button>
+      <button onclick="copyLog()">复制当前视图</button>
+      <span class="meta" id="logCount"></span>
     </div>
     <pre id="log">（选择一份日志）</pre>
   </section>
@@ -417,6 +441,7 @@ if (!token) {
 const streamMode = new URLSearchParams(location.search).get('stream') === '0' ? 'off' : 'on';
 let currentLog = 'hostOut';
 let streamEvents = [];
+let activityData = null;
 let diagReport = null;
 let lastRuntime = null;
 const pageErrors = [];
@@ -465,14 +490,68 @@ function freePort(name) {
   api('/api/port/free', { method: 'POST', body: JSON.stringify({ name }) }).then((r) => { toast((r.ok ? '✅ ' : '⚠️ ') + r.reason); setTimeout(refresh, 1200); });
 }
 function setLog(name) { currentLog = name; loadLog(true); }
+let logLines = [];
+function filteredLogLines() {
+  const q = (document.getElementById('logQ')?.value || '').trim().toLowerCase();
+  const errorsOnly = document.getElementById('logErrors')?.checked === true;
+  return logLines.filter((line) => {
+    if (errorsOnly && !/error|warn|fail|失败|错误|异常|告警/i.test(line)) return false;
+    if (q && !line.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+/** 日志里可能带宿主/控制台的 token；页面上显示、复制、下载都先打码。 */
+function maskLogText(text) {
+  return String(text)
+    .replace(/([?&](?:token|access_token|api_key)=)[^&\s]+/gi, '$1<已隐藏>')
+    .replace(/\b(Bearer\s+)\S+/gi, '$1<已隐藏>')
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '<已隐藏>');
+}
+function renderLog() {
+  const el = document.getElementById('log');
+  if (!el) return;
+  const rows = filteredLogLines();
+  el.textContent = rows.length ? maskLogText(rows.join('\n')) : '（没有匹配的行）';
+  const count = document.getElementById('logCount');
+  if (count) count.textContent = `${rows.length}/${logLines.length} 行` + (currentLog ? ` · ${currentLog}` : '');
+}
+function downloadLog() {
+  const rows = filteredLogLines();
+  const blob = new Blob([maskLogText(rows.join('\n'))], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `qq-${currentLog}-filtered.log`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast(`已下载当前视图（${rows.length} 行，密钥已打码）`);
+}
+async function copyLog() {
+  const text = maskLogText(filteredLogLines().join('\n'));
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`已复制当前视图（${filteredLogLines().length} 行，密钥已打码）`);
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    area.remove();
+    toast(ok ? '已复制当前视图（密钥已打码）' : '复制失败（浏览器不允许）');
+  }
+}
 async function loadLog(force) {
   if (!force && (!document.getElementById('follow').checked || document.hidden)) return;
   try {
     const result = await api('/api/logs?name=' + currentLog + '&lines=200');
     const el = document.getElementById('log');
-    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
-    el.textContent = (result.lines || []).join('\n') || '（空）';
-    if (atBottom) el.scrollTop = el.scrollHeight;
+    logLines = Array.isArray(result.lines) ? result.lines : [];
+    renderLog();
+    if (el) el.scrollTop = el.scrollHeight;
   } catch { /* 轮询失败不打断界面 */ }
 }
 function exportBundle() {
@@ -557,12 +636,12 @@ function renderRuntime(runtime, status) {
       ${sessions.map((s) => `<tr><td>${s.chatKey}</td><td class="meta">${String(s.sessionId).slice(0, 12)}</td><td>${s.status}</td><td>${s.resumed ? '续接' : '新建'}</td><td class="meta">${s.lastTurnAt ? new Date(s.lastTurnAt).toLocaleTimeString('zh-CN', { hour12: false }) : '-'}</td></tr>`).join('')}
     </tbody></table>` : '<div class="meta" style="margin-top:6px">当前没有活跃会话（发一条消息给机器人即可建立）。</div>'}`;
 }
-function renderStream() {
+function filteredStream() {
   const level = document.getElementById('fLevel').value;
   const okFilter = document.getElementById('fOk').value;
   const stage = document.getElementById('fStage').value.trim().toLowerCase();
   const chat = document.getElementById('fChat').value.trim();
-  const rows = streamEvents.filter((e) => {
+  return streamEvents.filter((e) => {
     if (level && e.level !== level) return false;
     if (okFilter === 'false' && e.ok !== false) return false;
     if (okFilter === 'true' && e.ok === false) return false;
@@ -570,6 +649,41 @@ function renderStream() {
     if (chat && !(e.chatKey || '').includes(chat)) return false;
     return true;
   }).slice(-400).reverse();
+}
+function streamJsonl() {
+  return maskLogText(filteredStream().map((event) => JSON.stringify(event)).join('\n'));
+}
+function downloadStream() {
+  const rows = filteredStream();
+  const blob = new Blob([streamJsonl()], { type: 'application/x-ndjson;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `qq-stream-filtered-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast(`已导出当前筛选（${rows.length} 条，密钥已打码）`);
+}
+async function copyStream() {
+  const text = streamJsonl();
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`已复制当前筛选（${filteredStream().length} 条，密钥已打码）`);
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    area.remove();
+    toast(ok ? '已复制当前筛选（密钥已打码）' : '复制失败（浏览器不允许）');
+  }
+}
+function renderStream() {
+  const rows = filteredStream();
   const box = document.getElementById('stream');
   box.innerHTML = rows.map((e, index) => {
     const time = new Date(e.ts).toLocaleTimeString('zh-CN', { hour12: false });
@@ -885,6 +999,23 @@ const PALETTE_CARDS = [
   ['群配置', 'groupsOut'], ['登录二维码', 'qrImg'], ['日志文件', 'log'],
 ];
 
+const PALETTE_RECENT_KEY = 'qq-palette-recent-v1';
+
+/** 最近用过的命令面板条目（最多 5 条，存本浏览器）。 */
+function paletteRecentLabels() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PALETTE_RECENT_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter((item) => typeof item === 'string').slice(0, 5) : [];
+  } catch { return []; }
+}
+
+function rememberPaletteUse(label) {
+  const clean = String(label || '').replace(/^⭐\s*/, '').trim();
+  if (!clean) return;
+  const next = [clean, ...paletteRecentLabels().filter((item) => item !== clean)].slice(0, 5);
+  try { localStorage.setItem(PALETTE_RECENT_KEY, JSON.stringify(next)); } catch { /* 隐私模式禁写 */ }
+}
+
 function buildPaletteItems() {
   const tabs = TAB_NAMES.map((name) => ({ label: '分组：' + TAB_LABELS[name], run: () => showTab(name) }));
   const cards = PALETTE_CARDS.map(([label, target]) => ({ label: '卡片：' + label, run: () => focusCard(target) }));
@@ -900,8 +1031,19 @@ function buildPaletteItems() {
 
 function renderPalette() {
   const query = paletteInput.value.trim().toLowerCase();
-  const all = buildPaletteItems();
-  paletteItems = query === '' ? all : all.filter((item) => item.label.toLowerCase().includes(query));
+  const base = buildPaletteItems();
+  if (query === '') {
+    const recent = paletteRecentLabels()
+      .map((label) => {
+        const hit = base.find((item) => item.label === label);
+        return hit ? { ...hit, label: '⭐ ' + hit.label } : null;
+      })
+      .filter(Boolean);
+    const used = new Set(recent.map((item) => item.label.slice(2)));
+    paletteItems = [...recent, ...base.filter((item) => !used.has(item.label))];
+  } else {
+    paletteItems = base.filter((item) => item.label.toLowerCase().includes(query));
+  }
   if (paletteIndex >= paletteItems.length) paletteIndex = Math.max(0, paletteItems.length - 1);
   paletteList.innerHTML = paletteItems.length === 0
     ? '<div class="meta" style="padding:16px">没有匹配项</div>'
@@ -917,7 +1059,10 @@ function renderPalette() {
 function runPalette(index) {
   const item = paletteItems[index];
   closePalette();
-  if (item) item.run();
+  if (item) {
+    rememberPaletteUse(item.label);
+    item.run();
+  }
 }
 
 function openPalette() {
@@ -1268,6 +1413,73 @@ async function loadGroups() {
   }
 }
 
+async function loadActivity() {
+  const out = document.getElementById('activityOut');
+  const state = document.getElementById('activityState');
+  const days = Number(document.getElementById('activityDays')?.value) || 7;
+  state.textContent = '读取中…';
+  try {
+    const result = await api('/api/activity?days=' + days);
+    if (result.ok !== true) { state.textContent = ''; out.textContent = '⚠️ ' + (result.reason || '群活跃不可用'); return; }
+    if (result.missing === true) {
+      state.textContent = '';
+      out.textContent = '没有找到 qq-history 归档目录；historyArchiveEnabled=false 或还没有白名单会话消息时就是空的。';
+      return;
+    }
+    const chats = Array.isArray(result.chats) ? result.chats : [];
+    activityData = result;
+    const groups = chats.filter((entry) => entry.kind === 'group');
+    const privates = chats.filter((entry) => entry.kind === 'private');
+    if (chats.length === 0) {
+      state.textContent = '';
+      out.textContent = `最近 ${days} 天没有归档消息（归档目录：${result.dir || 'qq-history'}）。`;
+      return;
+    }
+    const rows = groups.map((entry) => {
+      const members = (entry.topMembers || []).map((member) => escapeHtml(member.name || ('u' + member.userId)) + ' ' + member.count).join('、') || '—';
+      const last = entry.lastAt ? new Date(entry.lastAt).toLocaleString('zh-CN', { hour12: false }) : '—';
+      const daily = Array.isArray(entry.daily) ? entry.daily : [];
+      const max = Math.max(1, ...daily.map((day) => Number(day.count) || 0));
+      const trend = daily.map((day) => {
+        const count = Number(day.count) || 0;
+        const height = Math.max(2, Math.round((count / max) * 18));
+        return `<span title="${escapeHtml(day.day)} ${count} 条" style="display:inline-block;width:7px;height:${height}px;background:var(--accent);opacity:.75;margin-right:2px;vertical-align:bottom"></span>`;
+      }).join('');
+      return `<tr><td>${escapeHtml(entry.chatKey)}</td><td>${entry.total}</td><td>${trend}</td><td>${members}</td><td class="meta">${last}</td></tr>`;
+    }).join('');
+    out.innerHTML = groups.length === 0
+      ? '<div class="meta">最近这个时间窗里只有私聊，没有群消息。</div>'
+      : '<table><thead><tr><th>群</th><th>消息数</th><th>趋势</th><th>最活跃成员</th><th>最近一条</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    state.textContent = `${groups.length} 个群 · 私聊 ${privates.length} 个 · 共 ${result.total} 条归档` +
+      (result.scanned?.truncated ? ' · 读取已截断' : '');
+  } catch (error) {
+    state.textContent = '';
+    out.textContent = '⚠️ ' + error.message;
+  }
+}
+
+/** 导出当前群活跃数据为 CSV（只含计数/名字，不含消息原文）。 */
+function downloadActivityCsv() {
+  if (!activityData || !Array.isArray(activityData.chats) || activityData.chats.length === 0) {
+    toast('还没有可导出的群活跃数据');
+    return;
+  }
+  const quote = (value) => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+  const lines = ['chatKey,kind,total,topMembers,lastAt'];
+  for (const entry of activityData.chats) {
+    const members = (entry.topMembers || []).map((member) => `${member.name || 'u' + member.userId}:${member.count}`).join(' / ');
+    lines.push([entry.chatKey, entry.kind, entry.total, members, entry.lastAt ? new Date(entry.lastAt).toISOString() : ''].map(quote).join(','));
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `qq-activity-${activityData.days || 7}d.csv`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast(`已导出 ${activityData.chats.length} 个会话的群活跃 CSV`);
+}
+
 async function loadScenarios() {
   const pick = document.getElementById('scenPick');
   try {
@@ -1404,6 +1616,7 @@ loadArchive();
 loadPerf();
 loadJobs();
 loadGroups();
+loadActivity();
 runDiagnose();
 loadAcceptance();
 loadChangeHistory();
@@ -1418,6 +1631,7 @@ setInterval(() => { if (!document.hidden) loadHealthHistory(false); }, 30000);
   // 定时任务/群配置变化慢，自动刷新频率低一些（也不在页面不可见时空转）
   setInterval(() => { if (!document.hidden) loadJobs(); }, 20000);
   setInterval(() => { if (!document.hidden) loadGroups(); }, 30000);
+  setInterval(() => { if (!document.hidden) loadActivity(); }, 60000);
 }
 </script>
 </body>

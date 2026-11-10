@@ -526,7 +526,17 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         json(response, 200, { ok: result.ok, report: result.report, text: result.text, verdict: result.report?.verdict })
         return
       }
-      /** 体检趋势：最近 N 次体检的一行摘要（时间/结论/计数），数据来自 qq-health-history.jsonl。 */
+      /** 群活跃：最近 N 天归档消息的聚合计数（不含原文）。 */
+      if (request.method === 'GET' && path === '/api/activity') {
+        if (typeof api.activity !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持群活跃看板', chats: [] })
+          return
+        }
+        const days = Math.min(30, Math.max(1, Number(url.searchParams.get('days')) || 7))
+        const force = ['1', 'true', 'yes'].includes(String(url.searchParams.get('force') ?? '').toLowerCase())
+        json(response, 200, await api.activity({ days, force }))
+        return
+      }
       if (request.method === 'GET' && path === '/api/health/history') {
         if (typeof api.healthHistory !== 'function') {
           json(response, 200, { ok: false, reason: '当前控制台不支持体检趋势', entries: [] })

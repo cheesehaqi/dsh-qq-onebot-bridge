@@ -32,14 +32,19 @@ check('分组都有中文标题', ['总览', '实时事件', '诊断与报告', 
   .every((label) => navTabs.includes(label)))
 
 const sectionTabs = [...html.matchAll(/<section class="card"[^>]*data-tab="([a-z]+)"/g)].map((m) => m[1])
-check('每张卡片都归到某个分组', sectionTabs.length === 17, String(sectionTabs.length))
+check('每张卡片都归到某个分组', sectionTabs.length === 18, String(sectionTabs.length))
 check('分组值都在导航里', sectionTabs.every((tab) => NAV_TABS.includes(tab)))
 check('总览分组包含端口/操作/运行快照/登录二维码',
   sectionTabs.filter((tab) => tab === 'overview').length === 4, String(sectionTabs.filter((tab) => tab === 'overview').length))
 check('诊断分组包含验收台/一键体检/变更历史/体检趋势',
   sectionTabs.filter((tab) => tab === 'diagnose').length === 4)
 check('实时分组包含事件流与决策链', sectionTabs.filter((tab) => tab === 'live').length === 2)
-check('数据分组包含群资产/性能/定时任务/群配置', sectionTabs.filter((tab) => tab === 'data').length === 4)
+check('数据分组包含群资产/性能/定时任务/群配置/群活跃', sectionTabs.filter((tab) => tab === 'data').length === 5)
+check('群活跃卡读 /api/activity 并渲染趋势/活跃成员/CSV',
+  html.includes('id="activityOut"') && html.includes('id="activityDays"')
+  && script.includes("api('/api/activity?days='")
+  && script.includes('topMembers') && script.includes('function downloadActivityCsv(')
+  && script.includes('qq-activity-'), 'activity')
 
 check('非当前分组的卡片默认隐藏（CSS）',
   /main > section\[data-tab\]\s*\{\s*display:\s*none/.test(html) && /\.tab-active\s*\{\s*display:\s*block/.test(html))
@@ -77,14 +82,23 @@ check('语音页支持 embed（隐藏大标题与回控制台）',
 
 // 改布局不能把卡片/函数弄丢
 for (const id of ['ports', 'acceptance', 'streamBox', 'chain', 'diag', 'history', 'runtime',
-  'inbox', 'archOut', 'perfOut', 'jobsOut', 'groupsOut', 'log', 'qrImg', 'healthTrend']) {
+  'inbox', 'archOut', 'perfOut', 'jobsOut', 'groupsOut', 'log', 'qrImg', 'healthTrend',
+  'logQ', 'logErrors', 'logCount', 'activityOut', 'activityState', 'activityDays']) {
   if (!html.includes(`id="${id}"`)) { failed++; console.log('FAIL', `卡片元素丢了 #${id}`) }
 }
 check('关键卡片元素都还在', true)
-for (const fn of ['showTab', 'focusCard', 'refresh', 'runDiagnose', 'loadAcceptance', 'loadChangeHistory', 'loadHealthHistory']) {
+for (const fn of ['showTab', 'focusCard', 'refresh', 'runDiagnose', 'loadAcceptance', 'loadChangeHistory', 'loadHealthHistory',
+  'renderLog', 'downloadLog', 'copyLog', 'filteredStream', 'streamJsonl', 'downloadStream', 'copyStream', 'loadActivity', 'downloadActivityCsv']) {
   if (!new RegExp(`(async )?function ${fn}\\(`).test(script)) { failed++; console.log('FAIL', `缺少函数 ${fn}`) }
 }
 check('关键函数都还在', true)
+check('日志页支持关键词/错误过滤与下载复制（token 打码）',
+  html.includes('id="logQ"') && html.includes('id="logErrors"')
+  && script.includes('function filteredLogLines(')
+  && script.includes('function maskLogText(')
+  && script.includes('maskLogText(rows.join')
+  && script.includes('qq-${currentLog}-filtered.log')
+  && html.includes('只看错误/告警'), 'logs')
 check('页面报错卡不属于任何分组（永远可见）',
   /<section class="card badbox" id="pageErrors"[^>]*>/.test(html) && !/id="pageErrors"[^>]*data-tab=/.test(html))
 
@@ -92,6 +106,13 @@ check('页面报错卡不属于任何分组（永远可见）',
 for (const id of ['palette', 'paletteInput', 'paletteList']) {
   if (!html.includes(`id="${id}"`)) { failed++; console.log('FAIL', `命令面板缺少 #${id}`) }
 }
+check('实时事件可导出当前筛选（JSONL + token 打码）',
+  html.includes('导出当前筛选') && script.includes('function streamJsonl(')
+  && script.includes('maskLogText(filteredStream()')
+  && script.includes('application/x-ndjson'), 'live')
+check('命令面板记住最近使用（最多 5 条，⭐ 置顶）',
+  script.includes('PALETTE_RECENT_KEY') && script.includes('function paletteRecentLabels(')
+  && script.includes('function rememberPaletteUse(') && script.includes("'⭐ '"))
 check('命令面板默认隐藏', /id="palette"[^>]*display:none/.test(html))
 for (const fn of ['buildPaletteItems', 'renderPalette', 'runPalette', 'openPalette', 'closePalette']) {
   if (!new RegExp(`function ${fn}\\(`).test(script)) { failed++; console.log('FAIL', `缺少函数 ${fn}`) }

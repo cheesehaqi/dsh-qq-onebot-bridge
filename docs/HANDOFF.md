@@ -1,4 +1,4 @@
-# dsh-qq-onebot-bridge 交接（2026-11-09，v0.8.7）
+# dsh-qq-onebot-bridge 交接（2026-11-10，v0.8.8）
 
 > 给新会话用：粘在第一条消息里，或让新会话读这个文件。
 
@@ -7,11 +7,9 @@
 ```
 路径    工作区根下的 dsh-qq-onebot-bridge（不进仓库的绝对路径，按你本机实际位置）
 分支    main
-HEAD    v0.8.7 发布提交（用 `git log -1` 看实际哈希）
-版本    0.8.7（tag：v0.8.0 … v0.8.7 都在）
-本次发布  「控制台 Ctrl+K 命令面板」：改 control/ui.html（面板 + 快捷键），test/console-layout-unit.mjs 25 → 40 条；
-        「语音调试并入控制台」：ui.html 的语音分组 + iframe 懒加载 `/voice?embed=1`，voice.html 支持 embed 模式；
-        顺手修 test/settings-history-unit.mjs 里的真实绝对路径（privacy 会扫已跟踪文件）；
+HEAD    v0.8.8 发布提交（用 `git log -1` 看实际哈希）
+版本    0.8.8（tag：v0.8.0 … v0.8.8 都在）
+本次发布  日志页过滤/下载/复制 + token 打码；命令面板最近使用；实时事件导出；群活跃看板（7/14/30 天 + CSV）；语音页服务状态与试听存默认；
 已发布  「一键体检报告」：control/lib/report.mjs、control/report.html、test/report-unit.mjs；
         「设置项变更历史」：control/lib/history.mjs、test/settings-history-unit.mjs；
         「语音调试」：lib/voice.js、lib/voice-routes.js、control/voice.html、test/voice-unit.mjs；
@@ -28,7 +26,7 @@ HEAD    v0.8.7 发布提交（用 `git log -1` 看实际哈希）
 
 ```
 node tools/audit.mjs            # 6 项结构体检，退出码 0/1（46 路由全部有测试提到）
-逐套跑 test/*-unit.mjs          # 当前 78 套 / 4744 断言 / 0 失败
+逐套跑 test/*-unit.mjs          # 当前 79 套 / 4762 断言 / 0 失败
 ```
 
 `tools/audit.mjs` 现在查：① 语法 ② 页面元素时序（`$('id')` 必须出现在 `<script>` 之前，动态白名单 6 个）
@@ -182,6 +180,34 @@ node tools/audit.mjs            # 6 项结构体检，退出码 0/1（46 路由�
 - `qq-host-out.log` 是 DSH 自己的输出（可能含宿主 token），插件改不了；文档明确「不要原样发人，用脱敏诊断包」；
 - 测试：`privacy-unit` 42 条（+2）、`control-unit` 183 条（+1）。
 
+### 5.12 语音页服务状态与试听音色（v0.8.8）
+
+- `control/voice.html`：从控制台 `/api/status` 的 `tts` 端口读监听状态（`voiceServicePill`），「启动」在已监听时禁用、「停止」在未启动时禁用；后端不是 local 仍全部禁用；
+- 试听记录（非 local）新增「存为默认音色」：把这次实际 `voice` 通过 `values.ttsVoice` 写回配置；
+- 测试：`voice-unit` 154 条（+2）。
+
+### 5.13 控制台日志过滤与打码（v0.8.8）
+
+- `control/ui.html` 日志页：关键词过滤、只看 error/warn、下载/复制当前视图、`命中/总行数`；
+- `maskLogText()` 对 `?token=…`、`Bearer …`、`sk-…` 打码后显示/复制/下载，避免把宿主 token 发出去；
+- 测试：`console-layout-unit` 40 → 41 条。
+
+### 5.14 命令面板最近使用（v0.8.8）
+
+- `control/ui.html`：Ctrl+K 记录最近 5 条（`qq-palette-recent-v1`），再次打开以 `⭐` 置顶；过滤时仍按原标签；
+- 测试：`console-layout-unit` 41 → 42 条。
+
+### 5.15 实时事件导出当前筛选（v0.8.8）
+
+- `control/ui.html`：`filteredStream()` 抽出筛选口径，`streamJsonl()` 导出/复制当前视图（最多 400 条，token 打码）；
+- 测试：`console-layout-unit` 42 → 43 条。
+
+### 5.16 群活跃看板（v0.8.8）
+
+- 新增 `control/lib/activity.mjs`：`aggregateActivity()` 纯聚合 + `readActivity()` 读 `qq-history/*.jsonl`（只认 `g:`/`u:`，不返回原文，最多 20 万行、30 秒缓存）；
+- `GET /api/activity?days=7`；控制台「数据与任务」新增「群活跃」卡（7/14/30 天，消息量 / 每日趋势柱 / 最活跃成员 / 最近一条，支持导出 CSV）；
+- 测试：新增 `test/activity-unit.mjs` 11 条；`report-unit` 88 条、`console-layout-unit` 44 条；套数 78 → 79。
+
 ## 六、下一步候选（按用户已表态的口径）
 
 用户说"先准备一下新的功能，继续添加功能"，又说"很久没开发以前的老功能了，比如语音模块"。已聊过但**尚未开工**的方向
@@ -215,4 +241,11 @@ v0.8.7（2026-11-09，已发布）：
 - 顺手修掉 `test/settings-history-unit.mjs` 里的真实绝对路径（`privacy-unit` 会扫已跟踪文件）。
 - 修复「启动语音服务」：`TTS控制.bat` 是 UTF-8 无 BOM，cmd 按 GBK 解析会把中文行当命令；改为直接拉 `.venv\Scripts\pythonw.exe api_v2.py`（无控制台，避免 forrtl window-CLOSE 中止）并确认 9880 是否监听（`control-unit` 183 条）。
 - 隐私加固：控制台启动日志 token 打码；诊断包脱敏覆盖 token / apiKey / Bearer / `sk-…`；`privacy-unit` 42 条。
-- 验证：78 套 / 4744 断言全绿；`git status` 只有源码/文档/测试改动，运行产物全部被忽略。
+
+v0.8.8（2026-11-10，已发布）：
+- 语音页：服务监听状态灯 + 试听记录「存为默认音色」；`voice-unit` 154 条。
+- 控制台日志页：关键词/错误过滤、下载/复制、token 打码；`console-layout-unit` 41 条。
+- 命令面板：最近 5 条以 ⭐ 置顶（localStorage）；`console-layout-unit` 42 条。
+- 实时事件：导出/复制当前筛选为 JSONL（token 打码）；`console-layout-unit` 43 条。
+- 群活跃看板：`qq-history` 聚合（不含原文）、`GET /api/activity`、7/14/30 天；`activity-unit` 11 条，套数 78 → 79。
+- 验证：79 套 / 4762 断言全绿；`git status` 只有源码/文档/测试改动，运行产物全部被忽略。

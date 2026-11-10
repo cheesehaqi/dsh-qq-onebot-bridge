@@ -247,6 +247,16 @@ const server = createControlServer({
       file: 'qq-health-history.jsonl',
       entries: [{ at: 1_700_000_000_000, verdict: 'healthy', ok: true, checks: { total: 3, passed: 3, failed: 0 }, constraints: null }].slice(0, limit),
     }),
+    activity: async ({ days }) => ({
+      ok: true,
+      dir: 'qq-history',
+      days,
+      total: 2,
+      groups: [{ chatKey: 'g:100', kind: 'group', total: 2, lastAt: 1_700_000_000_000, daily: [], topMembers: [{ userId: 1, name: '甲', count: 2 }] }],
+      privates: [],
+      chats: [{ chatKey: 'g:100', kind: 'group', total: 2, lastAt: 1_700_000_000_000, daily: [], topMembers: [{ userId: 1, name: '甲', count: 2 }] }],
+      scanned: { files: 1, lines: 2, truncated: false },
+    }),
   },
   ui: '<h1>console</h1>',
   reportUi: '<h1>报告页</h1>',
@@ -268,6 +278,12 @@ check('GET /api/health/history 返回体检趋势点',
   historyResponse.status === 200 && historyBody.ok === true && Array.isArray(historyBody.entries)
   && historyBody.entries.length === 1 && historyBody.entries[0].checks.passed === 3,
   JSON.stringify(historyBody.entries?.[0] ?? {}))
+const activityResponse = await fetch(`${base}/api/activity?days=7&token=${token}`)
+const activityBody = await activityResponse.json()
+check('GET /api/activity 返回群活跃聚合（不含原文）',
+  activityResponse.status === 200 && activityBody.ok === true && activityBody.days === 7
+  && activityBody.groups[0].total === 2 && !JSON.stringify(activityBody).includes('text'),
+  JSON.stringify(activityBody.groups?.[0] ?? {}))
 check('报告接口需要 token', (await fetch(`${base}/api/report`)).status === 401)
 check('报告接口拒绝跨站 Origin',
   (await fetch(`${base}/api/report?token=${token}`, { headers: { Origin: 'https://evil.example' } })).status === 403)
