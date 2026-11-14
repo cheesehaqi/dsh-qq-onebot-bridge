@@ -1,4 +1,4 @@
-# dsh-qq-onebot-bridge 交接（2026-11-14，v0.9.0）
+# dsh-qq-onebot-bridge 交接（2026-11-14，v0.8.9）
 
 > 给新会话用：粘在第一条消息里，或让新会话读这个文件。
 
@@ -7,8 +7,8 @@
 ```
 路径    工作区根下的 dsh-qq-onebot-bridge（不进仓库的绝对路径，按你本机实际位置）
 分支    main
-HEAD    v0.9.0 发布提交（用 `git log -1` 看实际哈希）
-版本    0.9.0（tag：v0.8.0 … v0.9.0 都在）
+HEAD    v0.8.9 发布提交（用 `git log -1` 看实际哈希）
+版本    0.8.9（tag：v0.8.0 … v0.8.9 都在）
 本次发布  视频理解 / 聊天导出（md/csv/json）/ `/summary [N]` / 群文件搜索 / 关键词订阅 / 群活动报名；
         隐私/保留：`videoApiKey` 只存 profile、控制台只报已配置、日志/写接口响应打码；视频 `peek-*` 目录与 `qq-exports` 纳入 `imageRetentionDays` 清理（移入 `qq-trash/`）；
         群活动报名：`/报名 活动名` 发起、`/报名` 加入、`/报名列表`、`/取消报名`、`/报名结束`（默认关；发起人或管理员结束）；新增 `lib/signup.js`、`test/signup-unit.mjs`；

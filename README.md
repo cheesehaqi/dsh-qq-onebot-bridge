@@ -2,7 +2,7 @@
 
 QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱动 DSH agent 会话，agent 回复自动发回 QQ。
 
-当前版本 **v0.9.0** · [发布记录（Releases）](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [更新日志](CHANGELOG.md)
+当前版本 **v0.8.9** · [发布记录（Releases）](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [更新日志](CHANGELOG.md)
 
 ## 架构
 
@@ -536,7 +536,7 @@ node test/replay-live-host.mjs --token <控制台 token>   # 录制 → 离线�
   `Bearer …` / 整段私钥打码（或按 `outboundRedactBlock` 整条拦下），并在 trace 里注明命中了哪条规则（**不写原文**）。
   这三道都需要自己打开；关着就等于没有这层保护。
 
-### 视频与密钥（v0.9.0）
+### 视频与密钥（v0.8.9）
 
 - 视频理解默认 `videoProvider=local`：只在本机用 ffmpeg 抽帧，不上传；只有显式选择 `qwen` / `gemini` 才会调外部模型；
 - `qwen` 发送的是**联系表图片**；`gemini` 通过 Google Files API 上传**整段视频（含音轨）**，敏感视频不要选；
@@ -654,7 +654,7 @@ npm run shortcut
 
 最近五个版本（始终滚动展示）：
 
-- **v0.9.0** — 视频理解（私聊自动 / 群聊引用 + @；本地抽帧、Qwen / Gemini 可换后端、控制台独立视频栏与配置）、聊天记录导出（md/csv/json，群聊管理员私聊交付）、`/summary [N]` 归档总结、群文件搜索/子目录下载、关键词订阅、群活动报名。
+- **v0.8.9** — 视频理解（私聊自动 / 群聊引用 + @；本地抽帧、Qwen / Gemini 可换后端、控制台独立视频栏与配置）、聊天记录导出（md/csv/json，群聊管理员私聊交付）、`/summary [N]` 归档总结、群文件搜索/子目录下载、关键词订阅、群活动报名。
 - **v0.8.8** — 控制台日志页关键词/错误过滤与下载复制（token 打码）；命令面板最近使用置顶；实时事件导出当前筛选；群活跃看板（7/14/30 天趋势 + CSV）；语音页服务监听状态与试听「存为默认音色」。
 - **v0.8.7** — Ctrl+K 命令面板 + 侧栏滑动选中；语音调试并入控制台（页内开关 / 后端切换 / 服务配置 / 直接启停语音服务，改用 pythonw 避免窗口关闭中止）；「体检趋势」卡；隐私加固（控制台日志 token 打码、诊断包脱敏覆盖 token / apiKey / Bearer / `sk-…`）
 - **v0.8.6** — 控制台可调试性三件套：一键体检报告独立页 `/report`、设置项变更历史、独立语音调试页 `/voice`（试听/转写 + 音色/语速/±12 半音音调/采样参数按次覆盖）；调试台改左侧六组导航 + 单列卡片；`lib/` 只挂语音路由与 TTS 参数，**补丁面 `bridge.js` / `index.js` / `panel.js` 未动**

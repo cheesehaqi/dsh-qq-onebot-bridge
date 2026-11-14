@@ -2,7 +2,7 @@
 
 A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ messages drive DSH agent sessions directly, and agent replies are sent back to QQ automatically.
 
-Current version **v0.9.0** · [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [Changelog](CHANGELOG.md)
+Current version **v0.8.9** · [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [Changelog](CHANGELOG.md)
 
 ## Architecture
 
@@ -596,7 +596,7 @@ This plugin ships **no persona, preferences, or group rules**. The whale-girl pe
   (or the whole message is dropped when `outboundRedactBlock` is on), and the trace names the rule that fired (**never the
   text**). All three are off unless you turn them on.
 
-### Video and keys (v0.9.0)
+### Video and keys (v0.8.9)
 
 - Video understanding defaults to `videoProvider=local` (ffmpeg frames only, no upload); only explicit `qwen` / `gemini` calls leave the machine;
 - `qwen` sends contact-sheet images; `gemini` uploads the **whole video including audio** to Google Files API — do not use it for sensitive clips;
@@ -648,7 +648,7 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 
 The five most recent versions (always kept rolling):
 
-- **v0.9.0** — video understanding (private auto / group quote + @; local frames, swappable Qwen / Gemini backend, dedicated console section and config), chat export (md/csv/json; groups deliver to the admin privately), `/summary [N]` archive summaries, group-file search / nested download, keyword watches, activity sign-up.
+- **v0.8.9** — video understanding (private auto / group quote + @; local frames, swappable Qwen / Gemini backend, dedicated console section and config), chat export (md/csv/json; groups deliver to the admin privately), `/summary [N]` archive summaries, group-file search / nested download, keyword watches, activity sign-up.
 - **v0.8.8** — log-page keyword/errors-only filters plus download/copy (tokens masked); recently used command-palette entries pinned; live-event export of the current filter; group activity dashboard (7/14/30-day trend + CSV); voice page shows service listening state and can save a trial's voice as default.
 - **v0.8.7** — Ctrl+K command palette + sliding sidebar selection; the voice lab moves into the console (in-page toggles / backend switch / service config / start-stop, now via pythonw so a closed window cannot abort it); a "health trend" card; privacy hardening (console-log tokens masked, diagnostic bundle masks token / apiKey / Bearer / `sk-…`)
 - **v0.8.6** — debuggability trio for the console: a standalone health-report page `/report`, settings change history, and a standalone voice lab `/voice` (TTS/STT trials plus per-attempt voice / speed / ±12 semitone pitch / sampling overrides); console rebuilt with a six-group sidebar and single-column cards; `lib/` only gains voice routes and TTS parameters — **the patch-surface files `bridge.js` / `index.js` / `panel.js` are untouched**

@@ -57,7 +57,7 @@ try { await downloadVideoSource({ raw: '', videoDir: join(mediaDir, 'videos3') }
 check('下载：空地址报明确原因', noSource.includes('没有可下载'))
 rmSync(mediaDir, { recursive: true, force: true })
 
-const ffmpegCandidates = [process.env.FFMPEG_PATH, 'ffmpeg', 'D:\\Deepseek\\netease-docs\\ffmpeg\\ffmpeg.exe'].filter(Boolean)
+const ffmpegCandidates = [process.env.FFMPEG_PATH, 'ffmpeg'].filter(Boolean)
 const ffmpeg = ffmpegCandidates.find((candidate) => {
   const result = spawnSync(candidate, ['-version'], { encoding: 'utf8', windowsHide: true })
   return result.status === 0
