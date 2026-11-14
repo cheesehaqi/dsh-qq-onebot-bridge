@@ -144,6 +144,9 @@ check('依赖标记只用词表里的值（界面按它渲染小标签）',
 const externalHintKeys = ['apiKey', 'baseUrl', 'provider', 'model', 'region']
 const needMarkers = new Set(Object.values(PANEL_NEEDS))
 const missed = PANEL_KEYS.filter((key) => {
+  // 视频理解的模型/密钥是**可选后端**：local 不需要任何外部服务，因此视频开关/时长/帧数
+  // 不强制标“需准备”，否则默认本地路径会被误报成外部依赖。
+  if (key.startsWith('video')) return false
   const stem = key.replace(/(Enabled|Local|InGroup|Only)$/, '').toLowerCase().slice(0, 4)
   const family = Object.keys(dict).filter((other) => other !== key && other.toLowerCase().startsWith(stem))
   const needsExternal = family.some((other) => externalHintKeys.some((marker) => other.toLowerCase().includes(marker.toLowerCase())))
@@ -153,11 +156,11 @@ const missed = PANEL_KEYS.filter((key) => {
 })
 check('凡 schema 里带 apiKey/baseUrl/provider/model 的开关都标了依赖',
   missed.length === 0, missed.join(','))
-check('依赖分布合理（既有"开箱即用"也有需要准备的，且总数为 88 = 70 开关 + 12 数值 + 1 时段 + 3 名单 + 2 句式）',
+check('依赖分布合理（既有"开箱即用"也有需要准备的，且总数为 93 = 73 开关 + 14 数值 + 1 时段 + 3 名单 + 2 句式）',
   allRows.filter((entry) => entry.needs === '').length >= 5
   && allRows.filter((entry) => entry.needs !== '').length >= 20
-  && allRows.length === 88
-  && boolRows.length === 70 && numRows.length === 12
+  && allRows.length === 93
+  && boolRows.length === 73 && numRows.length === 14
   && allRows.filter((entry) => entry.type === 'times').length === 1
   && allRows.filter((entry) => entry.type === 'list').length === 3
   && allRows.filter((entry) => entry.type === 'patterns').length === 2,
@@ -472,9 +475,11 @@ const fakeRequest = (method, body, headers = {}) => ({
   async *[Symbol.asyncIterator]() { if (body !== undefined) yield Buffer.from(JSON.stringify(body)) },
 })
 
-check('挂载了十二条路由（读面板 + 写开关 + 批量写 + 调试台 + 账号 + 二维码 + 启动 NapCat + 重启登录 + 账号中心 + 语音调试×3）',
-  registered.length === 12 && registered.some((r) => r.path === '/qqai/panel')
+check('挂载了十五条路由（读面板 + 写开关 + 批量写 + 视频状态/测试/配置 + 调试台 + 账号 + 二维码 + 启动 NapCat + 重启登录 + 账号中心 + 语音调试×3）',
+  registered.length === 15 && registered.some((r) => r.path === '/qqai/panel')
   && registered.some((r) => r.path === '/qqai/panel/set-batch')
+  && registered.some((r) => r.path === '/qqai/video/status') && registered.some((r) => r.path === '/qqai/video/test')
+  && registered.some((r) => r.path === '/qqai/video/config')
   && registered.some((r) => r.path === '/qqai/panel/set') && registered.some((r) => r.path === '/qqai/console')
   && registered.some((r) => r.path === '/qqai/account') && registered.some((r) => r.path === '/qqai/napcat/start')
   && registered.some((r) => r.path === '/qqai/napcat/relogin') && registered.some((r) => r.path === '/qqai/napcat/qr')
@@ -486,6 +491,9 @@ const getHandler = registered.find((r) => r.path === '/qqai/panel').handler
 const setHandler = registered.find((r) => r.path === '/qqai/panel/set').handler
 // v0.6.8：合并写入单独一条路由（连点开关时前端攒批走它）。
 const batchHandler = registered.find((r) => r.path === '/qqai/panel/set-batch').handler
+const videoStatusHandler = registered.find((r) => r.path === '/qqai/video/status').handler
+const videoTestHandler = registered.find((r) => r.path === '/qqai/video/test').handler
+const videoConfigHandler = registered.find((r) => r.path === '/qqai/video/config').handler
 
 const readRes = makeResponse()
 await getHandler(fakeRequest('GET'), readRes)
@@ -836,6 +844,55 @@ await batchHandler(fakeRequest('POST', { entries: [{ key: 'port', value: 1234 }]
 check('★批量写入：白名单外的键整批拒掉', batchUnknown.out.status === 400 && /白名单/.test(batchUnknown.out.body), batchUnknown.out.body.slice(0, 90))
 // 还原这两个键，后面的断言继续按常规跑。
 await batchHandler(fakeRequest('POST', { entries: [{ key: 'ttsEnabled', value: false }, { key: 'chatTurnsPerMinute', value: 5 }] }, JSON_HEADERS), makeResponse())
+
+// 视频理解配置：控制台专用 GET/POST，不经过 QQ助手面板的键也放行（命令/视觉方式/字节上限）。
+const videoStatusRes = makeResponse()
+await videoStatusHandler(fakeRequest('GET'), videoStatusRes)
+const videoStatusBody = JSON.parse(videoStatusRes.out.body)
+check('GET /qqai/video/status 返回视频配置默认值',
+  videoStatusRes.out.status === 200 && videoStatusBody.ok === true
+  && videoStatusBody.values.videoEnabled === false
+  && videoStatusBody.values.videoMaxSeconds === 60
+  && videoStatusBody.values.videoVisionMode === 'tool'
+  && videoStatusBody.values.videoProvider === 'local'
+  && videoStatusBody.values.videoApiKeySet === false, brief(videoStatusBody.values))
+const videoTestRes = makeResponse()
+await videoTestHandler(fakeRequest('POST', { values: { videoProvider: 'local' } }, JSON_HEADERS), videoTestRes)
+const videoTestBody = JSON.parse(videoTestRes.out.body)
+check('POST /qqai/video/test 本地后端直接通过（不需要 Key）',
+  videoTestRes.out.status === 200 && videoTestBody.ok === true && videoTestBody.provider === 'local', brief(videoTestBody))
+const videoSaveRes = makeResponse()
+await videoConfigHandler(fakeRequest('POST', {
+  values: {
+    videoEnabled: true,
+    videoMaxSeconds: 45,
+    videoFrames: 8,
+    videoMaxBytes: 20_971_520,
+    videoVisionMode: 'native',
+    videoPeekCommand: 'node D:\\tools\\video.mjs',
+    videoProvider: 'qwen',
+    videoApiBase: 'https://qwen.example/v1',
+    videoApiModel: 'qwen-vl-test',
+    videoApiKey: 'secret-test-key',
+    videoPrompt: '描述画面',
+  },
+}, JSON_HEADERS), videoSaveRes)
+check('POST /qqai/video/config 写开关/数值/视觉方式/分析器命令',
+  videoSaveRes.out.status === 200 && JSON.parse(videoSaveRes.out.body).ok === true
+  && /^\s*videoEnabled: true$/m.test(readFileSync(patchPath, 'utf8'))
+  && /^\s*videoMaxSeconds: 45$/m.test(readFileSync(patchPath, 'utf8'))
+  && /^\s*videoVisionMode:\s*"?native"?$/m.test(readFileSync(patchPath, 'utf8'))
+  && /videoPeekCommand:.*video\.mjs/.test(readFileSync(patchPath, 'utf8'))
+  && /videoProvider:\s*"?qwen"?/.test(readFileSync(patchPath, 'utf8'))
+  && /videoApiBase:.*qwen\.example/.test(readFileSync(patchPath, 'utf8'))
+  && /videoApiModel:.*qwen-vl-test/.test(readFileSync(patchPath, 'utf8'))
+  && /videoApiKey:.*secret-test-key/.test(readFileSync(patchPath, 'utf8'))
+  && /videoPrompt:.*描述画面/.test(readFileSync(patchPath, 'utf8'))
+  && !JSON.stringify(videoSaveRes.out.body).includes('secret-test-key'),
+  brief({ status: videoSaveRes.out.status, body: JSON.parse(videoSaveRes.out.body) }))
+const videoBadRes = makeResponse()
+await videoConfigHandler(fakeRequest('POST', { values: { videoMaxBytes: 1 } }, JSON_HEADERS), videoBadRes)
+check('POST /qqai/video/config 拒绝越界大小', videoBadRes.out.status === 400 && /超出范围/.test(videoBadRes.out.body), videoBadRes.out.body.slice(0, 120))
 /**
  * ★ v0.6.8（用户 2026-10-19「做一个白名单添加面板」）：
  *   `allowUsers` / `allowGroups` 是 `z.array(z.number())`，而 OneBot 的 user_id 也是数字 ⇒
@@ -1863,11 +1920,11 @@ check('★管理员分支走 WMI Win32_Process.Create，且 if/else 之间没有
 
 dispose()
 check('dispose 注销了全部路由（配置热重载后能重新挂载，不会撞 duplicate route）',
-  registered.length === 0 && disposed.length === 12, `left=${registered.length}`)
+  registered.length === 0 && disposed.length === 15, `left=${registered.length}`)
 mountQqAiPanel(fakeHost, {
   profile: 'web', config: {}, readFile: readFileSync, writeFile: writeFileSync, env,
 })
-check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 12, String(registered.length))
+check('注销后可以再次挂载（模拟宿主重建插件条目）', registered.length === 15, String(registered.length))
 
 // ------------------------------------------------- 3. 客户端 bundle 冒烟 ---- ----
 const clientText = readFileSync(join(import.meta.dirname, '..', 'client', 'client.js'), 'utf8')

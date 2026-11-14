@@ -18,6 +18,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { redactConfig } from '../lib/extension.js'
 
 const repo = dirname(dirname(fileURLToPath(import.meta.url)))
 let passed = 0
@@ -379,8 +380,10 @@ check('配置 schema 里的密钥字段默认值为空', nonEmptyKeyDefaults.len
 // 而"至少 4 个"的下限照样通过。所以这里点名几个必须被覆盖到的字段。
 const defaultedNames = new Set(keyDefaults.map((match) => match[1]))
 check('关键密钥字段确实被默认值检查覆盖',
-  ['sttApiKey', 'ttsApiKey', 'imageGenApiKey'].every((field) => defaultedNames.has(field)) && keyDefaults.length >= 4,
+  ['sttApiKey', 'ttsApiKey', 'imageGenApiKey', 'videoApiKey'].every((field) => defaultedNames.has(field)) && keyDefaults.length >= 5,
   `${keyDefaults.length} 个：${[...defaultedNames].join(',')}`)
+const redactedVideoConfig = redactConfig({ videoApiKey: 'placeholder', videoProvider: 'qwen' })
+check('视频密钥不会进入调试/扩展配置投影', !('videoApiKey' in redactedVideoConfig) && redactedVideoConfig.videoProvider === 'qwen', JSON.stringify(redactedVideoConfig))
 
 // 示例配置里也不能填值
 const example = textFiles.find(({ name }) => name === 'examples/cordis.patch.example.yml')?.text ?? ''

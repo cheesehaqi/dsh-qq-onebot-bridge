@@ -2,7 +2,7 @@
 
 QQ ↔ DeepSeek Harness 双向桥插件（独立 bundle）。QQ 消息直接驱动 DSH agent 会话，agent 回复自动发回 QQ。
 
-当前版本 **v0.8.8** · [发布记录（Releases）](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [更新日志](CHANGELOG.md)
+当前版本 **v0.9.0** · [发布记录（Releases）](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [更新日志](CHANGELOG.md)
 
 ## 架构
 
@@ -121,6 +121,7 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `actionRatePerDay` | `500` | 写操作闸门：全部会话合计每日上限 |
 | `actionAuditEnabled` | `true` | 写操作与拒绝记录写入 `cwd/qq-actions.log` |
 | `keywordEnabled` | `false` | 关键词问答库（**默认关闭**）：命中本地词库直接回复，不走模型、不需要 @ |
+| `keywordWatchEnabled` | `false` | 关键词订阅（**默认关闭**，仅群聊）：`/订阅 关键词` 后有人提到就私聊提醒；跳过自己的消息，同一订阅 5 分钟冷却，每人每群最多 20 个 |
 | `keywordFile` | `''` | 词库文件路径（空=`cwd/qq-keywords.json`）；支持 exact/contains/regex、随机多答、图片、作用域与冷却 |
 | `fortuneEnabled` | `true` | 今日人品/运势、抽签、塔罗（按 QQ 号+日期确定性生成，纯本地） |
 | `diceEnabled` | `true` | 骰子（`.r 3d6`）与随机抽人（`/抽一个 A B C`） |
@@ -170,7 +171,18 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `privateImageView` | `true` | 私聊中主动下载查看对方发送的图片/动画表情（存 `cwd/qq-images/`，agent 用 describe_image 查看） |
 | `visionMode` | `tool` | 识图方式：`tool`=存盘后由 `visionToolName` 工具查看（稳定）；`native`=原生多模态附件直传模型（DSH 0.1.1+，文本模型自动降级） |
 | `visionToolName` | `describe_image` | `tool` 模式下使用的识图工具名 |
-| `imageRetentionDays` | `14` | 下载图片（qq-images/qq-replies）保留天数，宿主启动时清理更旧的 |
+| `videoEnabled` | `false` | **视频理解（默认关）**：私聊收到视频自动处理；群聊必须引用视频 + @机器人（可带 `/看视频`）。本地抽帧不联网；选了 qwen/gemini 才会把联系表/整段视频发给对应模型 |
+| `videoMaxSeconds` | `60` | 长视频只分析前 N 秒，避免群里一条电影烧穿上下文 |
+| `videoFrames` | `12` | 内置分析器抽多少帧（2–24）；越多越不容易漏动作，上下文也更贵 |
+| `videoMaxBytes` | `104857600` | 下载视频大小上限（默认 100 MB），超过直接拒绝 |
+| `videoPeekCommand` | `''` | 可替换的分析器命令：传 `--input/--out/--frames/--ffmpeg/--max-seconds`（看片段时另加 `--start/--duration`）并写出 `manifest.json`（可选 `description` 字段）；`videoProvider=command` 时使用 |
+| `videoVisionMode` | `tool` | 联系表怎么给主模型：`native`=作为图片附件直传（模型需支持视觉）；`tool`=只存路径，让 `visionToolName` 查看 |
+| `videoProvider` | `local` | 视频描述来源：`local`=只抽帧；`command`=外部分析器；`qwen`=OpenAI 兼容视觉接口（发联系表）；`gemini`=原生视频 Files API（整段视频+音轨） |
+| `videoApiBase` | `''` | qwen/gemini 的 API Base（空=各自默认：DashScope 兼容模式 / Google Generative Language） |
+| `videoApiModel` | `''` | qwen/gemini 模型 ID（空=默认 `qwen-vl-max` / `gemini-2.0-flash`） |
+| `videoApiKey` | `''` | qwen/gemini 的 API Key（secret；控制台只显示“已配置”，不回显） |
+| `videoPrompt` | `''` | 视频模型提示词（空=内置中文提示：按时间线描述画面/声音，不要编造） |
+| `imageRetentionDays` | `14` | 下载图片/视频/导出（qq-images/qq-replies/qq-videos/qq-exports）保留天数，宿主启动时清理更旧的 |
 | `imageTrashEnabled` | `true` | **删除策略：只回收不销毁**——过期图片移动到 `cwd/qq-trash/<日期>/` 而不是删除（失败则保留原文件） |
 | `imageTrashDir` | `''` | 回收目录（空=`cwd/qq-trash`）；该目录**不会自动清理**，由你自行处理（本机可 `scripts/safe-delete.ps1` 送进回收站） |
 | `memoryEnabled` | `true` | 每会话持久化记忆（最近对话存 `cwd/qq-memory/`，宿主重启后自动恢复；`/new` 清除） |
@@ -202,6 +214,7 @@ profile 的 `cordis.patch.yml` 覆盖 `id: dsh-qq-onebot-bridge` 的 config（�
 | `pokeCooldownSeconds` | `15` | 每会话戳一戳回复最小间隔（秒，防刷） |
 | `voiceReadingEnabled` | `true` | 语音朗读：@机器人引用文字说「读一下/念出来」，或 `/读 <文字>`（走 ttsProvider 合成） |
 | `checkinEnabled` | `false` | 每日签到（**默认关闭**）：说「签到」打卡，连续/累计天数存 `cwd/qq-checkin/`；「签到榜」看排行 |
+| `signupEnabled` | `false` | 群活动报名（**默认关闭**）：`/报名 活动名` 发起，`/报名` 加入，`/报名列表`、`/取消报名`、`/报名结束`；单群一个活动、最多 100 人 |
 | `checkinKeyword` | `签到` | 签到触发词 |
 | `welcomeEnabled` | `false` | 入群欢迎语（**默认关闭**）：新人进群自动 @+欢迎文案（机器人自己入群不触发） |
 | `welcomeText` | `''` | 欢迎文案（空=内置默认文案） |
@@ -297,6 +310,25 @@ ws://127.0.0.1:6700/
 注意事项：
 - 智谱 GLM-ASR-2512 限 wav/mp3、**≤ 30 秒**、≤ 25MB；更长的语音请换 SiliconFlow 等端点
 - 智谱接口的 multipart 字段必须是 `file`（二进制）——文档里写的 `file_base64` 实测会报 1214 错误
+
+## 视频理解（可选，默认关）
+
+`videoEnabled=true` 后：
+
+- **私聊**：直接发视频就自动处理；
+- **群聊**：必须**引用那条视频 + @机器人**（可只发 `/看视频`，也可带问题）；直接发视频不会处理；
+- 支持时间段：`/看视频 0:30-0:45 这段在干嘛` 只看这一段；不写就是整段（仍受 `videoMaxSeconds` 限制）；
+- 只分析前 `videoMaxSeconds` 秒，视频超过 `videoMaxBytes` 直接拒绝；
+- 内置分析器用本机 ffmpeg 抽帧 + 每 12 帧一张联系表；`videoProvider=local` 时**不联网、不上传**；
+- `videoProvider` 可换视频后端：
+  - `local`：只抽帧（默认，零成本）；
+  - `command`：`videoPeekCommand` 外部命令，manifest 里的 `description` 会写进提示；
+  - `qwen`：OpenAI 兼容视觉接口，发联系表 + 提示（不发整段视频）；配 `videoApiBase/videoApiModel/videoApiKey`；
+  - `gemini`：Google Files API 上传**整段视频（含音轨）**，再 `generateContent`；配 `videoApiKey/videoApiModel`。**会把视频上传给 Google，敏感视频别选它**；
+- 联系表按 `videoVisionMode` 直传主模型（`native`）或只存盘给 `visionToolName`（`tool`）；
+- 开了 `sttEnabled` 时，视频音轨会复用现有 STT 转写；
+- 控制台左侧新增独立的「🎬 视频理解」栏：列出 `qq-videos/peek-*` 的最近分析（原片/分析区间/帧数/联系表/音轨/转写/目录）；同一栏可直接改**开关 / 最长秒数 / 抽帧数 / 大小上限 / 视觉方式 / 视频后端 / API Base / 模型 / Key / 提示词 / 分析器命令**（写 `cordis.patch.yml`，宿主热重载后生效；Key 只写不回显），并用「测试连接」只验证 Key/Base/Model 是否通（local/command 不发起网络请求）。
+- 每条分析可「查看」：预览联系表/前 8 帧、看音轨转写；「删除」会把整个 `peek-*` 目录移入 `qq-trash/`（回收站优先，不永久删除）。
 
 ## 会话分组
 
@@ -420,9 +452,11 @@ if (api.instanceId !== lastInstanceId) { lastInstanceId = api.instanceId; reRegi
 
 | 用途 | 常用命令 |
 |---|---|
-| 会话 | `/new` 新对话 · `/status` 会话状态 · `/summary` 群聊总结 · `/export` 导出记录 |
-| 查询 | **`/为什么`** 某条消息为什么没回 · `/health` 运行诊断 · `/成员` 名单/详情 · `/群信息` `/公告` `/荣誉` `/精华` · `/找一个历史` · `/文件` `/取` `/相册` `/ocr` |
+| 会话 | `/new` 新对话 · `/status` 会话状态 · `/summary [条数]` 群聊总结（默认 30，最多 200） · `/导出 [天数] [md\|csv\|json]` 导出聊天记录文件（`/export` 同义；群聊仅管理员，文件私聊发给管理员） |
+| 查询 | **`/为什么`** 某条消息为什么没回 · `/health` 运行诊断 · `/成员` 名单/详情 · `/群信息` `/公告` `/荣誉` `/精华` · `/找一个历史` · `/文件` `/文件 找 关键词` `/取 文件夹/文件名` `/相册` `/ocr` |
 | 玩法 | 「签到」打卡 · `/签到榜` · `/积分` `/排行榜` `/转账` · 「今日人品」「抽签」 · `.r 3d6` · 「接龙」「猜数字」 · `/画` 生图 · `/读` 朗读 |
+| 活动报名 | `/报名 活动名` 发起 · `/报名` 加入 · `/报名列表` · `/取消报名` · `/报名结束`（默认关；发起人或管理员结束） |
+| 关键词订阅 | `/订阅 关键词` 私聊收提醒 · `/订阅列表` · `/取消订阅 关键词`（群聊、默认关；最多 20 个/人，5 分钟冷却） |
 | 群运营 | `/mute` `/unmute` `/kick` `/clear` · `/公告` `/全员禁言` `/名片` `/头衔` · `/批量踢` · `/禁言名单` `/全体余量` · `/退群`（慎用） |
 | 管理/调试 | `/reminders` 提醒 · `/todo` 待办 · `/日报` · `/kw` 词库 · `/播报` · `/赞榜` `/谁赞了` · `/点赞` `/戳` · **`/能力体检`**（只读探针，见下） |
 
@@ -442,7 +476,7 @@ if (api.instanceId !== lastInstanceId) { lastInstanceId = api.instanceId; reRegi
 
 ## 测试
 
-65 个单测脚本，共 4224 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
+86 个单测脚本，共 4887 项断言（`test/*-unit.mjs`）+ 3 个真机脚本：
 
 ```sh
 
@@ -502,6 +536,14 @@ node test/replay-live-host.mjs --token <控制台 token>   # 录制 → 离线�
   `Bearer …` / 整段私钥打码（或按 `outboundRedactBlock` 整条拦下），并在 trace 里注明命中了哪条规则（**不写原文**）。
   这三道都需要自己打开；关着就等于没有这层保护。
 
+### 视频与密钥（v0.9.0）
+
+- 视频理解默认 `videoProvider=local`：只在本机用 ffmpeg 抽帧，不上传；只有显式选择 `qwen` / `gemini` 才会调外部模型；
+- `qwen` 发送的是**联系表图片**；`gemini` 通过 Google Files API 上传**整段视频（含音轨）**，敏感视频不要选；
+- `videoApiKey` 只存在你的 DSH profile 配置（`cordis.patch.yml`，本机明文），控制台只显示「已配置」、不回显；宿主写配置的日志/响应里密钥打 `<已隐藏>`；诊断包只收集日志/环境/公开配置，不包含 profile 配置；
+- 视频/联系表/导出文件都按 `imageRetentionDays`（默认 14 天）在宿主启动时移入 `qq-trash/`，不永久删除；
+- `/导出` 的聊天文件只在私聊交付；群聊仅管理员，且不会上传到群文件。导出文件同样纳入上面的保留期清理。
+
 ### 合规提示
 
 - 仅用于个人学习、内部小范围交流；不得用于批量营销、广告、骚扰、群控等用途
@@ -549,7 +591,7 @@ npm run shortcut
 
 ```
 
-控制台左侧按用途分六组（**总览 / 实时事件 / 诊断与报告 / 录制 · 回放 · 注入 / 数据与任务 / 日志**）+ 第七组**语音调试**，右上角只留四个全局动作
+控制台左侧按用途分**八组**（**总览 / 实时事件 / 诊断与报告 / 录制 · 回放 · 注入 / 数据与任务 / 日志 / 语音调试 / 视频理解**），右上角只留四个全局动作
 （刷新 / 一键体检 / 导出诊断包 / 体检报告）；语音调试点开就是控制台里的一个分组（内容仍由 `/voice` 提供，iframe 懒加载）。分组只切可见性，隐藏的卡片照常轮询/收 SSE。
 按 **Ctrl+K**（macOS ⌘K）可打开命令面板，直接搜分组 / 卡片 / 动作。
 
@@ -567,7 +609,7 @@ npm run shortcut
 | 体检报告 | **`/report`**：把逐项体检与 6 条硬约束合成一整页报告 —— 一句话结论、「先修这些」（按后果排序）、分组明细、每条约束的证据与「去看 →」深链；只读、可打印成 PDF、可一键复制整段文本（发给别人排查用）；`GET /api/report` |
 | 体检趋势 | 「诊断与报告」里的趋势卡：每次体检落一行 `qq-health-history.jsonl`（时间 / 结论 / 通过数 / 阻断数），最近 30 次倒序展示并标出失败数变化；`GET /api/health/history`，30 秒自动刷新 |
 | 变更历史 | 「设置项变更历史」卡：控制台写过的设置（路径配置 / WebUI / 网络配置）留下 **old → new**，密钥类键只记「值已隐藏」；存储 `<工作目录>\qq-settings-history.jsonl`，`GET /api/history`，只读、可按关键词过滤与复制 |
-| 命令面板 | **Ctrl+K（⌘K）**：按名称过滤并跳转七个分组、17 张卡片，或直接执行刷新 / 一键体检 / 导出诊断包 / 打开体检报告 / 打开语音调试；↑↓ 选择、回车执行、Esc 关闭；最近用过的 5 条会以 ⭐ 置顶（存本浏览器）。侧栏顶部有可见入口「🔍 搜索 / 跳转 Ctrl K」，不靠键盘也能发现；切换分组时侧栏的选中块会跟着滑动 |
+| 命令面板 | **Ctrl+K（⌘K）**：按名称过滤并跳转八个分组、19 张卡片，或直接执行刷新 / 一键体检 / 导出诊断包 / 打开体检报告 / 打开语音调试；↑↓ 选择、回车执行、Esc 关闭；最近用过的 5 条会以 ⭐ 置顶（存本浏览器）。侧栏顶部有可见入口「🔍 搜索 / 跳转 Ctrl K」，不靠键盘也能发现；切换分组时侧栏的选中块会跟着滑动 |
 | 语音调试 | 控制台左侧「语音调试」分组（内部仍是 `/voice` 页，`embed=1` 隐藏大标题；也可直接打开 `/voice`）：先看语音模块卡在哪（开关 / 本地参考音频 / 云端密钥 / 宿主 `speechToText`），再一句话试听 TTS、录一段或选音频文件试转写；**细调**音色/语速/**±12 半音音调**/风格（Azure、OpenAI）与参考音频/采样参数（GPT-SoVITS：`temperature`/`top_k`/`top_p`/`seed`…）、STT 语言（自动/中/英/日）/云端模型，全部**按次覆盖**（不写回配置、越界直接报错），可存成**命名预设**（本浏览器，支持导入/导出）并保留最近 5 条试听便于 A/B（可下载音频、复制参数/对比表），刷新后自动恢复上次参数；输入框 **Ctrl+Enter** 直接合成；**卡点全部列出**、状态每 15 秒自动刷新（切回/聚焦立即刷新）；页内可直接开关「语音回复（TTS）」「语音转文字（STT）」并切换后端（TTS：Azure / OpenAI / 本地 GPT-SoVITS；STT：本地 SenseVoice / 云端），写插件配置、宿主热重载；「服务配置」里还能改音色 / 模型 / 本地地址 / 参考音频 / 参考文本 / STT 模型（**不含密钥**，密钥仍在 DSH 设置页）；TTS 后端 = local 时可**页内直接启停语音服务**并显示监听状态，试听记录还能把音色存为默认；会自己找宿主（含桌面端的随机端口），**只在本机，不发 QQ** |
 | 账号中心 | **`/accounts`**（v0.7.11 起）：本地页面直接看 NapCat WebUI 的地址与打码 token、登录状态、扫码二维码、快速登录列表与本机账号配置；可一键「快速登录」或「设为自动登录」。**只连本机**，`webui.json` 的 token 只在服务端使用；NapCat 没起时如实说「连不上」而不是报错 |
 | 安全 | 只绑 `127.0.0.1`；所有 API 需要 token；带 `Origin` 的跨站请求一律拒绝 |
@@ -612,11 +654,11 @@ npm run shortcut
 
 最近五个版本（始终滚动展示）：
 
+- **v0.9.0** — 视频理解（私聊自动 / 群聊引用 + @；本地抽帧、Qwen / Gemini 可换后端、控制台独立视频栏与配置）、聊天记录导出（md/csv/json，群聊管理员私聊交付）、`/summary [N]` 归档总结、群文件搜索/子目录下载、关键词订阅、群活动报名。
 - **v0.8.8** — 控制台日志页关键词/错误过滤与下载复制（token 打码）；命令面板最近使用置顶；实时事件导出当前筛选；群活跃看板（7/14/30 天趋势 + CSV）；语音页服务监听状态与试听「存为默认音色」。
 - **v0.8.7** — Ctrl+K 命令面板 + 侧栏滑动选中；语音调试并入控制台（页内开关 / 后端切换 / 服务配置 / 直接启停语音服务，改用 pythonw 避免窗口关闭中止）；「体检趋势」卡；隐私加固（控制台日志 token 打码、诊断包脱敏覆盖 token / apiKey / Bearer / `sk-…`）
 - **v0.8.6** — 控制台可调试性三件套：一键体检报告独立页 `/report`、设置项变更历史、独立语音调试页 `/voice`（试听/转写 + 音色/语速/±12 半音音调/采样参数按次覆盖）；调试台改左侧六组导航 + 单列卡片；`lib/` 只挂语音路由与 TTS 参数，**补丁面 `bridge.js` / `index.js` / `panel.js` 未动**
 - **v0.8.5** — 补护栏（8 个新接口 + 13 个老接口的契约测试，路由覆盖 41/41，并抓出 `unlinkSync` 未导入导致「删除备份/回收站还原」一直 500）、文件与插件目录可下钻、端口全景、回收站批量清理、日志按 traceId 看链路、`docs/ACCESS.md` 准入真值表、`tools/audit.mjs` 结构审计；**`lib/` 未动**
-- **v0.8.4** — 端口连通性测试（三段都能测）、账号页「连接」列、长列表收进折叠块（展开才加载）、日志导出带筛选说明头、接口「全部重新检测」、面板搜文件；**白名单语义拆分**（`allowUsersPrivateOnly`，默认关）；设置页两项改名「QQ 用户」「QQ 群聊」
 
 **更早的版本（v0.4 线及之前）见 [CHANGELOG.md](CHANGELOG.md)** —— 完整历史、每个版本的缺陷清单与测试计数都在那里。
 也可以直接在 [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) 页按版本过滤（每版都带 `compare/v上一版...v本版` 的 diff 链接）。

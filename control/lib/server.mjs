@@ -537,6 +537,39 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
         json(response, 200, await api.activity({ days, force }))
         return
       }
+      /** 视频理解：最近分析计数/时间线（只读 qq-videos，不返回视频内容）。 */
+      if (request.method === 'GET' && path === '/api/video') {
+        if (typeof api.video !== 'function') {
+          json(response, 200, { ok: false, reason: '当前控制台不支持视频理解看板', analyses: [] })
+          return
+        }
+        const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit')) || 20))
+        const result = await api.video({ limit })
+        let config = null
+        if (typeof api.videoStatus === 'function') {
+          try { config = await api.videoStatus() } catch (error) { config = { ok: false, reason: error?.message ?? String(error) } }
+        }
+        json(response, 200, { ...result, config })
+        return
+      }
+      if (request.method === 'GET' && path === '/api/video/detail') {
+        if (typeof api.videoDetail !== 'function') { json(response, 200, { ok: false, reason: '当前控制台不支持视频详情' }); return }
+        json(response, 200, await api.videoDetail({ id: String(url.searchParams.get('id') ?? '') }))
+        return
+      }
+      if (request.method === 'GET' && path === '/api/video/asset') {
+        if (typeof api.videoAsset !== 'function') { json(response, 200, { ok: false, reason: '当前控制台不支持视频预览' }); return }
+        const asset = await api.videoAsset({ id: String(url.searchParams.get('id') ?? ''), file: String(url.searchParams.get('file') ?? '') })
+        if (asset.ok !== true) { json(response, 404, asset); return }
+        try {
+          const buffer = readFileSync(asset.path)
+          response.writeHead(200, { 'content-type': asset.contentType || 'image/jpeg', 'cache-control': 'no-store', 'content-length': buffer.length })
+          response.end(buffer)
+        } catch (error) {
+          json(response, 404, { ok: false, reason: `读不到图片：${error.message}` })
+        }
+        return
+      }
       if (request.method === 'GET' && path === '/api/health/history') {
         if (typeof api.healthHistory !== 'function') {
           json(response, 200, { ok: false, reason: '当前控制台不支持体检趋势', entries: [] })
@@ -846,6 +879,34 @@ export function createControlServer({ config, token, api, ui = '', uiFile = '', 
             }
             if (Object.keys(payload).length === 0) return { ok: false, reason: '没有要切换的语音设置（tts/stt/ttsProvider/sttProvider 都是空）' }
             return api.voiceToggle(payload)
+          },
+          '/api/video/test': () => {
+            if (typeof api.videoTest !== 'function') return { ok: false, reason: '当前控制台不支持测试视频模型' }
+            const source = body.values && typeof body.values === 'object' && !Array.isArray(body.values) ? body.values : body
+            const values = {}
+            for (const key of ['videoProvider', 'videoApiBase', 'videoApiModel', 'videoApiKey']) {
+              const raw = source?.[key]
+              if (typeof raw === 'string') values[key] = raw
+            }
+            return api.videoTest({ values })
+          },
+          '/api/video/delete': () => {
+            if (typeof api.videoDelete !== 'function') return { ok: false, reason: '当前控制台不支持删除视频分析' }
+            return api.videoDelete({ id: String(body.id ?? '') })
+          },
+          // 视频理解配置：写宿主 profile（schema 校验 + 备份 + 热重载），控制台不自己拼 YAML。
+          '/api/video/config': () => {
+            if (typeof api.videoConfig !== 'function') return { ok: false, reason: '当前控制台不支持视频配置' }
+            const source = body.values && typeof body.values === 'object' && !Array.isArray(body.values) ? body.values : body
+            const values = {}
+            const allowed = ['videoEnabled', 'videoMaxSeconds', 'videoFrames', 'videoMaxBytes', 'videoVisionMode', 'videoPeekCommand', 'videoProvider', 'videoApiBase', 'videoApiModel', 'videoApiKey', 'videoPrompt']
+            for (const key of allowed) {
+              if (!Object.hasOwn(source, key)) continue
+              const raw = source[key]
+              if (typeof raw === 'boolean' || typeof raw === 'number' || typeof raw === 'string') values[key] = raw
+            }
+            if (Object.keys(values).length === 0) return { ok: false, reason: '没有要写入的视频配置' }
+            return api.videoConfig({ values })
           },
           '/api/config': () => {
             if (typeof saveConfig !== 'function') return { ok: false, reason: '配置保存不可用' }

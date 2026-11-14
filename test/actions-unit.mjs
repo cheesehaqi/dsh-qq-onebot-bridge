@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, uti
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ActionGate, DEFAULT_ACTION_LIMITS } from '../lib/actions.js'
-import { JsonStore, readJson, writeJsonAtomic, appendCappedLine, expiredFiles, moveToTrash } from '../lib/store.js'
+import { JsonStore, readJson, writeJsonAtomic, appendCappedLine, expiredDirs, expiredFiles, moveToTrash } from '../lib/store.js'
 
 let passed = 0
 let failed = 0
@@ -121,6 +121,14 @@ utimesSync(oldImage, old, old)
 const expired = expiredFiles(imagesDir, 14 * 86_400_000, Date.now())
 check('expiredFiles 只挑过期文件', expired.length === 1 && expired[0].endsWith('old.png'), expired.join(','))
 check('expiredFiles 缺失目录安全', expiredFiles(join(dir, 'nope'), 1000).length === 0)
+
+const videoDir = join(dir, 'qq-videos')
+mkdirSync(join(videoDir, 'peek-old'), { recursive: true })
+mkdirSync(join(videoDir, 'peek-fresh'), { recursive: true })
+utimesSync(join(videoDir, 'peek-old'), old, old)
+const expiredVideoDirs = expiredDirs(videoDir, 14 * 86_400_000, Date.now())
+check('expiredDirs 只挑过期目录（视频分析目录）', expiredVideoDirs.length === 1 && expiredVideoDirs[0].endsWith('peek-old'), expiredVideoDirs.join(','))
+check('expiredDirs 缺失目录安全', expiredDirs(join(dir, 'nope-video'), 1000).length === 0)
 
 const trashDir = join(dir, 'qq-trash')
 const moved = moveToTrash(oldImage, trashDir)

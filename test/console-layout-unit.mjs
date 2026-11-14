@@ -24,15 +24,15 @@ const voiceHtml = readFileSync(join(import.meta.dirname, '..', 'control', 'voice
 
 check('脚本可解析', (() => { try { new Function(script); return true } catch { return false } })())
 
-const NAV_TABS = ['overview', 'live', 'diagnose', 'replay', 'data', 'logs', 'voice']
+const NAV_TABS = ['overview', 'live', 'diagnose', 'replay', 'data', 'logs', 'voice', 'video']
 const navTabs = /<aside id="nav">[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
 const navItems = [...navTabs.matchAll(/class="navitem[^"]*" data-tab="([a-z]+)"/g)].map((m) => m[1])
-check('左侧导航有七个分组且顺序固定', navItems.join(',') === NAV_TABS.join(','), navItems.join(','))
-check('分组都有中文标题', ['总览', '实时事件', '诊断与报告', '录制 · 回放 · 注入', '数据与任务', '日志', '语音调试']
+check('左侧导航有八个分组且顺序固定', navItems.join(',') === NAV_TABS.join(','), navItems.join(','))
+check('分组都有中文标题', ['总览', '实时事件', '诊断与报告', '录制 · 回放 · 注入', '数据与任务', '日志', '语音调试', '视频理解']
   .every((label) => navTabs.includes(label)))
 
 const sectionTabs = [...html.matchAll(/<section class="card"[^>]*data-tab="([a-z]+)"/g)].map((m) => m[1])
-check('每张卡片都归到某个分组', sectionTabs.length === 18, String(sectionTabs.length))
+check('每张卡片都归到某个分组', sectionTabs.length === 19, String(sectionTabs.length))
 check('分组值都在导航里', sectionTabs.every((tab) => NAV_TABS.includes(tab)))
 check('总览分组包含端口/操作/运行快照/登录二维码',
   sectionTabs.filter((tab) => tab === 'overview').length === 4, String(sectionTabs.filter((tab) => tab === 'overview').length))
@@ -40,6 +40,20 @@ check('诊断分组包含验收台/一键体检/变更历史/体检趋势',
   sectionTabs.filter((tab) => tab === 'diagnose').length === 4)
 check('实时分组包含事件流与决策链', sectionTabs.filter((tab) => tab === 'live').length === 2)
 check('数据分组包含群资产/性能/定时任务/群配置/群活跃', sectionTabs.filter((tab) => tab === 'data').length === 5)
+check('视频分组单独一栏并读 /api/video',
+  sectionTabs.filter((tab) => tab === 'video').length === 1
+  && html.includes('id="videoCard"') && html.includes('id="videoOut"')
+  && script.includes("api('/api/video?limit=20')")
+  && script.includes('async function loadVideo()'), 'video')
+check('视频栏可改配置（开关/时长/帧数/大小/视觉方式/分析器）',
+  script.includes('/api/video/config?') && script.includes('videoCfgEnabled')
+  && script.includes('videoCfgVision') && script.includes('videoCfgCommand')
+  && script.includes('videoCfgProvider') && script.includes("value=\"qwen\"") && script.includes("value=\"gemini\"")
+  && script.includes('/api/video/test?') && script.includes('async function testVideoConfig()')
+  && script.includes('async function saveVideoConfig()'), 'video-config')
+check('视频栏可预览联系表/转写并安全删除',
+  script.includes("api('/api/video/detail?id='") && script.includes('/api/video/asset?')
+  && script.includes('/api/video/delete?') && script.includes('async function deleteVideo('), 'video-detail')
 check('群活跃卡读 /api/activity 并渲染趋势/活跃成员/CSV',
   html.includes('id="activityOut"') && html.includes('id="activityDays"')
   && script.includes("api('/api/activity?days='")
@@ -83,12 +97,13 @@ check('语音页支持 embed（隐藏大标题与回控制台）',
 // 改布局不能把卡片/函数弄丢
 for (const id of ['ports', 'acceptance', 'streamBox', 'chain', 'diag', 'history', 'runtime',
   'inbox', 'archOut', 'perfOut', 'jobsOut', 'groupsOut', 'log', 'qrImg', 'healthTrend',
-  'logQ', 'logErrors', 'logCount', 'activityOut', 'activityState', 'activityDays']) {
+  'logQ', 'logErrors', 'logCount', 'activityOut', 'activityState', 'activityDays',
+  'videoCard', 'videoOut', 'videoState', 'videoDetail', 'videoCfgEnabled', 'videoCfgSeconds', 'videoCfgFrames', 'videoCfgMb', 'videoCfgVision', 'videoCfgCommand', 'videoCfgProvider', 'videoCfgBase', 'videoCfgModel', 'videoCfgKey', 'videoCfgPrompt', 'videoCfgTestState']) {
   if (!html.includes(`id="${id}"`)) { failed++; console.log('FAIL', `卡片元素丢了 #${id}`) }
 }
 check('关键卡片元素都还在', true)
 for (const fn of ['showTab', 'focusCard', 'refresh', 'runDiagnose', 'loadAcceptance', 'loadChangeHistory', 'loadHealthHistory',
-  'renderLog', 'downloadLog', 'copyLog', 'filteredStream', 'streamJsonl', 'downloadStream', 'copyStream', 'loadActivity', 'downloadActivityCsv']) {
+  'renderLog', 'downloadLog', 'copyLog', 'filteredStream', 'streamJsonl', 'downloadStream', 'copyStream', 'loadActivity', 'downloadActivityCsv', 'loadVideo', 'saveVideoConfig', 'testVideoConfig', 'showVideoDetail', 'deleteVideo']) {
   if (!new RegExp(`(async )?function ${fn}\\(`).test(script)) { failed++; console.log('FAIL', `缺少函数 ${fn}`) }
 }
 check('关键函数都还在', true)
@@ -120,7 +135,7 @@ for (const fn of ['buildPaletteItems', 'renderPalette', 'runPalette', 'openPalet
 check('命令面板函数齐全', true)
 check('Ctrl+K / Esc 都接了快捷键',
   /event\.key\.toLowerCase\(\) === 'k'/.test(script) && /event\.key === 'Escape'/.test(script))
-check('面板项覆盖六个分组', /TAB_NAMES\.map\(\(name\) => \(\{ label: '分组：'/.test(script))
+check('面板项覆盖八个分组', /TAB_NAMES\.map\(\(name\) => \(\{ label: '分组：'/.test(script))
 check('面板项覆盖卡片与四个全局动作',
   /label: '卡片：'/.test(script)
   && ['刷新状态', '一键体检', '导出诊断包', '打开体检报告', '打开语音调试']

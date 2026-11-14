@@ -1,4 +1,4 @@
-# dsh-qq-onebot-bridge 交接（2026-11-10，v0.8.8）
+# dsh-qq-onebot-bridge 交接（2026-11-14，v0.9.0）
 
 > 给新会话用：粘在第一条消息里，或让新会话读这个文件。
 
@@ -7,9 +7,16 @@
 ```
 路径    工作区根下的 dsh-qq-onebot-bridge（不进仓库的绝对路径，按你本机实际位置）
 分支    main
-HEAD    v0.8.8 发布提交（用 `git log -1` 看实际哈希）
-版本    0.8.8（tag：v0.8.0 … v0.8.8 都在）
-本次发布  日志页过滤/下载/复制 + token 打码；命令面板最近使用；实时事件导出；群活跃看板（7/14/30 天 + CSV）；语音页服务状态与试听存默认；
+HEAD    v0.9.0 发布提交（用 `git log -1` 看实际哈希）
+版本    0.9.0（tag：v0.8.0 … v0.9.0 都在）
+本次发布  视频理解 / 聊天导出（md/csv/json）/ `/summary [N]` / 群文件搜索 / 关键词订阅 / 群活动报名；
+        隐私/保留：`videoApiKey` 只存 profile、控制台只报已配置、日志/写接口响应打码；视频 `peek-*` 目录与 `qq-exports` 纳入 `imageRetentionDays` 清理（移入 `qq-trash/`）；
+        群活动报名：`/报名 活动名` 发起、`/报名` 加入、`/报名列表`、`/取消报名`、`/报名结束`（默认关；发起人或管理员结束）；新增 `lib/signup.js`、`test/signup-unit.mjs`；
+        群关键词订阅：`/订阅 关键词`（默认关，仅群聊，命中私聊提醒，5 分钟冷却/每人每群最多 20）；新增 `lib/watch.js`、`test/watch-unit.mjs`；
+        群文件搜索：`/文件 找 关键词`（根目录 + 最多 10 个子文件夹）与 `/取 文件夹/文件名`；新增 `lib/group-files.js`、`test/group-files-unit.mjs`；
+        `/summary [N]`（`/总结`）优先用本地归档最近 N 条总结，归档空才回退会话记忆；默认 30、最多 200；
+        聊天记录导出：`/导出 [天数] [md|csv|json]`（`/export` 同义）从 `qq-history` 最近 N 天生成文件并作为文件发回，群聊仅管理员且文件私聊发管理员；新增 `lib/chat-export.js`、`HistoryArchive.recent()`、`test/chat-export-unit.mjs`；
+        视频理解：私聊自动、群聊引用 + @；本地 ffmpeg 抽帧/联系表/音轨 STT；`videoProvider=local|command|qwen|gemini`（qwen 收联系表、gemini 原生视频 Files API），`videoPeekCommand` 可换分析器、`provider/model` 换主视觉模型；默认关；新增 `lib/video.js`、`lib/video-vision.js`、`test/video-unit.mjs`、`test/video-vision-unit.mjs`、`test/video-console-unit.mjs`；控制台新增独立「🎬 视频理解」栏（`GET /api/video`、`POST /api/video/config`，宿主 `/qqai/video/status|test|config`，可改开关/时长/帧数/大小/视觉方式/视频后端/API Base/模型/Key/提示词/分析器，可测试连接；详情 `GET /api/video/detail|asset`，删除走 `POST /api/video/delete` 移入 `qq-trash/`）；
 已发布  「一键体检报告」：control/lib/report.mjs、control/report.html、test/report-unit.mjs；
         「设置项变更历史」：control/lib/history.mjs、test/settings-history-unit.mjs；
         「语音调试」：lib/voice.js、lib/voice-routes.js、control/voice.html、test/voice-unit.mjs；
@@ -19,14 +26,14 @@ HEAD    v0.8.8 发布提交（用 `git log -1` 看实际哈希）
         三者都改了 docs/DEBUG*.md、README*.md、CHANGELOG.md、docs/HANDOFF.md
 ```
 
-**关键事实**：`lib/` 自 v0.8.6 起**新增**了语音调试相关文件（`voice.js` / `voice-routes.js`，并在 `settings-routes.js`、`tts.js` 里各加了一小段）；
-`lib/bridge.js`、`lib/index.js`（551123 的补丁面）**仍未改动**；`lib/panel.js` 只在 `upsertPatchValue`（833 行之后）加了可选参数 `allowString`，**217–247 的锚点未变**。
+**关键事实**：`lib/` 自 v0.8.6 起新增了语音调试相关文件（`voice.js` / `voice-routes.js`，并在 `settings-routes.js`、`tts.js` 里各加了一小段）；
+**本次发布**的视频理解改动已改 `lib/bridge.js`、`lib/index.js`、`lib/panel.js`、`lib/onebot.js`，并新增 `lib/video.js`、`test/video-unit.mjs`——551123 的补丁面这次**需要重新对锚点**（bridge/index/panel 都动了），不要直接套旧行号。
 
 ## 二、这台机器上的验证口径（每次改完都跑）
 
 ```
-node tools/audit.mjs            # 6 项结构体检，退出码 0/1（46 路由全部有测试提到）
-逐套跑 test/*-unit.mjs          # 当前 79 套 / 4762 断言 / 0 失败
+node tools/audit.mjs            # 6 项结构体检，退出码 0/1（50 路由全部有测试提到）
+逐套跑 test/*-unit.mjs          # 当前 86 套 / 4887 断言 / 0 失败
 ```
 
 `tools/audit.mjs` 现在查：① 语法 ② 页面元素时序（`$('id')` 必须出现在 `<script>` 之前，动态白名单 6 个）

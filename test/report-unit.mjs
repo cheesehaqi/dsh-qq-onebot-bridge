@@ -232,6 +232,7 @@ check('force 选项可用且不改变结构', forced.report.constraints.length =
 const token = createToken()
 const fakeReport = buildHealthReport({ diagnosis: HEALTHY_DIAG, acceptance: ALL_PASS, generatedAt: Date.now() })
 const seen = []
+const seenVideoConfig = []
 const server = createControlServer({
   config,
   token,
@@ -257,6 +258,26 @@ const server = createControlServer({
       chats: [{ chatKey: 'g:100', kind: 'group', total: 2, lastAt: 1_700_000_000_000, daily: [], topMembers: [{ userId: 1, name: '甲', count: 2 }] }],
       scanned: { files: 1, lines: 2, truncated: false },
     }),
+    video: async ({ limit }) => ({
+      ok: true,
+      dir: 'qq-videos',
+      missing: false,
+      total: 1,
+      truncated: false,
+      analyses: [{ id: 'peek-1', at: 1_700_000_000_000, durationMs: 47_770, startMs: 0, analyzedMs: 30_000, width: 1920, height: 1080, frames: 12, sheets: 1, hasAudio: true, hasTranscript: true }].slice(0, limit),
+    }),
+    videoStatus: async () => ({
+      ok: true,
+      values: { videoEnabled: true, videoMaxSeconds: 60, videoFrames: 12, videoMaxBytes: 104857600, videoVisionMode: 'tool', videoPeekCommand: '' },
+    }),
+    videoConfig: async ({ values }) => {
+      seenVideoConfig.push(values)
+      return { ok: true, changed: true, keys: Object.keys(values), note: '已保存' }
+    },
+    videoTest: async ({ values }) => ({ ok: true, provider: values.videoProvider, text: '连接正常' }),
+    videoDetail: async ({ id }) => ({ ok: true, id, contactSheets: ['contact-sheet-01.jpg'], frames: ['frame-001.jpg'], transcript: '测试转写' }),
+    videoAsset: async () => ({ ok: true, path: traceFile, contentType: 'image/jpeg' }),
+    videoDelete: async ({ id }) => ({ ok: true, movedTo: `qq-trash/${id}` }),
   },
   ui: '<h1>console</h1>',
   reportUi: '<h1>报告页</h1>',
@@ -284,6 +305,51 @@ check('GET /api/activity 返回群活跃聚合（不含原文）',
   activityResponse.status === 200 && activityBody.ok === true && activityBody.days === 7
   && activityBody.groups[0].total === 2 && !JSON.stringify(activityBody).includes('text'),
   JSON.stringify(activityBody.groups?.[0] ?? {}))
+const videoResponse = await fetch(`${base}/api/video?limit=5&token=${token}`)
+const videoBody = await videoResponse.json()
+check('GET /api/video 返回视频分析计数（不含画面内容）',
+  videoResponse.status === 200 && videoBody.ok === true && videoBody.analyses.length === 1
+  && videoBody.analyses[0].frames === 12 && !JSON.stringify(videoBody).includes('base64'),
+  JSON.stringify(videoBody.analyses?.[0] ?? {}))
+check('GET /api/video 带视频配置（开关/时长/视觉方式）',
+  videoBody.config?.ok === true && videoBody.config.values.videoEnabled === true
+  && videoBody.config.values.videoVisionMode === 'tool', JSON.stringify(videoBody.config ?? {}))
+const videoSaveResponse = await fetch(`${base}/api/video/config?token=${token}`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ values: { videoEnabled: false, videoMaxSeconds: 45, videoFrames: 8, videoMaxBytes: 20971520, videoVisionMode: 'native', videoPeekCommand: 'node tool.mjs', videoProvider: 'gemini', videoApiBase: 'https://g.example', videoApiModel: 'gemini-test', videoApiKey: 'secret', videoPrompt: '描述' } }),
+})
+const videoSaveBody = await videoSaveResponse.json()
+check('POST /api/video/config 写视频配置',
+  videoSaveResponse.status === 200 && videoSaveBody.ok === true
+  && seenVideoConfig.length === 1 && seenVideoConfig[0].videoMaxSeconds === 45
+  && seenVideoConfig[0].videoVisionMode === 'native' && seenVideoConfig[0].videoPeekCommand === 'node tool.mjs'
+  && seenVideoConfig[0].videoProvider === 'gemini' && seenVideoConfig[0].videoApiModel === 'gemini-test'
+  && seenVideoConfig[0].videoApiKey === 'secret' && seenVideoConfig[0].videoPrompt === '描述',
+  JSON.stringify(seenVideoConfig[0] ?? {}))
+const videoTestResponse = await fetch(`${base}/api/video/test?token=${token}`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ values: { videoProvider: 'qwen' } }),
+})
+const videoTestBody = await videoTestResponse.json()
+check('POST /api/video/test 测试视频模型连接',
+  videoTestResponse.status === 200 && videoTestBody.ok === true && videoTestBody.provider === 'qwen' && videoTestBody.text === '连接正常',
+  JSON.stringify(videoTestBody))
+const videoDetailResponse = await fetch(`${base}/api/video/detail?id=peek-1&token=${token}`)
+const videoDetailBody = await videoDetailResponse.json()
+check('GET /api/video/detail 返回转写/联系表/帧',
+  videoDetailResponse.status === 200 && videoDetailBody.ok === true
+  && videoDetailBody.transcript === '测试转写' && videoDetailBody.contactSheets.length === 1,
+  JSON.stringify(videoDetailBody))
+const videoAssetResponse = await fetch(`${base}/api/video/asset?id=peek-1&file=contact-sheet-01.jpg&token=${token}`)
+check('GET /api/video/asset 返回图片字节',
+  videoAssetResponse.status === 200 && (videoAssetResponse.headers.get('content-type') ?? '').includes('image/jpeg')
+  && (await videoAssetResponse.arrayBuffer()).byteLength > 0)
+const videoDeleteResponse = await fetch(`${base}/api/video/delete?token=${token}`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'peek-1' }),
+})
+const videoDeleteBody = await videoDeleteResponse.json()
+check('POST /api/video/delete 移入回收目录', videoDeleteResponse.status === 200 && videoDeleteBody.ok === true
+  && videoDeleteBody.movedTo === 'qq-trash/peek-1', JSON.stringify(videoDeleteBody))
 check('报告接口需要 token', (await fetch(`${base}/api/report`)).status === 401)
 check('报告接口拒绝跨站 Origin',
   (await fetch(`${base}/api/report?token=${token}`, { headers: { Origin: 'https://evil.example' } })).status === 403)

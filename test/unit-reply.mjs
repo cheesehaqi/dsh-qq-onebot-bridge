@@ -25,5 +25,12 @@ check('string text stripped', r2.text === '分析一下', r2.text)
 const r3 = parseMessage('普通消息', 0)
 check('no reply', r3.reply === null, JSON.stringify(r3.reply))
 
+// 视频段（数组 / CQ 字符串）
+const v1 = parseMessage([{ type: 'video', data: { file: 'clip.mp4', url: 'https://example.test/clip.mp4' } }, { type: 'text', data: { text: '看看' } }], 0)
+check('array video url/file', v1.videos.length === 1 && v1.videos[0].url.includes('clip.mp4') && v1.videos[0].file === 'clip.mp4', JSON.stringify(v1.videos))
+check('array video text 保留', v1.text === '看看', v1.text)
+const v2 = parseMessage('[CQ:video,file=clip.mp4,url=https://example.test/clip.mp4]', 0)
+check('string video 解析', v2.videos.length === 1 && v2.videos[0].file === 'clip.mp4' && v2.text === '', JSON.stringify(v2.videos))
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

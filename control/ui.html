@@ -116,6 +116,7 @@
     <div class="navitem" data-tab="data" onclick="showTab('data')"><span class="ico">🗂️</span>数据与任务</div>
     <div class="navitem" data-tab="logs" onclick="showTab('logs')"><span class="ico">🪵</span>日志</div>
     <div class="navitem" data-tab="voice" onclick="showTab('voice')"><span class="ico">🎙️</span>语音调试</div>
+  <div class="navitem" data-tab="video" onclick="showTab('video')"><span class="ico">🎬</span>视频理解</div>
     <div class="foot">右上角：刷新 / 一键体检 / 导出诊断包 / 体检报告<br />Ctrl+K 搜索 / 跳转 · 只连 127.0.0.1，所有接口都要 token</div>
   </aside>
   <main>
@@ -387,6 +388,16 @@
       <span class="meta" id="logCount"></span>
     </div>
     <pre id="log">（选择一份日志）</pre>
+  </section>
+
+  <section class="card" style="grid-column:1/-1" data-tab="video" id="videoCard">
+    <h2>🎬 视频理解 <span class="meta" id="videoMeta">（本机 <code>qq-videos/</code> 的最近分析；开关/时长/帧数/分析器/视觉方式可在本栏修改）</span></h2>
+    <div class="row">
+      <button onclick="loadVideo()">刷新</button>
+      <span class="meta" id="videoState"></span>
+    </div>
+    <div id="videoOut" class="meta">（点「刷新」看最近分析；默认关闭时这里会是空的）</div>
+    <div id="videoDetail" style="margin-top:10px"></div>
   </section>
 
   <section class="card badbox" id="pageErrors" style="grid-column:1/-1; display:none"></section>
@@ -912,11 +923,11 @@ function renderAcceptance() {
   }).join('');
 }
 // ---------------------------------------------------------------- 布局 ----
-/** 控制台的七个分组（左侧导航）；卡片按 data-tab 归属，切 tab 只切可见性，DOM 与轮询都不动。 */
-const TAB_NAMES = ['overview', 'live', 'diagnose', 'replay', 'data', 'logs', 'voice'];
+/** 控制台的八个分组（左侧导航）；卡片按 data-tab 归属，切 tab 只切可见性，DOM 与轮询都不动。 */
+const TAB_NAMES = ['overview', 'live', 'diagnose', 'replay', 'data', 'logs', 'voice', 'video'];
 const TAB_LABELS = {
   overview: '总览', live: '实时事件', diagnose: '诊断与报告',
-  replay: '录制 · 回放 · 注入', data: '数据与任务', logs: '日志', voice: '语音调试',
+  replay: '录制 · 回放 · 注入', data: '数据与任务', logs: '日志', voice: '语音调试', video: '视频理解',
 };
 
 /** 语音分组用 iframe 装 /voice 页；第一次切过去才加载（不拖慢首屏，也不重复请求语音接口）。 */
@@ -955,6 +966,7 @@ function showTab(name, push = true) {
   }
   moveNavGlow();
   if (target === 'voice') loadVoiceFrame();
+  if (target === 'video') loadVideo();
   if (push) {
     const url = new URL(location.href);
     if (target === 'overview') url.searchParams.delete('tab');
@@ -1455,6 +1467,199 @@ async function loadActivity() {
   } catch (error) {
     state.textContent = '';
     out.textContent = '⚠️ ' + error.message;
+  }
+}
+
+function videoConfigHtml(config) {
+  if (!config || config.ok !== true) {
+    return `<div class="meta" style="margin-bottom:10px">⚠️ 读不到视频配置：${escapeHtml(config?.reason || '宿主还没重启到带 /qqai/video/status 的版本')}（分析记录仍可看）</div>`;
+  }
+  const v = config.values || {};
+  const mb = Math.max(1, Math.round((Number(v.videoMaxBytes) || 104857600) / 1048576));
+  const provider = ['local', 'command', 'qwen', 'gemini'].includes(v.videoProvider) ? v.videoProvider : 'local';
+  const keyPlaceholder = v.videoApiKeySet === true ? '已配置（留空保持不变）' : 'API Key（仅 qwen/gemini 需要）';
+  return '<div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">' +
+    `<label class="meta"><input type="checkbox" id="videoCfgEnabled" ${v.videoEnabled === true ? 'checked' : ''}> 启用视频理解</label>` +
+    `<label class="meta">最长 <input type="number" id="videoCfgSeconds" value="${Number(v.videoMaxSeconds) || 60}" min="1" max="600" style="width:70px"> 秒</label>` +
+    `<label class="meta">抽帧 <input type="number" id="videoCfgFrames" value="${Number(v.videoFrames) || 12}" min="2" max="24" style="width:60px"> 帧</label>` +
+    `<label class="meta">大小上限 <input type="number" id="videoCfgMb" value="${mb}" min="1" max="200" style="width:70px"> MB</label>` +
+    '<label class="meta">视觉方式 <select id="videoCfgVision">' +
+      `<option value="tool" ${v.videoVisionMode === 'native' ? '' : 'selected'}>tool · 交给识图工具</option>` +
+      `<option value="native" ${v.videoVisionMode === 'native' ? 'selected' : ''}>native · 直传图片附件</option>` +
+    '</select></label>' +
+    '<label class="meta">视频模型 <select id="videoCfgProvider">' +
+      `<option value="local" ${provider === 'local' ? 'selected' : ''}>local · 只抽帧</option>` +
+      `<option value="command" ${provider === 'command' ? 'selected' : ''}>command · 外部分析器</option>` +
+      `<option value="qwen" ${provider === 'qwen' ? 'selected' : ''}>qwen · 视觉接口</option>` +
+      `<option value="gemini" ${provider === 'gemini' ? 'selected' : ''}>gemini · 原生视频</option>` +
+    '</select></label></div>' +
+    '<div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">' +
+    `<input type="text" id="videoCfgBase" value="${escapeAttr(v.videoApiBase || '')}" placeholder="API Base（qwen/gemini，空=默认）" style="flex:1;min-width:220px">` +
+    `<input type="text" id="videoCfgModel" value="${escapeAttr(v.videoApiModel || '')}" placeholder="模型 ID（空=默认）" style="width:190px">` +
+    `<input type="password" id="videoCfgKey" value="" placeholder="${escapeAttr(keyPlaceholder)}" autocomplete="new-password" style="width:220px"></div>` +
+    '<div class="row" style="margin-bottom:8px">' +
+    `<input type="text" id="videoCfgCommand" value="${escapeAttr(v.videoPeekCommand || '')}" placeholder="分析器命令（provider=command 时用；空 = 内置本地 ffmpeg）" style="flex:1;min-width:260px">` +
+    `<input type="text" id="videoCfgPrompt" value="${escapeAttr(v.videoPrompt || '')}" placeholder="模型提示词（空=内置中文描述提示）" style="flex:1;min-width:220px"></div>` +
+    '<div class="row" style="margin-bottom:8px">' +
+    '<button onclick="saveVideoConfig()">保存视频配置</button><button onclick="testVideoConfig()">测试连接</button>' +
+    '<span class="meta" id="videoCfgState"></span><span class="meta" id="videoCfgTestState"></span></div>' +
+    '<div class="meta" style="margin-bottom:10px">保存会写 profile 的 <code>cordis.patch.yml</code>（宿主热重载后生效）；密钥只写不回显，留空表示不改。</div>';
+}
+
+async function testVideoConfig() {
+  const state = document.getElementById('videoCfgTestState');
+  if (!state) return;
+  const provider = document.getElementById('videoCfgProvider')?.value || 'local';
+  const base = String(document.getElementById('videoCfgBase')?.value || '').trim();
+  const model = String(document.getElementById('videoCfgModel')?.value || '').trim();
+  const key = String(document.getElementById('videoCfgKey')?.value || '').trim();
+  state.textContent = '测试中…';
+  try {
+    const response = await fetch('/api/video/test?token=' + encodeURIComponent(token), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'X-Control-Token': token },
+      body: JSON.stringify({ values: { videoProvider: provider, videoApiBase: base, videoApiModel: model, ...(key !== '' ? { videoApiKey: key } : {}) } }),
+    });
+    const result = await response.json();
+    if (result.ok !== true) { state.textContent = ''; toast('测试失败：' + (result.reason || '未知错误')); return; }
+    state.textContent = result.text || '连接正常';
+    toast('视频模型连接正常');
+  } catch (error) {
+    state.textContent = '';
+    toast('测试失败：' + error.message);
+  }
+}
+
+async function saveVideoConfig() {
+  const state = document.getElementById('videoCfgState');
+  const enabled = document.getElementById('videoCfgEnabled')?.checked === true;
+  const seconds = Number(document.getElementById('videoCfgSeconds')?.value);
+  const frames = Number(document.getElementById('videoCfgFrames')?.value);
+  const mb = Number(document.getElementById('videoCfgMb')?.value);
+  const vision = document.getElementById('videoCfgVision')?.value === 'native' ? 'native' : 'tool';
+  const provider = document.getElementById('videoCfgProvider')?.value || 'local';
+  const base = String(document.getElementById('videoCfgBase')?.value || '').trim();
+  const model = String(document.getElementById('videoCfgModel')?.value || '').trim();
+  const key = String(document.getElementById('videoCfgKey')?.value || '').trim();
+  const prompt = String(document.getElementById('videoCfgPrompt')?.value || '').trim();
+  const command = String(document.getElementById('videoCfgCommand')?.value || '').trim();
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600) { toast('视频最长秒数必须是 1–600 的整数'); return; }
+  if (!Number.isInteger(frames) || frames < 2 || frames > 24) { toast('抽帧数必须是 2–24 的整数'); return; }
+  if (!Number.isInteger(mb) || mb < 1 || mb > 200) { toast('大小上限必须是 1–200 MB 的整数'); return; }
+  state.textContent = '保存中…';
+  try {
+    const response = await fetch('/api/video/config?token=' + encodeURIComponent(token), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'X-Control-Token': token },
+      body: JSON.stringify({
+        values: {
+          videoEnabled: enabled,
+          videoMaxSeconds: seconds,
+          videoFrames: frames,
+          videoMaxBytes: mb * 1048576,
+          videoVisionMode: vision,
+          videoPeekCommand: command,
+          videoProvider: provider,
+          videoApiBase: base,
+          videoApiModel: model,
+          videoPrompt: prompt,
+          ...(key !== '' ? { videoApiKey: key } : {}),
+        },
+      }),
+    });
+    const result = await response.json();
+    if (result.ok !== true) { state.textContent = ''; toast('保存失败：' + (result.reason || '未知错误')); return; }
+    state.textContent = result.note || '已保存';
+    toast('视频配置已保存');
+    setTimeout(() => loadVideo(), 1200);
+  } catch (error) {
+    state.textContent = '';
+    toast('保存失败：' + error.message);
+  }
+}
+
+async function showVideoDetail(id) {
+  const out = document.getElementById('videoDetail');
+  if (!out) return;
+  out.innerHTML = '<div class="meta">读取详情…</div>';
+  try {
+    const result = await api('/api/video/detail?id=' + encodeURIComponent(id));
+    if (result.ok !== true) { out.innerHTML = '⚠️ ' + escapeHtml(result.reason || '详情不可用'); return; }
+    const sec = (ms) => (Number(ms || 0) / 1000).toFixed(1) + 's';
+    const images = (result.contactSheets || []).map((name) =>
+      `<img src="/api/video/asset?token=${encodeURIComponent(token)}&id=${encodeURIComponent(id)}&file=${encodeURIComponent(name)}" alt="${escapeAttr(name)}" style="max-width:100%;border:1px solid var(--line);border-radius:6px;margin:4px 0" loading="lazy">`
+    ).join('');
+    const frames = (result.frames || []).slice(0, 8).map((name) =>
+      `<img src="/api/video/asset?token=${encodeURIComponent(token)}&id=${encodeURIComponent(id)}&file=${encodeURIComponent(name)}" alt="${escapeAttr(name)}" style="width:150px;border:1px solid var(--line);border-radius:4px;margin:2px" loading="lazy">`
+    ).join('');
+    out.innerHTML = '<div class="card" style="padding:10px">' +
+      `<h3 style="margin:0 0 6px">${escapeHtml(id)} <button onclick="document.getElementById('videoDetail').innerHTML=''" style="float:right">关闭</button></h3>` +
+      `<div class="meta">原片 ${sec(result.durationMs)} · 窗口 ${sec(result.startMs)}–${sec(result.startMs + result.analyzedMs)} · ${result.width}×${result.height} · 目录 <code>${escapeHtml(result.path)}</code></div>` +
+      (result.description ? `<div style="margin-top:6px">外部描述：${escapeHtml(result.description)}</div>` : '') +
+      (images ? `<div style="margin-top:8px">${images}</div>` : '') +
+      (frames ? `<div style="margin-top:8px"><div class="meta">帧（前 8 张）</div>${frames}</div>` : '') +
+      (result.transcript ? `<div style="margin-top:8px"><div class="meta">音轨转写</div><pre style="white-space:pre-wrap">${escapeHtml(result.transcript)}</pre></div>` : '') +
+      '</div>';
+  } catch (error) {
+    out.innerHTML = '⚠️ ' + escapeHtml(error.message);
+  }
+}
+
+async function deleteVideo(id) {
+  if (!confirm(`删除视频分析 ${id}？会移入 qq-trash（回收目录），不是永久删除。`)) return;
+  try {
+    const response = await fetch('/api/video/delete?token=' + encodeURIComponent(token), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'X-Control-Token': token },
+      body: JSON.stringify({ id }),
+    });
+    const result = await response.json();
+    if (result.ok !== true) { toast('删除失败：' + (result.reason || '未知错误')); return; }
+    toast('已移入回收目录：' + (result.movedTo || 'qq-trash'));
+    document.getElementById('videoDetail').innerHTML = '';
+    loadVideo();
+  } catch (error) {
+    toast('删除失败：' + error.message);
+  }
+}
+
+async function loadVideo() {
+  const out = document.getElementById('videoOut');
+  const state = document.getElementById('videoState');
+  if (!out || !state) return;
+  state.textContent = '读取中…';
+  try {
+    const result = await api('/api/video?limit=20');
+    if (result.ok !== true) { state.textContent = ''; out.innerHTML = '⚠️ ' + escapeHtml(result.reason || '视频理解不可用'); return; }
+    const form = videoConfigHtml(result.config);
+    const analyses = Array.isArray(result.analyses) ? result.analyses : [];
+    if (result.missing === true) {
+      state.textContent = '';
+      out.innerHTML = form + `<div class="meta">还没有 qq-videos 目录：开启视频理解后，私聊发视频或群里引用视频，分析记录会出现在这里。</div>`;
+      return;
+    }
+    if (analyses.length === 0) {
+      state.textContent = '';
+      out.innerHTML = form + `<div class="meta">目录已存在，但还没有分析记录（${escapeHtml(result.dir || 'qq-videos')}）。</div>`;
+      return;
+    }
+    const sec = (ms) => (Number(ms || 0) / 1000).toFixed(1) + 's';
+    const rows = analyses.map((entry) => {
+      const at = entry.at ? new Date(entry.at).toLocaleString('zh-CN', { hour12: false }) : '—';
+      const range = entry.startMs > 0
+        ? `${sec(entry.startMs)}–${sec(entry.startMs + entry.analyzedMs)}`
+        : `0–${sec(entry.analyzedMs)}`;
+      return `<tr><td class="meta">${at}</td><td>${sec(entry.durationMs)}</td><td>${range}</td>` +
+        `<td>${entry.width}×${entry.height}</td><td>${entry.frames} 帧 / ${entry.sheets} 表</td>` +
+        `<td>${entry.hasAudio ? '有' : '—'}</td><td>${entry.hasTranscript ? '有' : '—'}</td>` +
+        `<td><code>${escapeHtml(entry.path)}</code></td>` +
+        `<td><button onclick="showVideoDetail('${escapeAttr(entry.id)}')">查看</button> <button onclick="deleteVideo('${escapeAttr(entry.id)}')">删除</button></td></tr>`;
+    }).join('');
+    out.innerHTML = form + '<table><thead><tr><th>分析时间</th><th>原片</th><th>分析区间</th><th>画面</th><th>帧/联系表</th><th>音轨</th><th>转写</th><th>目录</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    state.textContent = `${result.total} 次分析` + (result.truncated ? ` · 只显示最近 ${analyses.length} 条` : '');
+  } catch (error) {
+    state.textContent = '';
+    out.innerHTML = '⚠️ ' + escapeHtml(error.message);
   }
 }
 

@@ -8,7 +8,7 @@
  */
 import { execFile, spawn } from 'node:child_process'
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, isAbsolute, join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PORT_LABELS, configWarnings } from './config.mjs'
 import { createTraceTailer, filterEvents, formatChain, groupChains, readRuntime, readTraceFile, summarizeEvents } from './trace.mjs'
@@ -964,6 +964,128 @@ export function createSupervisor(config, deps = {}) {
     return value
   }
 
+  /**
+   * 视频理解：只读 `<cwd>/qq-videos/peek-*` 的 manifest，给控制台单独一栏用。
+   * 不返回视频/图片内容，只返回计数、时间线和本地路径；开关仍在 DSH 设置→QQ助手 里。
+   */
+  function video({ limit = 20 } = {}) {
+    const dir = join(config.cwd || process.cwd(), 'qq-videos')
+    if (!existsSync(dir)) return { ok: true, dir, missing: true, analyses: [], total: 0, truncated: false }
+    const max = Math.min(50, Math.max(1, Math.floor(Number(limit) || 20)))
+    const entries = []
+    let total = 0
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith('peek-')) continue
+      total += 1
+      const folder = join(dir, name)
+      const manifestFile = join(folder, 'manifest.json')
+      if (!existsSync(manifestFile)) continue
+      try {
+        const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'))
+        const info = statSync(manifestFile)
+        const frames = Array.isArray(manifest.frames) ? manifest.frames.length : 0
+        const sheets = Array.isArray(manifest.contactSheets) ? manifest.contactSheets.length : 0
+        const durationMs = Number(manifest.durationMs) || 0
+        const analyzedMs = Number(manifest.analyzedMs ?? manifest.windowMs) || durationMs
+        entries.push({
+          id: name,
+          at: info.mtimeMs,
+          path: folder,
+          durationMs,
+          startMs: Number(manifest.startMs) || 0,
+          analyzedMs,
+          width: Number(manifest.width) || 0,
+          height: Number(manifest.height) || 0,
+          frames,
+          sheets,
+          hasAudio: Boolean(manifest.audioFile),
+          hasTranscript: Boolean(manifest.transcript) || Boolean(manifest.transcriptFile),
+          description: Boolean(manifest.description),
+        })
+      } catch { /* 半截 manifest / 坏 JSON：跳过，不把控制台带崩 */ }
+    }
+    entries.sort((a, b) => b.at - a.at)
+    return { ok: true, dir, missing: false, total, analyses: entries.slice(0, max), truncated: entries.length > max }
+  }
+
+  const videoRoot = () => join(config.cwd || process.cwd(), 'qq-videos')
+
+  /** 校验 id 并读 manifest；只允许 qq-videos/peek-<小写字母数字>，防路径穿越。 */
+  function videoEntry(id) {
+    const text = String(id ?? '')
+    if (!/^peek-[a-z0-9]+$/i.test(text)) throw new Error('非法的视频分析 id')
+    const folder = join(videoRoot(), text)
+    const manifestFile = join(folder, 'manifest.json')
+    if (!existsSync(manifestFile)) throw new Error('找不到这条视频分析记录')
+    let manifest
+    try { manifest = JSON.parse(readFileSync(manifestFile, 'utf8')) } catch (error) {
+      throw new Error(`manifest 损坏：${error.message}`)
+    }
+    return { folder, manifest }
+  }
+
+  function videoDetail({ id } = {}) {
+    try {
+      const { folder, manifest } = videoEntry(id)
+      const contactSheets = (Array.isArray(manifest.contactSheets) ? manifest.contactSheets : []).map((name) => basename(String(name)))
+      const frames = (Array.isArray(manifest.frames) ? manifest.frames : []).map((frame) => basename(String(frame?.path ?? ''))).filter(Boolean)
+      let transcript = String(manifest.transcript || '')
+      if (transcript === '' && typeof manifest.transcriptFile === 'string') {
+        const file = join(folder, basename(manifest.transcriptFile))
+        if (existsSync(file)) { try { transcript = readFileSync(file, 'utf8') } catch { /* 读不到就当没有 */ } }
+      }
+      return {
+        ok: true,
+        id: String(id),
+        path: folder,
+        durationMs: Number(manifest.durationMs) || 0,
+        startMs: Number(manifest.startMs) || 0,
+        analyzedMs: Number(manifest.analyzedMs ?? manifest.windowMs) || 0,
+        width: Number(manifest.width) || 0,
+        height: Number(manifest.height) || 0,
+        hasAudio: Boolean(manifest.audioFile),
+        contactSheets,
+        frames,
+        transcript,
+        description: String(manifest.description || ''),
+      }
+    } catch (error) {
+      return { ok: false, reason: error.message }
+    }
+  }
+
+  /** 只允许读该分析记录 manifest 里列出的联系表/帧，返回本地路径给 server 读字节。 */
+  function videoAsset({ id, file } = {}) {
+    try {
+      const { folder, manifest } = videoEntry(id)
+      const name = basename(String(file ?? ''))
+      const allowed = new Set([
+        ...(Array.isArray(manifest.contactSheets) ? manifest.contactSheets : []).map((item) => basename(String(item))),
+        ...(Array.isArray(manifest.frames) ? manifest.frames : []).map((item) => basename(String(item?.path ?? ''))),
+      ])
+      if (!allowed.has(name)) throw new Error('这个文件不在该分析的 manifest 里')
+      const target = join(folder, name)
+      if (!existsSync(target)) throw new Error('文件不存在（可能已被清理）')
+      const ext = name.toLowerCase().split('.').pop()
+      const contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
+      return { ok: true, path: target, contentType }
+    } catch (error) {
+      return { ok: false, reason: error.message }
+    }
+  }
+
+  /** 删除整条分析＝移入 qq-trash（回收站优先，不永久删除）。 */
+  function videoDelete({ id } = {}) {
+    try {
+      const { folder } = videoEntry(id)
+      const moved = moveToTrash(folder, join(config.cwd || process.cwd(), 'qq-trash'))
+      if (!moved) return { ok: false, reason: '移入回收目录失败（文件可能被占用）' }
+      return { ok: true, movedTo: moved }
+    } catch (error) {
+      return { ok: false, reason: error.message }
+    }
+  }
+
   // ---------------------------------------------------- 设置项变更历史 ----
   /**
    * 会写"设置文件"的入口只有一个包装（在 server 的 POST 分发里）：动作前后各拍一份快照，
@@ -1118,6 +1240,15 @@ export function createSupervisor(config, deps = {}) {
   }
 
   async function voiceStatus() { return await voiceCall('/qqai/voice/status') }
+  async function videoStatus() { return await voiceCall('/qqai/video/status') }
+  async function videoConfig({ values } = {}) {
+    const payload = values && typeof values === 'object' && !Array.isArray(values) ? values : {}
+    return await voiceCall('/qqai/video/config', { method: 'POST', body: { values: payload } })
+  }
+  async function videoTest({ values } = {}) {
+    const payload = values && typeof values === 'object' && !Array.isArray(values) ? values : {}
+    return await voiceCall('/qqai/video/test', { method: 'POST', body: { values: payload } })
+  }
   /**
    * 开关语音模块（ttsEnabled / sttEnabled）。
    *
@@ -1418,9 +1549,11 @@ export function createSupervisor(config, deps = {}) {
     traceStats,
     // v0.7.11：账号中心（本地网站）。每次调用都重读 webui.json —— 用户可能刚在别处改过 token/端口。
     accounts: createAccountsApi({ napcatBat: config.napcatBat }),
-    traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance, healthReport, healthHistory, activity,
+    traceEvents, traceChain, runtime, diagnose, exportBundle, acceptance, healthReport, healthHistory, activity, video,
+    videoDetail, videoAsset, videoDelete,
     settingsSnapshot, recordSettingsChange, settingsHistory,
     voiceStatus, voiceTts, voiceStt, voiceToggle,
+    videoStatus, videoConfig, videoTest,
     inboxList, replay, inject, clearQueue, archiveStats, archiveSearch,
     perf, jobsView, groups,
     // 每个调用方（每个 SSE 连接）拿一份独立 tailer：共用模块级单例会让两个面板互相"偷"事件，

@@ -1,5 +1,21 @@
 # 更新日志 / Changelog
-## v0.8 系列 —— 本地账号中心 / Local Account Center
+## v0.9 系列 —— 视频理解 / 聊天工具 / 群订阅
+### v0.9.0（2026-11-14）— 视频理解 / 聊天工具 / 群订阅与报名
+#### 隐私与保留
+- **隐私/保留**：`videoApiKey` 只在 profile 配置中，控制台只报「已配置」，宿主日志/写接口响应打 `<已隐藏>`，诊断包不含 profile 配置；视频分析目录（`peek-*`）和 `qq-exports` 也纳入 `imageRetentionDays` 清理（移入 `qq-trash/`）；
+- **群活动报名**：`/报名 活动名` 发起、`/报名` 加入、`/报名列表`、`/取消报名`、`/报名结束`（默认关，发起人或管理员结束，单群一个活动、最多 100 人）；新增 `lib/signup.js`、`test/signup-unit.mjs`；
+- **群关键词订阅**：`/订阅 关键词`、`/订阅列表`、`/取消订阅 关键词`（默认关，仅群聊）；命中后私聊提醒订阅者，跳过自己的消息，同一订阅 5 分钟冷却，每人每群最多 20 个；新增 `lib/watch.js`、`test/watch-unit.mjs`；
+- **群文件搜索/子目录下载**：`/文件 找 关键词` 递归搜根目录 + 最多 10 个子文件夹；`/取 文件夹/文件名` 下载子目录文件（仍私聊交付）；新增 `lib/group-files.js`、`test/group-files-unit.mjs`；
+- **聊天总结升级**：`/summary [条数]`（`/总结` 同义）优先读本会话最近 N 条本地归档，归档为空再回退会话记忆；默认 30、最多 200；
+- **聊天记录导出升级**：`/导出 [天数] [md|csv|json]`（`/export` 同义）从本会话最近 N 天归档生成 Markdown/CSV/JSON 并作为文件发回；群聊仅 adminUsers 可用，且文件只私聊发给管理员（不发群文件），私聊直接可用；新增 `lib/chat-export.js`、`HistoryArchive.recent()` 与 `test/chat-export-unit.mjs`；
+- **默认关**：`videoEnabled=true` 后，私聊收到视频自动处理；群聊必须引用视频 + @机器人（可带 `/看视频`），直接发视频不处理；
+- 支持 `/看视频 0:30-0:45` 只看指定时间段；不写则整段（仍受 `videoMaxSeconds` 限制）；
+- 本机 ffmpeg 抽帧 + 每 12 帧一张联系表，**不联网**；`videoMaxSeconds`/`videoFrames`/`videoMaxBytes` 限制时长/帧数/大小；
+- 联系表按 `videoVisionMode: native|tool` 直传模型或落盘给 `visionToolName`；开了 `sttEnabled` 时音轨复用现有 STT；
+- 分析器可用 `videoPeekCommand` 换成外部命令（Gemini/Qwen 适配器）；视觉模型通过既有 `provider`/`model` 切换；
+- 新增可配置视频后端 `videoProvider`：`local`（默认）、`command`、`qwen`（OpenAI 兼容视觉接口，发联系表）、`gemini`（Files API 原生视频）；配套 `videoApiBase/videoApiModel/videoApiKey/videoPrompt`，控制台视频栏可改，Key 只写不回显；「测试连接」只验证 Key/Base/Model（local/command 不发网络请求）；
+- 控制台新增独立「🎬 视频理解」栏：列出 `qq-videos/peek-*` 最近分析（区间/帧数/联系表/音轨/转写/目录），`GET /api/video`；同栏可改开关/时长/帧数/大小/视觉方式/分析器命令（`POST /api/video/config` → 宿主 `/qqai/video/config`）；每条分析可查看联系表/帧/转写，删除移入 `qq-trash/`；
+- 新增 `lib/video.js`、`test/video-unit.mjs`，`parseMessage` 支持 OneBot `video` 段；面板新增「视频理解」开关与数值。
 ### v0.8.8（2026-11-10）— 日志 / 命令面板 / 群活跃 + 语音页
 
 ### 群活跃看板

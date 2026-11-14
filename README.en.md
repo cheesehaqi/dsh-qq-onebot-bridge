@@ -2,7 +2,7 @@
 
 A bidirectional QQ ↔ DeepSeek Harness bridge plugin (independent bundle). QQ messages drive DSH agent sessions directly, and agent replies are sent back to QQ automatically.
 
-Current version **v0.8.8** · [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [Changelog](CHANGELOG.md)
+Current version **v0.9.0** · [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) · [Changelog](CHANGELOG.md)
 
 ## Architecture
 
@@ -107,6 +107,7 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `actionRatePerDay` | `500` | Write-action gate: max OneBot write actions per day across all chats |
 | `actionAuditEnabled` | `true` | Append every write action and denial to `cwd/qq-actions.log` |
 | `keywordEnabled` | `false` | Keyword wordbook (default OFF): matching messages are answered from a local JSON file without calling the model or requiring an @-mention |
+| `keywordWatchEnabled` | `false` | Keyword watch (default OFF, groups only): `/订阅 keyword` sends the subscriber a private note when someone mentions it; skips their own messages, 5-minute cooldown, max 20 per member/chat |
 | `keywordFile` | `''` | Wordbook path (empty = `cwd/qq-keywords.json`); exact/contains/regex triggers, random reply pools, images, scopes and cooldowns |
 | `fortuneEnabled` | `true` | Local fortune features: 今日人品/运势, 抽签, 塔罗 (deterministic per QQ id + day) |
 | `diceEnabled` | `true` | Dice (`.r 3d6`) and random picks (`/抽一个 A B C`) |
@@ -156,6 +157,17 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `privateImageView` | `true` | In private chats, proactively download and view images/animated stickers the user sends (saved to `cwd/qq-images/`, viewed with describe_image) |
 | `visionMode` | `tool` | Image viewing mode: `tool` = save to disk and view via `visionToolName` (stable); `native` = attach images as native multimodal attachments (DSH 0.1.1+, text-only models degrade automatically) |
 | `visionToolName` | `describe_image` | Vision tool used in `tool` mode |
+| `videoEnabled` | `false` | **Video understanding (default off)**: private chats process a video automatically; groups require quoting the video + @bot (optionally `/看视频`). Local ffmpeg extracts frames/contact sheets, no cloud. |
+| `videoMaxSeconds` | `60` | Analyse only the first N seconds of a long video. |
+| `videoFrames` | `12` | Frames extracted by the built-in analyser (2–24). |
+| `videoMaxBytes` | `104857600` | Max downloaded video size (100 MB); larger videos are rejected. |
+| `videoPeekCommand` | `''` | Replaceable analyser command (`--input/--out/--frames/--ffmpeg`, writes `manifest.json`); empty = built-in local analyser. |
+| `videoVisionMode` | `tool` | How contact sheets reach the main model: `native` = image attachments (requires vision model), `tool` = paths for `visionToolName`. |
+| `videoProvider` | `local` | Description source: `local` = frames only; `command` = external analyser; `qwen` = OpenAI-compatible vision (contact sheets); `gemini` = native video upload + generateContent. |
+| `videoApiBase` | `''` | qwen/gemini API base (empty = DashScope compatible mode / Google Generative Language defaults). |
+| `videoApiModel` | `''` | qwen/gemini model id (empty = `qwen-vl-max` / `gemini-2.0-flash`). |
+| `videoApiKey` | `''` | qwen/gemini API key (secret; the console only reports “configured”, never echoes it). |
+| `videoPrompt` | `''` | Prompt for the video model (empty = built-in Chinese timestamped description prompt). |
 | `imageTrashEnabled` | `true` | **Deletion policy: recycle, never destroy** — expired downloads are MOVED to `cwd/qq-trash/<date>/` (a failed move keeps the original file) |
 | `imageTrashDir` | `''` | Trash directory (empty = `cwd/qq-trash`); never auto-pruned, clean it up yourself when convenient |
 | `memoryEnabled` | `true` | Per-chat persistent memory (recent conversation saved to `cwd/qq-memory/`, restored after host restarts; `/new` clears it) |
@@ -187,6 +199,7 @@ Override `id: dsh-qq-onebot-bridge` config in the profile's `cordis.patch.yml` (
 | `pokeCooldownSeconds` | `15` | Min seconds between poke replies per chat (anti-spam) |
 | `voiceReadingEnabled` | `true` | Voice reading: @bot + quote text saying "读一下/念出来", or `/读 <text>` (synthesized via ttsProvider) |
 | `checkinEnabled` | `false` | Daily check-in (**off by default**): say the keyword (default 签到) to check in; streaks persisted per chat in `cwd/qq-checkin/`; 签到榜 shows the leaderboard |
+| `signupEnabled` | `false` | Group activity sign-up (**off by default**): `/报名 title` starts, `/报名` joins, `/报名列表`, `/取消报名`, `/报名结束`; one active signup per chat, max 100 entries |
 | `checkinKeyword` | `签到` | Check-in trigger keyword |
 | `welcomeEnabled` | `false` | New-member welcome (**off by default**): @-mention the newcomer with the welcome text when someone joins (bot itself excluded) |
 | `welcomeText` | `''` | Welcome text (empty = built-in default) |
@@ -284,6 +297,19 @@ Pipeline: the quoted message → `get_msg` → contains a `record` segment → O
 Notes:
 - Zhipu GLM-ASR-2512 accepts wav/mp3, **≤ 30 s**, ≤ 25 MB; use SiliconFlow or another endpoint for longer audio
 - The Zhipu endpoint requires the multipart field `file` (binary) — the documented `file_base64` field is rejected at runtime with error 1214
+
+## Video understanding (optional, off by default)
+
+With `videoEnabled=true`:
+
+- **Private chats**: sending a video processes it automatically;
+- **Groups**: quote the video + @bot (optionally `/看视频`); a bare video is ignored;
+- Only the first `videoMaxSeconds` seconds are analysed; videos over `videoMaxBytes` are rejected;
+- The built-in analyser uses local ffmpeg for frames + one contact sheet per 12 frames; with `videoProvider=local` nothing is uploaded;
+- `videoProvider`: `local` (frames only, default), `command` (external analyser writes `description`), `qwen` (OpenAI-compatible vision on contact sheets), `gemini` (Files API upload + native video; **the whole video, including audio, is sent to Google**);
+- `videoVisionMode: native` attaches contact sheets to the main model; `tool` only saves paths for `visionToolName`;
+- With `sttEnabled`, the video's audio is transcribed by the existing STT provider;
+- The console now has a dedicated **Video** nav section: recent `qq-videos/peek-*` analyses (duration/window/frames/sheets/audio/transcript/path) plus editable **enabled / max seconds / frames / size cap / vision mode / provider / API base / model / key / prompt / analyser command** (writes `cordis.patch.yml`, effective after host reload; keys are write-only and never echoed). A **Test connection** button validates Key/Base/Model only (local/command make no network call). Each row can preview contact sheets/frames/transcript; delete moves the whole `peek-*` folder into `qq-trash/` (recycle-first).
 
 ## Session grouping
 
@@ -424,9 +450,11 @@ Summary by purpose; details in `docs/FEATURES.md`:
 
 | Purpose | Common commands |
 |---|---|
-| Session | `/new` fresh chat · `/status` state · `/summary` group summary · `/export` export log |
-| Lookup | **`/为什么`** why a message got no reply · `/health` diagnostics · `/成员` roster/detail · `/群信息` `/公告` `/荣誉` `/精华` · `/找` history · `/文件` `/取` `/相册` `/ocr` |
+| Session | `/new` fresh chat · `/status` state · `/summary [N]` group summary (default 30, max 200) · `/导出 [days] [md\|csv\|json]` export chat log file (`/export` alias; groups require an admin user; the file is sent privately to that admin) |
+| Lookup | **`/为什么`** why a message got no reply · `/health` diagnostics · `/成员` roster/detail · `/群信息` `/公告` `/荣誉` `/精华` · `/找` history · `/文件` `/文件 找 keyword` `/取 folder/file` `/相册` `/ocr` |
 | Fun | 「签到」check-in · `/签到榜` · `/积分` `/排行榜` `/转账` · 「今日人品」「抽签」 · `.r 3d6` · 「接龙」「猜数字」 · `/画` image gen · `/读` text-to-speech |
+| Activity sign-up | `/报名 title` starts · `/报名` joins · `/报名列表` · `/取消报名` · `/报名结束` (default off; creator or admin closes) |
+| Keyword watch | `/订阅 keyword` private alerts · `/订阅列表` · `/取消订阅 keyword` (groups, default off; max 20 per member, 5-minute cooldown) |
 | Group ops | `/mute` `/unmute` `/kick` `/clear` · `/公告` `/全员禁言` `/名片` `/头衔` · `/批量踢` · `/退群` (careful) |
 | Admin / debug | `/reminders` reminders · `/todo` todos · `/日报` daily report · `/kw` keyword replies · `/播报` broadcasts · `/赞榜` `/谁赞了` · `/点赞` `/戳` |
 
@@ -507,7 +535,7 @@ Suggested order: is `6099` listening → did `QQ.exe` start → if both are fine
 
 ## Tests
 
-65 unit suites, 4224 assertions in `test/*-unit.mjs`, plus 3 live scripts:
+86 unit suites, 4887 assertions in `test/*-unit.mjs`, plus 3 live scripts:
 
 ```sh
 
@@ -568,6 +596,14 @@ This plugin ships **no persona, preferences, or group rules**. The whale-girl pe
   (or the whole message is dropped when `outboundRedactBlock` is on), and the trace names the rule that fired (**never the
   text**). All three are off unless you turn them on.
 
+### Video and keys (v0.9.0)
+
+- Video understanding defaults to `videoProvider=local` (ffmpeg frames only, no upload); only explicit `qwen` / `gemini` calls leave the machine;
+- `qwen` sends contact-sheet images; `gemini` uploads the **whole video including audio** to Google Files API — do not use it for sensitive clips;
+- `videoApiKey` lives only in your DSH profile (`cordis.patch.yml`, plaintext on your disk); the console reports “configured” and never echoes it, host logs/responses mask it as `<已隐藏>`, and diagnostic bundles do not include the profile config;
+- video/contact sheets/exports follow `imageRetentionDays` (default 14) and are moved to `qq-trash/` on host start, never permanently deleted;
+- `/导出` files are delivered privately: groups require an admin and never upload the file to the group. Export files are included in the same retention cleanup.
+
 ### Compliance tips
 
 - For personal learning and small internal groups only; do not use for mass marketing, advertising, harassment, or bot-farming
@@ -612,11 +648,11 @@ Debugging usually means sending logs to someone else, so the plugin is explicit 
 
 The five most recent versions (always kept rolling):
 
+- **v0.9.0** — video understanding (private auto / group quote + @; local frames, swappable Qwen / Gemini backend, dedicated console section and config), chat export (md/csv/json; groups deliver to the admin privately), `/summary [N]` archive summaries, group-file search / nested download, keyword watches, activity sign-up.
 - **v0.8.8** — log-page keyword/errors-only filters plus download/copy (tokens masked); recently used command-palette entries pinned; live-event export of the current filter; group activity dashboard (7/14/30-day trend + CSV); voice page shows service listening state and can save a trial's voice as default.
 - **v0.8.7** — Ctrl+K command palette + sliding sidebar selection; the voice lab moves into the console (in-page toggles / backend switch / service config / start-stop, now via pythonw so a closed window cannot abort it); a "health trend" card; privacy hardening (console-log tokens masked, diagnostic bundle masks token / apiKey / Bearer / `sk-…`)
 - **v0.8.6** — debuggability trio for the console: a standalone health-report page `/report`, settings change history, and a standalone voice lab `/voice` (TTS/STT trials plus per-attempt voice / speed / ±12 semitone pitch / sampling overrides); console rebuilt with a six-group sidebar and single-column cards; `lib/` only gains voice routes and TTS parameters — **the patch-surface files `bridge.js` / `index.js` / `panel.js` are untouched**
 - **v0.8.5** — guard rails first: contract tests for 8 new and 13 old endpoints (route coverage 21/41 → 41/41, which immediately caught a missing `unlinkSync` import that made "delete backup" and "restore from trash" return 500), drill-down for files and plugins, a port panorama, batch trash cleanup, traceId chains from the log page, `docs/ACCESS.md` access matrix, and `tools/audit.mjs`; **`lib/` untouched**
-- **v0.8.4** — TCP reachability check for every endpoint, a "connections" column on the accounts page, collapsible long lists loaded on demand, filtered log exports with a header, a re-check button for API availability, file search in the palette; plus the **whitelist split** (`allowUsersPrivateOnly`, off by default) and the renamed QQ 用户 / QQ 群聊 lists
 
 **Older versions (the v0.4 line and earlier) are in [CHANGELOG.md](CHANGELOG.md)** — the full history, including every release's defect list and test counts.
 You can also filter by version on the [Releases](https://github.com/cheesehaqi/dsh-qq-onebot-bridge/releases) page (each entry carries a `compare/v<previous>...v<this>` diff link).
